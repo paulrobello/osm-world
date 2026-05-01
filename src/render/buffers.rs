@@ -12,6 +12,14 @@ pub struct SceneBuffers {
 impl SceneBuffers {
     pub fn new(device: &Device) -> Self {
         let (vertices, indices) = generate_test_scene();
+        Self::from_data(device, vertices, indices)
+    }
+
+    pub fn from_mesh(device: &Device, vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
+        Self::from_data(device, vertices, indices)
+    }
+
+    fn from_data(device: &Device, vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
         let index_count = indices.len() as u32;
 
         let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {

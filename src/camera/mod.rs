@@ -49,7 +49,7 @@ impl Flycam {
     }
 
     pub fn right(&self) -> glam::Vec3 {
-        glam::Vec3::new(self.yaw.sin(), 0.0, -self.yaw.cos()).normalize()
+        glam::Vec3::new(-self.yaw.sin(), 0.0, self.yaw.cos()).normalize()
     }
 
     pub fn view_matrix(&self) -> glam::Mat4 {

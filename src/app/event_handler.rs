@@ -9,10 +9,17 @@ use crate::app::{render_loop, update};
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
-            match init::init_wgpu(event_loop) {
+            match init::init_wgpu(
+                event_loop,
+                self.opts.window_width,
+                self.opts.window_height,
+                self.opts.input_path.as_deref(),
+                self.opts.srtm_dir.as_deref(),
+            ) {
                 Ok(state) => {
                     log::info!("WGPU initialized: {:?}", state.device.adapter_info());
                     self.state = Some(state);
+                    self.render_start = Some(std::time::Instant::now());
                 }
                 Err(e) => {
                     log::error!("Failed to initialize WGPU: {e}");
@@ -62,9 +69,22 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 update::update(self);
+
+                let screenshot_path = self.check_screenshot();
+
                 if let Some(state) = &self.state {
-                    render_loop::render(state);
+                    render_loop::render(state, screenshot_path);
                 }
+
+                if screenshot_path.is_some() {
+                    self.screenshot_taken = true;
+                }
+
+                if self.check_auto_exit() {
+                    event_loop.exit();
+                    return;
+                }
+
                 if let Some(state) = &self.state {
                     state.window.request_redraw();
                 }
@@ -88,5 +108,32 @@ impl ApplicationHandler for App {
         if let Some(state) = &self.state {
             state.window.request_redraw();
         }
+    }
+}
+
+impl App {
+    fn check_screenshot(&self) -> Option<&str> {
+        if self.screenshot_taken {
+            return None;
+        }
+        let path = self.opts.screenshot_path.as_ref()?;
+        let start = self.render_start?;
+        let elapsed = start.elapsed().as_secs_f32();
+        if elapsed >= self.opts.screenshot_delay {
+            Some(path.as_str())
+        } else {
+            None
+        }
+    }
+
+    fn check_auto_exit(&self) -> bool {
+        if let (Some(delay), Some(start)) = (self.opts.auto_exit_delay, self.render_start) {
+            let elapsed = start.elapsed().as_secs_f32();
+            if elapsed >= delay {
+                log::info!("[AUTO-EXIT] Exiting after {:.2}s", elapsed);
+                return true;
+            }
+        }
+        false
     }
 }

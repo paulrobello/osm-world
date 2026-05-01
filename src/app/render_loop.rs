@@ -2,7 +2,7 @@ use wgpu::*;
 
 use super::AppState;
 
-pub fn render(state: &AppState) {
+pub fn render(state: &AppState, screenshot_path: Option<&str>) {
     let output = match state.surface.get_current_texture() {
         CurrentSurfaceTexture::Success(frame) => frame,
         CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => return,
@@ -64,6 +64,89 @@ pub fn render(state: &AppState) {
         pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
     }
 
+    let screenshot_buffer = if screenshot_path.is_some() {
+        let width = state.surface_config.width;
+        let height = state.surface_config.height;
+        let unpadded_bytes_per_row = width * 4;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(256) * 256;
+
+        let buffer = state.device.create_buffer(&BufferDescriptor {
+            label: Some("screenshot buffer"),
+            size: (padded_bytes_per_row * height) as u64,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        encoder.copy_texture_to_buffer(
+            TexelCopyTextureInfo {
+                texture: &output.texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        Some((buffer, width, height, padded_bytes_per_row))
+    } else {
+        None
+    };
+
     state.queue.submit(std::iter::once(encoder.finish()));
     output.present();
+
+    if let Some(path) = screenshot_path {
+        if let Some((buffer, width, height, padded_bytes_per_row)) = screenshot_buffer {
+            save_screenshot(state, &buffer, width, height, padded_bytes_per_row, path);
+        }
+    }
+}
+
+fn save_screenshot(
+    state: &AppState,
+    buffer: &Buffer,
+    width: u32,
+    height: u32,
+    padded_bytes_per_row: u32,
+    path: &str,
+) {
+    let slice = buffer.slice(..);
+    slice.map_async(MapMode::Read, |_| {});
+    let _ = state.device.poll(PollType::Wait {
+        submission_index: None,
+        timeout: None,
+    });
+
+    let data = slice.get_mapped_range();
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        let offset = (row * padded_bytes_per_row) as usize;
+        let row_data = &data[offset..offset + (width * 4) as usize];
+        pixels.extend_from_slice(row_data);
+    }
+    drop(data);
+    buffer.unmap();
+
+    // Swap B and R channels (BGRA -> RGBA)
+    for chunk in pixels.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
+    }
+    if let Some(img) = image::RgbaImage::from_raw(width, height, pixels) {
+        match img.save(path) {
+            Ok(()) => log::info!("[SCREENSHOT] Saved {}x{} to {}", width, height, path),
+            Err(e) => log::error!("[SCREENSHOT] Failed to write {}: {}", path, e),
+        }
+    }
 }

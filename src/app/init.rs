@@ -20,10 +20,19 @@ pub struct AppState {
     pub scene: SceneBuffers,
 }
 
-pub fn init_wgpu(event_loop: &winit::event_loop::ActiveEventLoop) -> anyhow::Result<AppState> {
+pub fn init_wgpu(
+    event_loop: &winit::event_loop::ActiveEventLoop,
+    window_width: f64,
+    window_height: f64,
+    input_path: Option<&str>,
+    srtm_dir: Option<&str>,
+) -> anyhow::Result<AppState> {
     let window = Arc::new(
-        event_loop
-            .create_window(winit::window::WindowAttributes::default().with_title("osm-world"))?,
+        event_loop.create_window(
+            winit::window::WindowAttributes::default()
+                .with_title("osm-world")
+                .with_inner_size(winit::dpi::LogicalSize::new(window_width, window_height)),
+        )?,
     );
 
     let instance = Instance::new(InstanceDescriptor::new_with_display_handle(Box::new(
@@ -51,13 +60,13 @@ pub fn init_wgpu(event_loop: &winit::event_loop::ActiveEventLoop) -> anyhow::Res
     let surface_format = surface_caps
         .formats
         .iter()
-        .find(|f| f.is_srgb())
+        .find(|f| !f.is_srgb())
         .copied()
         .unwrap_or(surface_caps.formats[0]);
 
     let size = window.inner_size();
     let surface_config = SurfaceConfiguration {
-        usage: TextureUsages::RENDER_ATTACHMENT,
+        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
         format: surface_format,
         width: size.width.max(1),
         height: size.height.max(1),
@@ -71,10 +80,21 @@ pub fn init_wgpu(event_loop: &winit::event_loop::ActiveEventLoop) -> anyhow::Res
     let (depth_texture, depth_view) =
         create_depth_buffer(&device, surface_config.width, surface_config.height);
 
-    let camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
+    let mut camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
     let camera_bg = CameraBindGroup::new(&device);
     let pipeline = CityPipeline::new(&device, &camera_bg.layout, surface_format);
-    let scene = SceneBuffers::new(&device);
+
+    let scene = match input_path {
+        Some(path) => {
+            let srtm = srtm_dir.map(std::path::Path::new);
+            let world = crate::world::loader::load_world(std::path::Path::new(path), srtm)?;
+            camera.position = glam::Vec3::new(world.center.0, world.center.1, world.center.2);
+            camera.yaw = -std::f32::consts::FRAC_PI_2;
+            camera.pitch = -0.3;
+            SceneBuffers::from_mesh(&device, world.vertices, world.indices)
+        }
+        None => SceneBuffers::new(&device),
+    };
 
     Ok(AppState {
         window,

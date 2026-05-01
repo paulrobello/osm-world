@@ -1,4 +1,5 @@
-.PHONY: build run test lint fmt typecheck checkall clean release bench doc clippy-fix fmt-fix
+run-sacramento:
+	cargo run -- --input ../osm-to-bedrock/map_exports/planet_-121.7526,38.63863_-121.72179,38.65671.osm.pbf --srtm-dir ~/.cache/osm-to-bedrock/srtm
 
 build:
 	cargo build

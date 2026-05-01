@@ -40,10 +40,18 @@ impl CameraBindGroup {
             }],
         });
 
-        Self { layout, group, buffer }
+        Self {
+            layout,
+            group,
+            buffer,
+        }
     }
 
     pub fn update(&self, queue: &Queue, uniform: &CameraUniform) {
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(std::slice::from_ref(uniform)));
+        queue.write_buffer(
+            &self.buffer,
+            0,
+            bytemuck::cast_slice(std::slice::from_ref(uniform)),
+        );
     }
 }

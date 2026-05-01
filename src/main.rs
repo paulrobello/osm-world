@@ -1,7 +1,10 @@
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     log::info!("osm-world starting");
-    println!("osm-world: 3D OSM city renderer");
-    println!("Run with --help for usage");
+
+    let event_loop = winit::event_loop::EventLoop::new()?;
+    let mut app = osm_world::app::App::new();
+    event_loop.run_app(&mut app)?;
+
     Ok(())
 }

@@ -2,6 +2,12 @@ use super::Flycam;
 use std::collections::HashSet;
 use winit::event::{ElementState, MouseButton};
 
+impl Default for CameraController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct CameraController {
     pub keys_pressed: HashSet<winit::keyboard::KeyCode>,
     pub mouse_dx: f32,

@@ -1,7 +1,37 @@
-/target
+# Build artifacts
+/target/
+debug/
+*.pdb
+
+# Rust
+**/*.rs.bk
+*.rlib
+*.d
+
+# Cargo
+Cargo.lock
+
+# IDE / Editor
+.idea/
+.vscode/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
+
+# OS
 .DS_Store
-.idea/
-.vscode/
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Logs
+*.log

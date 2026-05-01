@@ -8,7 +8,11 @@ pub struct CityPipeline {
 }
 
 impl CityPipeline {
-    pub fn new(device: &Device, camera_layout: &BindGroupLayout, surface_format: TextureFormat) -> Self {
+    pub fn new(
+        device: &Device,
+        camera_layout: &BindGroupLayout,
+        surface_format: TextureFormat,
+    ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("city shader"),
             source: ShaderSource::Wgsl(include_str!("../../shaders/city.wgsl").into()),

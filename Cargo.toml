@@ -1,0 +1,24 @@
+[package]
+name = "osm-world"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "3D city renderer using OpenStreetMap data and WGPU"
+authors = ["Paul Robello <probello@gmail.com>"]
+license = "MIT"
+
+[dependencies]
+wgpu = "29.0.1"
+winit = "0.30.13"
+glam = "0.32.1"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+pollster = "0.4"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

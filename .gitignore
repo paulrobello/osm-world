@@ -35,3 +35,5 @@ Thumbs.db
 
 # Logs
 *.log
+graphify-out/
+statusline-*.json

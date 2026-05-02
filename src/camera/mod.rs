@@ -79,7 +79,11 @@ impl Flycam {
         glam::Mat4::perspective_rh(self.fov, self.aspect, self.near, self.far)
     }
 
-    pub fn uniforms(&self, day: &crate::atmosphere::DayCycleState, atm: &crate::atmosphere::AtmosphereSettings) -> SceneUniforms {
+    pub fn uniforms(
+        &self,
+        day: &crate::atmosphere::DayCycleState,
+        atm: &crate::atmosphere::AtmosphereSettings,
+    ) -> SceneUniforms {
         let view = self.view_matrix();
         let proj = self.projection_matrix();
         let vp = proj * view;

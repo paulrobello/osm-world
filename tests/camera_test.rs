@@ -2,7 +2,10 @@ fn build_camera() -> osm_world::camera::Flycam {
     osm_world::camera::Flycam::new(1.0)
 }
 
-fn default_atmosphere() -> (osm_world::atmosphere::DayCycleState, osm_world::atmosphere::AtmosphereSettings) {
+fn default_atmosphere() -> (
+    osm_world::atmosphere::DayCycleState,
+    osm_world::atmosphere::AtmosphereSettings,
+) {
     (
         osm_world::atmosphere::DayCycleState::default(),
         osm_world::atmosphere::AtmosphereSettings::default(),

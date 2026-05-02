@@ -24,6 +24,8 @@ pub struct App {
     pub opts: AppOptions,
     pub render_start: Option<std::time::Instant>,
     pub screenshot_taken: bool,
+    pub atmosphere: crate::atmosphere::AtmosphereSettings,
+    pub day_cycle: crate::atmosphere::DayCycleState,
 }
 
 impl App {
@@ -35,6 +37,8 @@ impl App {
             opts,
             render_start: None,
             screenshot_taken: false,
+            atmosphere: crate::atmosphere::AtmosphereSettings::default(),
+            day_cycle: crate::atmosphere::DayCycleState::default(),
         }
     }
 }

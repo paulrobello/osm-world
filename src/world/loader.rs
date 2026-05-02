@@ -14,6 +14,37 @@ pub struct WorldMesh {
     pub center: (f32, f32, f32),
 }
 
+#[derive(Clone, Debug)]
+pub struct ResolvedFeature {
+    pub tags: HashMap<String, String>,
+    pub points: Vec<(f32, f32)>,
+    pub elevations: Vec<f32>,
+    pub rep_lat: f64,
+    pub rep_lon: f64,
+}
+
+pub struct WorldSource {
+    pub min_lat: f64,
+    pub min_lon: f64,
+    pub max_lat: f64,
+    pub max_lon: f64,
+    pub conv: CoordConverter,
+    pub elevation: Option<ElevationData>,
+    pub buildings: Vec<ResolvedFeature>,
+    pub roads: Vec<ResolvedFeature>,
+    pub waters: Vec<ResolvedFeature>,
+    pub landuses: Vec<ResolvedFeature>,
+}
+
+impl WorldSource {
+    pub fn elevation_at(&self, lat: f64, lon: f64) -> f32 {
+        self.elevation
+            .as_ref()
+            .and_then(|e| e.elevation_at(lat, lon))
+            .unwrap_or(0.0) as f32
+    }
+}
+
 // Ensure CCW winding for polygon features while keeping per-vertex data aligned.
 fn ensure_ccw(poly: &mut [(f32, f32)], elevations: &mut [f32]) {
     if poly.len() < 3 {
@@ -33,8 +64,7 @@ fn ensure_ccw(poly: &mut [(f32, f32)], elevations: &mut [f32]) {
     }
 }
 
-/// Load and process OSM data, generating all meshes.
-pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldMesh> {
+pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldSource> {
     // 1. Parse PBF
     let osm_data = parse_pbf(pbf_path)?;
 
@@ -60,25 +90,12 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
             .unwrap_or(0.0) as f32
     };
 
-    let mut verts: Vec<Vertex> = Vec::new();
-    let mut idxs: Vec<u32> = Vec::new();
+    let mut buildings: Vec<ResolvedFeature> = Vec::new();
+    let mut roads: Vec<ResolvedFeature> = Vec::new();
+    let mut waters: Vec<ResolvedFeature> = Vec::new();
+    let mut landuses: Vec<ResolvedFeature> = Vec::new();
 
     // 5. Resolve ways to world coordinates and classify
-    #[derive(Clone)]
-    struct ResolvedWay {
-        tags: HashMap<String, String>,
-        points: Vec<(f32, f32)>,
-        elevations: Vec<f32>,
-        // Lat/lon of a representative point for elevation lookup
-        rep_lat: f64,
-        rep_lon: f64,
-    }
-
-    let mut buildings: Vec<ResolvedWay> = Vec::new();
-    let mut roads: Vec<ResolvedWay> = Vec::new();
-    let mut waters: Vec<ResolvedWay> = Vec::new();
-    let mut landuses: Vec<ResolvedWay> = Vec::new();
-
     for way in &osm_data.ways {
         // Resolve node references to world coordinates
         let mut points = Vec::with_capacity(way.node_refs.len());
@@ -116,7 +133,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         // Determine if the way is closed
         let is_closed = way.node_refs.len() >= 4 && way.node_refs.first() == way.node_refs.last();
 
-        let resolved = ResolvedWay {
+        let resolved = ResolvedFeature {
             tags: way.tags.clone(),
             points,
             elevations,
@@ -194,7 +211,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
             || tags.get("landuse").map(|s| s.as_str()) == Some("basin")
             || tags.get("landuse").map(|s| s.as_str()) == Some("reservoir");
 
-        let resolved = ResolvedWay {
+        let resolved = ResolvedFeature {
             tags: rel.tags.clone(),
             points: all_points,
             elevations,
@@ -209,8 +226,6 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         }
     }
 
-    // 7. Generate meshes in order: terrain, landuse, water, roads, buildings
-
     // Ensure CCW winding for all polygon-based features (OSM data can be either winding)
     for b in &mut buildings {
         ensure_ccw(&mut b.points, &mut b.elevations);
@@ -222,20 +237,60 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         ensure_ccw(&mut lu.points, &mut lu.elevations);
     }
 
-    // Terrain
-    super::terrain::generate_terrain(
+    Ok(WorldSource {
         min_lat,
         min_lon,
         max_lat,
         max_lon,
-        &conv,
-        elevation.as_ref(),
-        &mut verts,
-        &mut idxs,
+        conv,
+        elevation,
+        buildings,
+        roads,
+        waters,
+        landuses,
+    })
+}
+
+pub fn generate_world_mesh(source: &WorldSource) -> WorldMesh {
+    let mut verts = Vec::new();
+    let mut idxs = Vec::new();
+    append_world_mesh(source, &mut verts, &mut idxs);
+
+    let (cx, cz) = source.conv.bbox_centre(
+        source.min_lat,
+        source.min_lon,
+        source.max_lat,
+        source.max_lon,
+    );
+    let cy = source.elevation_at(
+        (source.min_lat + source.max_lat) / 2.0,
+        (source.min_lon + source.max_lon) / 2.0,
+    ) + 50.0;
+
+    WorldMesh {
+        vertices: verts,
+        indices: idxs,
+        center: (cx, cy, cz),
+    }
+}
+
+fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+    // Generate meshes in order: terrain, landuse, water, roads, buildings
+
+    // Terrain
+    super::terrain::generate_terrain(
+        source.min_lat,
+        source.min_lon,
+        source.max_lat,
+        source.max_lon,
+        &source.conv,
+        source.elevation.as_ref(),
+        verts,
+        idxs,
     );
 
     // Landuse
-    for lu in &landuses {
+    for lu in &source.landuses {
         let color = super::color::landuse_color(&lu.tags);
         let y_offset = super::landuse::landuse_y_offset(&lu.tags);
         super::landuse::generate_landuse_with_elevations_and_offset(
@@ -243,15 +298,15 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
             &lu.elevations,
             y_offset,
             color,
-            &mut verts,
-            &mut idxs,
+            verts,
+            idxs,
         );
     }
 
     // Water
-    for w in &waters {
-        let y = elev(w.rep_lat, w.rep_lon) + 0.3;
-        super::water::generate_water(&w.points, y, &mut verts, &mut idxs);
+    for w in &source.waters {
+        let y = source.elevation_at(w.rep_lat, w.rep_lon) + 0.3;
+        super::water::generate_water(&w.points, y, verts, idxs);
     }
 
     // Roads
@@ -271,7 +326,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         )
     };
     let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
-    for r in &roads {
+    for r in &source.roads {
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
         let count_len = if is_closed {
             r.points.len() - 1
@@ -294,7 +349,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     };
 
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
-    for r in &roads {
+    for r in &source.roads {
         let width = super::color::road_width(&r.tags);
         let color = super::color::road_color(&r.tags);
         let layer_offset = road_layer_offset(width);
@@ -304,8 +359,8 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
             &road_elevations,
             width,
             color,
-            &mut verts,
-            &mut idxs,
+            verts,
+            idxs,
         );
 
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
@@ -344,50 +399,69 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
             cap.width,
             cap.radius_scale,
             cap.color,
-            &mut verts,
-            &mut idxs,
+            verts,
+            idxs,
         );
     }
 
     // Buildings
-    for b in &buildings {
+    for b in &source.buildings {
         let color = super::color::building_color(&b.tags);
-        let base_y = elev(b.rep_lat, b.rep_lon);
+        let base_y = source.elevation_at(b.rep_lat, b.rep_lon);
         let height = super::building::parse_building_height(&b.tags);
         // Remove trailing duplicate point if present for the footprint
         let mut footprint = b.points.clone();
         if footprint.len() > 3 && footprint.first() == footprint.last() {
             footprint.pop();
         }
-        super::building::generate_building(
-            &footprint, base_y, height, color, &mut verts, &mut idxs,
-        );
+        super::building::generate_building(&footprint, base_y, height, color, verts, idxs);
     }
-
-    // 8. Compute center for camera placement
-    let (cx, cz) = conv.bbox_centre(min_lat, min_lon, max_lat, max_lon);
-    let cy = elev((min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0) + 50.0;
 
     log::info!(
         "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} water areas, {} landuse areas",
         verts.len(),
         idxs.len(),
-        buildings.len(),
-        roads.len(),
-        waters.len(),
-        landuses.len(),
+        source.buildings.len(),
+        source.roads.len(),
+        source.waters.len(),
+        source.landuses.len(),
     );
+}
 
-    Ok(WorldMesh {
-        vertices: verts,
-        indices: idxs,
-        center: (cx, cy, cz),
-    })
+/// Load and process OSM data, generating all meshes.
+pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldMesh> {
+    let source = load_world_source(pbf_path, srtm_dir)?;
+    Ok(generate_world_mesh(&source))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn world_source_bbox_center_matches_converter() {
+        let source = WorldSource {
+            min_lat: 1.0,
+            min_lon: 2.0,
+            max_lat: 1.1,
+            max_lon: 2.2,
+            conv: CoordConverter::new(1.0, 2.0),
+            elevation: None,
+            buildings: Vec::new(),
+            roads: Vec::new(),
+            waters: Vec::new(),
+            landuses: Vec::new(),
+        };
+
+        let (cx, cz) = source.conv.bbox_centre(
+            source.min_lat,
+            source.min_lon,
+            source.max_lat,
+            source.max_lon,
+        );
+        assert!(cx > 0.0);
+        assert!(cz < 0.0);
+    }
 
     #[test]
     fn ensure_ccw_keeps_elevations_aligned_when_reversing() {

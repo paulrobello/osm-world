@@ -4,5 +4,6 @@ pub mod camera;
 pub mod geo;
 pub mod osm;
 pub mod render;
+pub mod stream;
 pub mod ui;
 pub mod world;

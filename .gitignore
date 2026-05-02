@@ -33,6 +33,9 @@ Thumbs.db
 .env
 .env.*
 
+# Test images
+test_images/
+
 # Logs
 *.log
 graphify-out/

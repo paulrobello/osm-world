@@ -2,6 +2,13 @@ fn build_camera() -> osm_world::camera::Flycam {
     osm_world::camera::Flycam::new(1.0)
 }
 
+fn default_atmosphere() -> (osm_world::atmosphere::DayCycleState, osm_world::atmosphere::AtmosphereSettings) {
+    (
+        osm_world::atmosphere::DayCycleState::default(),
+        osm_world::atmosphere::AtmosphereSettings::default(),
+    )
+}
+
 #[test]
 fn forward_vector_is_normalized() {
     let cam = build_camera();
@@ -44,9 +51,10 @@ fn view_matrix_looks_forward() {
 }
 
 #[test]
-fn uniform_has_correct_padding() {
+fn uniform_has_correct_size_and_padding() {
     let cam = build_camera();
-    let uniform = cam.uniform();
-    assert_eq!(uniform._pad, 0.0);
-    assert_eq!(std::mem::size_of::<osm_world::camera::CameraUniform>(), 80);
+    let (day, atm) = default_atmosphere();
+    let uniforms = cam.uniforms(&day, &atm);
+    assert_eq!(uniforms._pad0, 0.0);
+    assert_eq!(std::mem::size_of::<osm_world::camera::SceneUniforms>(), 256);
 }

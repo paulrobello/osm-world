@@ -4,13 +4,32 @@ use bytemuck::{Pod, Zeroable};
 
 pub use controller::CameraController;
 
-/// Camera uniform buffer layout (GPU). Padded to 80 bytes.
+/// Scene uniform buffer layout (GPU). 256 bytes: camera + atmosphere.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub struct CameraUniform {
+pub struct SceneUniforms {
     pub view_proj: [[f32; 4]; 4],
-    pub position: [f32; 3],
-    pub _pad: f32,
+    pub inv_view_proj: [[f32; 4]; 4],
+    pub camera_pos: [f32; 3],
+    pub _pad0: f32,
+    pub time_of_day: f32,
+    pub animation_time: f32,
+    pub ambient_light: f32,
+    pub _pad1: f32,
+    pub sun_direction: [f32; 3],
+    pub _pad2: f32,
+    pub fog_density: f32,
+    pub fog_start: f32,
+    pub _pad3: [f32; 2],
+    pub sky_zenith: [f32; 3],
+    pub _pad4: f32,
+    pub sky_horizon: [f32; 3],
+    pub _pad5: f32,
+    pub cloud_speed: f32,
+    pub cloud_coverage: f32,
+    pub _pad6: [f32; 2],
+    pub cloud_color: [f32; 3],
+    pub clouds_enabled: u32,
 }
 
 /// Flycam: free-flight camera controlled by WASD + mouse.
@@ -60,11 +79,34 @@ impl Flycam {
         glam::Mat4::perspective_rh(self.fov, self.aspect, self.near, self.far)
     }
 
-    pub fn uniform(&self) -> CameraUniform {
-        CameraUniform {
-            view_proj: (self.projection_matrix() * self.view_matrix()).to_cols_array_2d(),
-            position: self.position.to_array(),
-            _pad: 0.0,
+    pub fn uniforms(&self, day: &crate::atmosphere::DayCycleState, atm: &crate::atmosphere::AtmosphereSettings) -> SceneUniforms {
+        let view = self.view_matrix();
+        let proj = self.projection_matrix();
+        let vp = proj * view;
+        let sun_dir = crate::atmosphere::sun_direction(day.time_of_day);
+        SceneUniforms {
+            view_proj: vp.to_cols_array_2d(),
+            inv_view_proj: vp.inverse().to_cols_array_2d(),
+            camera_pos: self.position.to_array(),
+            _pad0: 0.0,
+            time_of_day: day.time_of_day,
+            animation_time: day.animation_time,
+            ambient_light: atm.ambient_light,
+            _pad1: 0.0,
+            sun_direction: sun_dir,
+            _pad2: 0.0,
+            fog_density: atm.fog_density,
+            fog_start: atm.fog_start,
+            _pad3: [0.0; 2],
+            sky_zenith: atm.sky_color_zenith,
+            _pad4: 0.0,
+            sky_horizon: atm.sky_color_horizon,
+            _pad5: 0.0,
+            cloud_speed: atm.cloud_speed,
+            cloud_coverage: atm.cloud_coverage,
+            _pad6: [0.0; 2],
+            cloud_color: atm.cloud_color,
+            clouds_enabled: atm.clouds_enabled as u32,
         }
     }
 }

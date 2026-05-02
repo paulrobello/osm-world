@@ -2,7 +2,7 @@ use std::sync::Arc;
 use wgpu::*;
 
 use crate::camera::Flycam;
-use crate::render::bind_groups::CameraBindGroup;
+use crate::render::bind_groups::SceneBindGroup;
 use crate::render::buffers::SceneBuffers;
 use crate::render::pipelines::CityPipeline;
 
@@ -15,7 +15,7 @@ pub struct AppState {
     pub depth_texture: Texture,
     pub depth_view: TextureView,
     pub camera: Flycam,
-    pub camera_bg: CameraBindGroup,
+    pub camera_bg: SceneBindGroup,
     pub pipeline: CityPipeline,
     pub scene: SceneBuffers,
 }
@@ -81,7 +81,7 @@ pub fn init_wgpu(
         create_depth_buffer(&device, surface_config.width, surface_config.height);
 
     let mut camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
-    let camera_bg = CameraBindGroup::new(&device);
+    let camera_bg = SceneBindGroup::new(&device);
     let pipeline = CityPipeline::new(&device, &camera_bg.layout, surface_format);
 
     let scene = match input_path {

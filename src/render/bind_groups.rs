@@ -1,24 +1,24 @@
 use wgpu::*;
 
-use crate::camera::CameraUniform;
+use crate::camera::SceneUniforms;
 
-pub struct CameraBindGroup {
+pub struct SceneBindGroup {
     pub layout: BindGroupLayout,
     pub group: BindGroup,
     pub buffer: Buffer,
 }
 
-impl CameraBindGroup {
+impl SceneBindGroup {
     pub fn new(device: &Device) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("camera uniform buffer"),
-            size: std::mem::size_of::<CameraUniform>() as BufferAddress,
+            label: Some("scene uniform buffer"),
+            size: std::mem::size_of::<SceneUniforms>() as BufferAddress,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("camera bind group layout"),
+            label: Some("scene bind group layout"),
             entries: &[BindGroupLayoutEntry {
                 binding: 0,
                 visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
@@ -32,7 +32,7 @@ impl CameraBindGroup {
         });
 
         let group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("camera bind group"),
+            label: Some("scene bind group"),
             layout: &layout,
             entries: &[BindGroupEntry {
                 binding: 0,
@@ -47,11 +47,11 @@ impl CameraBindGroup {
         }
     }
 
-    pub fn update(&self, queue: &Queue, uniform: &CameraUniform) {
+    pub fn update(&self, queue: &Queue, uniforms: &SceneUniforms) {
         queue.write_buffer(
             &self.buffer,
             0,
-            bytemuck::cast_slice(std::slice::from_ref(uniform)),
+            bytemuck::cast_slice(std::slice::from_ref(uniforms)),
         );
     }
 }

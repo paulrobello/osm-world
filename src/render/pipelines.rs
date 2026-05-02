@@ -10,7 +10,7 @@ pub struct CityPipeline {
 impl CityPipeline {
     pub fn new(
         device: &Device,
-        camera_layout: &BindGroupLayout,
+        scene_layout: &BindGroupLayout,
         surface_format: TextureFormat,
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
@@ -20,7 +20,7 @@ impl CityPipeline {
 
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("city pipeline layout"),
-            bind_group_layouts: &[Some(camera_layout)],
+            bind_group_layouts: &[Some(scene_layout)],
             immediate_size: 0,
         });
 

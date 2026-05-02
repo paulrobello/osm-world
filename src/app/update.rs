@@ -7,8 +7,7 @@ pub fn update(app: &mut App) {
 
     if let Some(state) = &mut app.state {
         app.controller.update_camera(&mut state.camera, dt);
-        state
-            .camera_bg
-            .update(&state.queue, &state.camera.uniform());
+        let uniforms = state.camera.uniforms(&app.day_cycle, &app.atmosphere);
+        state.camera_bg.update(&state.queue, &uniforms);
     }
 }

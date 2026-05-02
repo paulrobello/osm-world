@@ -63,60 +63,64 @@ impl WorldSource {
     ) -> HashMap<crate::stream::TileCoord, crate::stream::tile::TileFeatureRefs> {
         let mut index = HashMap::new();
 
+        if let Some((min_x, min_z, max_x, max_z)) = self.world_bbox() {
+            for coord in crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
+            {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default);
+            }
+        }
+
         for (feature_idx, feature) in self.buildings.iter().enumerate() {
-            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
-                for coord in
-                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
-                {
-                    index
-                        .entry(coord)
-                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                        .buildings
-                        .push(feature_idx);
-                }
+            if let Some(coord) = feature_owner_tile(feature, tile_size) {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                    .buildings
+                    .push(feature_idx);
             }
         }
         for (feature_idx, feature) in self.roads.iter().enumerate() {
-            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
-                for coord in
-                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
-                {
-                    index
-                        .entry(coord)
-                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                        .roads
-                        .push(feature_idx);
-                }
+            if let Some(coord) = feature_owner_tile(feature, tile_size) {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                    .roads
+                    .push(feature_idx);
             }
         }
         for (feature_idx, feature) in self.waters.iter().enumerate() {
-            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
-                for coord in
-                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
-                {
-                    index
-                        .entry(coord)
-                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                        .waters
-                        .push(feature_idx);
-                }
+            if let Some(coord) = feature_owner_tile(feature, tile_size) {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                    .waters
+                    .push(feature_idx);
             }
         }
         for (feature_idx, feature) in self.landuses.iter().enumerate() {
-            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
-                for coord in
-                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
-                {
-                    index
-                        .entry(coord)
-                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                        .landuses
-                        .push(feature_idx);
-                }
+            if let Some(coord) = feature_owner_tile(feature, tile_size) {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                    .landuses
+                    .push(feature_idx);
             }
         }
 
         index
+    }
+
+    fn world_bbox(&self) -> Option<(f32, f32, f32, f32)> {
+        let (x0, z0) = self.conv.to_world_xz(self.max_lat, self.min_lon);
+        let (x1, z1) = self.conv.to_world_xz(self.min_lat, self.max_lon);
+        let min_x = x0.min(x1);
+        let max_x = x0.max(x1);
+        let min_z = z0.min(z1);
+        let max_z = z0.max(z1);
+        (min_x.is_finite() && min_z.is_finite() && max_x.is_finite() && max_z.is_finite())
+            .then_some((min_x, min_z, max_x, max_z))
     }
 }
 
@@ -132,6 +136,18 @@ fn feature_bbox(feature: &ResolvedFeature) -> Option<(f32, f32, f32, f32)> {
         max_z = max_z.max(z);
     }
     Some((min_x, min_z, max_x, max_z))
+}
+
+fn feature_owner_tile(
+    feature: &ResolvedFeature,
+    tile_size: f32,
+) -> Option<crate::stream::TileCoord> {
+    let (min_x, min_z, max_x, max_z) = feature_bbox(feature)?;
+    let center_x = (min_x + max_x) * 0.5;
+    let center_z = (min_z + max_z) * 0.5;
+    Some(crate::stream::TileCoord::from_world(
+        center_x, center_z, tile_size,
+    ))
 }
 
 // Ensure CCW winding for polygon features while keeping per-vertex data aligned.
@@ -527,19 +543,34 @@ pub fn generate_tile_mesh_set(
         generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Mid),
         generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Far),
     ];
-    let rect = coord.rect(tile_size);
-    let max_y = lods
-        .iter()
-        .flat_map(|m| m.vertices.iter().map(|v| v.position[1]))
-        .fold(0.0_f32, f32::max)
-        .max(100.0);
-    TileMeshSet {
-        coord,
-        aabb: crate::stream::TileAabb {
-            min: glam::Vec3::new(rect.min_x, -100.0, rect.min_z),
-            max: glam::Vec3::new(rect.max_x, max_y + 10.0, rect.max_z),
-        },
-        lods,
+    let aabb = aabb_for_lods(coord, tile_size, &lods);
+    TileMeshSet { coord, aabb, lods }
+}
+
+fn aabb_for_lods(
+    coord: crate::stream::TileCoord,
+    tile_size: f32,
+    lods: &[CpuMesh; 3],
+) -> crate::stream::TileAabb {
+    let mut min = glam::Vec3::splat(f32::INFINITY);
+    let mut max = glam::Vec3::splat(f32::NEG_INFINITY);
+    let mut has_vertices = false;
+
+    for vertex in lods.iter().flat_map(|mesh| &mesh.vertices) {
+        let position = glam::Vec3::from_array(vertex.position);
+        min = min.min(position);
+        max = max.max(position);
+        has_vertices = true;
+    }
+
+    if has_vertices {
+        crate::stream::TileAabb { min, max }
+    } else {
+        let rect = coord.rect(tile_size);
+        crate::stream::TileAabb {
+            min: glam::Vec3::new(rect.min_x, 0.0, rect.min_z),
+            max: glam::Vec3::new(rect.max_x, 1.0, rect.max_z),
+        }
     }
 }
 
@@ -819,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn feature_index_maps_feature_bboxes_to_tiles() {
+    fn feature_index_maps_feature_bboxes_to_owner_tiles() {
         let mut source = empty_source();
         source.buildings.push(feature(
             "building",
@@ -860,7 +891,7 @@ mod tests {
         );
         assert_eq!(
             index
-                .get(&crate::stream::TileCoord { x: -1, z: -1 })
+                .get(&crate::stream::TileCoord { x: 0, z: -1 })
                 .unwrap()
                 .waters,
             vec![0]
@@ -872,6 +903,111 @@ mod tests {
                 .landuses,
             vec![0]
         );
+    }
+
+    #[test]
+    fn cross_tile_feature_is_referenced_and_emitted_by_one_owner_tile_only() {
+        let mut source = empty_source();
+        source.max_lat = 1.002;
+        source.max_lon = 2.002;
+        source.roads.push(feature(
+            "highway",
+            "residential",
+            vec![(80.0, -50.0), (140.0, -50.0)],
+        ));
+
+        let index = source.feature_index_for_tile_size(100.0);
+        let owner_tiles: Vec<_> = index
+            .iter()
+            .filter_map(|(coord, refs)| refs.roads.contains(&0).then_some(*coord))
+            .collect();
+        assert_eq!(owner_tiles, vec![crate::stream::TileCoord { x: 1, z: -1 }]);
+
+        let tiles_emitting_road = index
+            .iter()
+            .filter(|(coord, refs)| {
+                let mesh = generate_tile_mesh_set(&source, **coord, refs, 100.0);
+                mesh.lods[crate::stream::TileLod::Near as usize]
+                    .vertices
+                    .iter()
+                    .any(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+            })
+            .count();
+        assert_eq!(tiles_emitting_road, 1);
+    }
+
+    #[test]
+    fn feature_index_includes_empty_terrain_tiles_for_world_bbox() {
+        let mut source = empty_source();
+        source.max_lat = 1.002;
+        source.max_lon = 2.002;
+
+        let index = source.feature_index_for_tile_size(100.0);
+
+        assert!(!index.is_empty());
+        assert!(index.contains_key(&crate::stream::TileCoord { x: 0, z: -3 }));
+        assert!(index.contains_key(&crate::stream::TileCoord { x: 2, z: 0 }));
+        assert!(index.values().all(|refs| refs.buildings.is_empty()
+            && refs.roads.is_empty()
+            && refs.waters.is_empty()
+            && refs.landuses.is_empty()));
+    }
+
+    #[test]
+    fn tile_mesh_aabb_bounds_cross_tile_geometry() {
+        let mut source = empty_source();
+        source.waters.push(feature(
+            "natural",
+            "water",
+            vec![(80.0, -40.0), (140.0, -40.0), (140.0, -60.0), (80.0, -60.0)],
+        ));
+        let refs = crate::stream::tile::TileFeatureRefs {
+            waters: vec![0],
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 1, z: -1 },
+            &refs,
+            100.0,
+        );
+
+        assert!(mesh.aabb.min.x <= 80.0, "aabb min x: {}", mesh.aabb.min.x);
+        assert!(mesh.aabb.max.x >= 200.0, "aabb max x: {}", mesh.aabb.max.x);
+        assert!(mesh.aabb.min.z <= -100.0, "aabb min z: {}", mesh.aabb.min.z);
+        assert!(mesh.aabb.max.z >= 0.0, "aabb max z: {}", mesh.aabb.max.z);
+    }
+
+    #[test]
+    fn tile_mesh_aabb_includes_actual_negative_elevations() {
+        let mut source = empty_source();
+        source.waters.push(ResolvedFeature {
+            tags: HashMap::from([("natural".to_string(), "water".to_string())]),
+            points: vec![(10.0, -10.0), (20.0, -10.0), (20.0, -20.0), (10.0, -20.0)],
+            elevations: vec![-250.0, -240.0, -230.0, -220.0],
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        let refs = crate::stream::tile::TileFeatureRefs {
+            waters: vec![0],
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+        );
+        let min_vertex_y = mesh
+            .lods
+            .iter()
+            .flat_map(|lod| lod.vertices.iter().map(|v| v.position[1]))
+            .fold(f32::INFINITY, f32::min);
+
+        assert_eq!(mesh.aabb.min.y, min_vertex_y);
+        assert!(mesh.aabb.min.y < -200.0, "aabb min y: {}", mesh.aabb.min.y);
     }
 
     #[test]

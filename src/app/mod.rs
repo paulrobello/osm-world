@@ -7,6 +7,29 @@ use crate::camera::CameraController;
 
 pub use init::AppState;
 
+#[derive(Clone, Debug)]
+pub struct StreamingOptions {
+    pub enabled: bool,
+    pub tile_size: f32,
+    pub stream_radius: f32,
+    pub upload_budget_mb: f32,
+    pub max_uploaded_tiles: usize,
+    pub max_uploaded_mb: f32,
+}
+
+impl Default for StreamingOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            tile_size: 1000.0,
+            stream_radius: 15_000.0,
+            upload_budget_mb: 4.0,
+            max_uploaded_tiles: 256,
+            max_uploaded_mb: 512.0,
+        }
+    }
+}
+
 pub struct AppOptions {
     pub window_width: f64,
     pub window_height: f64,
@@ -17,6 +40,7 @@ pub struct AppOptions {
     pub srtm_dir: Option<String>,
     pub cam_override: Option<crate::camera::CameraOverride>,
     pub show_settings: bool,
+    pub streaming: StreamingOptions,
 }
 
 pub struct App {

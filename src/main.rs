@@ -57,6 +57,30 @@ struct Args {
     /// Start with the in-game settings panel open
     #[arg(long)]
     show_settings: bool,
+
+    /// Disable tile streaming and use the legacy single-mesh renderer
+    #[arg(long)]
+    no_streaming: bool,
+
+    /// Streaming tile size in metres
+    #[arg(long, default_value = "1000.0")]
+    tile_size: f32,
+
+    /// Streaming radius in metres
+    #[arg(long, default_value = "15000.0")]
+    stream_radius: f32,
+
+    /// Per-frame GPU upload budget in MiB
+    #[arg(long, default_value = "4.0")]
+    upload_budget_mb: f32,
+
+    /// Maximum number of uploaded streaming tiles
+    #[arg(long, default_value = "256")]
+    max_uploaded_tiles: usize,
+
+    /// Maximum estimated uploaded tile memory in MiB
+    #[arg(long, default_value = "512.0")]
+    max_uploaded_mb: f32,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -93,6 +117,14 @@ fn main() -> anyhow::Result<()> {
         srtm_dir: args.srtm_dir,
         cam_override,
         show_settings: args.show_settings,
+        streaming: osm_world::app::StreamingOptions {
+            enabled: !args.no_streaming,
+            tile_size: args.tile_size,
+            stream_radius: args.stream_radius,
+            upload_budget_mb: args.upload_budget_mb,
+            max_uploaded_tiles: args.max_uploaded_tiles,
+            max_uploaded_mb: args.max_uploaded_mb,
+        },
     });
     event_loop.run_app(&mut app)?;
 
@@ -107,5 +139,31 @@ mod tests {
     fn parses_show_settings_flag() {
         let args = Args::try_parse_from(["osm-world", "--show-settings"]).unwrap();
         assert!(args.show_settings);
+    }
+
+    #[test]
+    fn parses_streaming_flags() {
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--no-streaming",
+            "--tile-size",
+            "500",
+            "--stream-radius",
+            "2500",
+            "--upload-budget-mb",
+            "2.5",
+            "--max-uploaded-tiles",
+            "64",
+            "--max-uploaded-mb",
+            "128",
+        ])
+        .unwrap();
+
+        assert!(args.no_streaming);
+        assert_eq!(args.tile_size, 500.0);
+        assert_eq!(args.stream_radius, 2500.0);
+        assert_eq!(args.upload_budget_mb, 2.5);
+        assert_eq!(args.max_uploaded_tiles, 64);
+        assert_eq!(args.max_uploaded_mb, 128.0);
     }
 }

@@ -48,7 +48,7 @@ impl Frustum {
                 make(r3 - r0),
                 make(r3 + r1),
                 make(r3 - r1),
-                make(r3 + r2),
+                make(r2),
                 make(r3 - r2),
             ],
         }
@@ -102,11 +102,59 @@ mod tests {
     }
 
     #[test]
+    fn aabb_before_near_plane_does_not_intersect() {
+        let f = test_frustum();
+        assert!(!f.intersects_aabb(
+            glam::Vec3::new(-0.01, -0.01, -0.09),
+            glam::Vec3::new(0.01, 0.01, -0.06)
+        ));
+    }
+
+    #[test]
+    fn aabb_beyond_far_plane_does_not_intersect() {
+        let f = test_frustum();
+        assert!(!f.intersects_aabb(
+            glam::Vec3::new(-1.0, -1.0, -102.0),
+            glam::Vec3::new(1.0, 1.0, -101.0)
+        ));
+    }
+
+    #[test]
+    fn aabb_outside_side_plane_does_not_intersect() {
+        let f = test_frustum();
+        assert!(!f.intersects_aabb(
+            glam::Vec3::new(6.0, -0.5, -5.0),
+            glam::Vec3::new(7.0, 0.5, -4.0)
+        ));
+    }
+
+    #[test]
     fn aabb_crossing_near_plane_intersects() {
         let f = test_frustum();
         assert!(f.intersects_aabb(
             glam::Vec3::new(-0.1, -0.1, -0.2),
             glam::Vec3::new(0.1, 0.1, 0.1)
+        ));
+    }
+
+    #[test]
+    fn translated_rotated_camera_intersects_front_and_rejects_behind() {
+        let eye = glam::Vec3::new(10.0, 2.0, 3.0);
+        let forward = glam::Vec3::new(1.0, 0.0, -1.0).normalize();
+        let view = glam::Mat4::look_at_rh(eye, eye + forward, glam::Vec3::Y);
+        let proj = glam::Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 100.0);
+        let f = Frustum::from_view_proj(proj * view);
+
+        let front_center = eye + forward * 5.0;
+        assert!(f.intersects_aabb(
+            front_center - glam::Vec3::splat(0.5),
+            front_center + glam::Vec3::splat(0.5)
+        ));
+
+        let behind_center = eye - forward * 2.0;
+        assert!(!f.intersects_aabb(
+            behind_center - glam::Vec3::splat(0.5),
+            behind_center + glam::Vec3::splat(0.5)
         ));
     }
 }

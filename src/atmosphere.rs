@@ -18,8 +18,8 @@ impl Default for AtmosphereSettings {
     fn default() -> Self {
         Self {
             ambient_light: 0.3,
-            fog_density: 0.002,
-            fog_start: 500.0,
+            fog_density: 0.0008,
+            fog_start: 1000.0,
             cloud_speed: 1.0,
             cloud_coverage: 0.45,
             cloud_color: [1.0, 1.0, 1.0],

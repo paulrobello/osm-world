@@ -4,6 +4,15 @@ use bytemuck::{Pod, Zeroable};
 
 pub use controller::CameraController;
 
+/// Optional overrides for the initial camera position and orientation.
+pub struct CameraOverride {
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    pub z: Option<f32>,
+    pub yaw: Option<f32>,
+    pub pitch: Option<f32>,
+}
+
 /// Scene uniform buffer layout (GPU). 256 bytes: camera + atmosphere.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]

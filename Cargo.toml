@@ -28,6 +28,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 quick-xml = "0.39.2"
+egui = "0.34"
+egui-wgpu = "0.34"
+egui-winit = "0.34"
 
 [profile.dev]
 opt-level = 1

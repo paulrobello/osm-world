@@ -33,6 +33,26 @@ struct Args {
     /// Window height in logical pixels
     #[arg(long, default_value = "1000")]
     height: f64,
+
+    /// Override initial camera X position
+    #[arg(long)]
+    cam_x: Option<f32>,
+
+    /// Override initial camera Y position
+    #[arg(long)]
+    cam_y: Option<f32>,
+
+    /// Override initial camera Z position
+    #[arg(long)]
+    cam_z: Option<f32>,
+
+    /// Override initial camera yaw in degrees
+    #[arg(long)]
+    cam_yaw: Option<f32>,
+
+    /// Override initial camera pitch in degrees
+    #[arg(long)]
+    cam_pitch: Option<f32>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -41,6 +61,24 @@ fn main() -> anyhow::Result<()> {
     log::info!("osm-world starting");
 
     let event_loop = winit::event_loop::EventLoop::new()?;
+
+    let cam_override = if args.cam_x.is_some()
+        || args.cam_y.is_some()
+        || args.cam_z.is_some()
+        || args.cam_yaw.is_some()
+        || args.cam_pitch.is_some()
+    {
+        Some(osm_world::camera::CameraOverride {
+            x: args.cam_x,
+            y: args.cam_y,
+            z: args.cam_z,
+            yaw: args.cam_yaw,
+            pitch: args.cam_pitch,
+        })
+    } else {
+        None
+    };
+
     let mut app = osm_world::app::App::new(osm_world::app::AppOptions {
         window_width: args.width,
         window_height: args.height,
@@ -49,6 +87,8 @@ fn main() -> anyhow::Result<()> {
         auto_exit_delay: args.auto_exit,
         input_path: args.input,
         srtm_dir: args.srtm_dir,
+        cam_override,
+        show_settings: false,
     });
     event_loop.run_app(&mut app)?;
 

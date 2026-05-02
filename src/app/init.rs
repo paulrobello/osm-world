@@ -28,7 +28,8 @@ pub fn init_wgpu(
     window_height: f64,
     input_path: Option<&str>,
     srtm_dir: Option<&str>,
-) -> anyhow::Result<AppState> {
+    cam_override: Option<&crate::camera::CameraOverride>,
+) -> anyhow::Result<(AppState, crate::ui::EguiState)> {
     let window = Arc::new(
         event_loop.create_window(
             winit::window::WindowAttributes::default()
@@ -82,6 +83,8 @@ pub fn init_wgpu(
     let (depth_texture, depth_view) =
         create_depth_buffer(&device, surface_config.width, surface_config.height);
 
+    let egui = crate::ui::EguiState::new(&device, &surface_config, &window);
+
     let mut camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
     let camera_bg = SceneBindGroup::new(&device);
     let pipeline = CityPipeline::new(&device, &camera_bg.layout, surface_format);
@@ -91,28 +94,50 @@ pub fn init_wgpu(
         Some(path) => {
             let srtm = srtm_dir.map(std::path::Path::new);
             let world = crate::world::loader::load_world(std::path::Path::new(path), srtm)?;
-            camera.position = glam::Vec3::new(world.center.0, world.center.1, world.center.2);
+            camera.position =
+                glam::Vec3::new(world.center.0, world.center.1 + 80.0, world.center.2);
             camera.yaw = -std::f32::consts::FRAC_PI_2;
-            camera.pitch = -0.3;
+            camera.pitch = -0.4;
             SceneBuffers::from_mesh(&device, world.vertices, world.indices)
         }
         None => SceneBuffers::new(&device),
     };
 
-    Ok(AppState {
-        window,
-        device,
-        queue,
-        surface,
-        surface_config,
-        depth_texture,
-        depth_view,
-        camera,
-        camera_bg,
-        pipeline,
-        sky_pipeline,
-        scene,
-    })
+    if let Some(ov) = cam_override {
+        if let Some(x) = ov.x {
+            camera.position.x = x;
+        }
+        if let Some(y) = ov.y {
+            camera.position.y = y;
+        }
+        if let Some(z) = ov.z {
+            camera.position.z = z;
+        }
+        if let Some(yaw) = ov.yaw {
+            camera.yaw = yaw.to_radians();
+        }
+        if let Some(pitch) = ov.pitch {
+            camera.pitch = pitch.to_radians();
+        }
+    }
+
+    Ok((
+        AppState {
+            window,
+            device,
+            queue,
+            surface,
+            surface_config,
+            depth_texture,
+            depth_view,
+            camera,
+            camera_bg,
+            pipeline,
+            sky_pipeline,
+            scene,
+        },
+        egui,
+    ))
 }
 
 pub fn create_depth_buffer(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {

@@ -1,8 +1,16 @@
 use wgpu::*;
 
 use super::AppState;
+use crate::ui::EguiState;
 
-pub fn render(state: &AppState, screenshot_path: Option<&str>) {
+pub fn render(
+    state: &AppState,
+    egui_state: &mut EguiState,
+    screenshot_path: Option<&str>,
+    atmosphere: &mut crate::atmosphere::AtmosphereSettings,
+    day_cycle: &mut crate::atmosphere::DayCycleState,
+    show_settings: &mut bool,
+) {
     let output = match state.surface.get_current_texture() {
         CurrentSurfaceTexture::Success(frame) => frame,
         CurrentSurfaceTexture::Timeout | CurrentSurfaceTexture::Occluded => return,
@@ -68,6 +76,64 @@ pub fn render(state: &AppState, screenshot_path: Option<&str>) {
         pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
         pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
         pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
+    }
+
+    // egui pass
+    let screen_descriptor = egui_wgpu::ScreenDescriptor {
+        size_in_pixels: [state.surface_config.width, state.surface_config.height],
+        pixels_per_point: state.window.scale_factor() as f32,
+    };
+
+    let raw_input = egui_state.winit_state.take_egui_input(&state.window);
+    #[allow(deprecated)]
+    let egui_output = egui_state.context.run(raw_input, |ctx| {
+        crate::ui::hud::draw(ctx, &state.camera, day_cycle);
+        if *show_settings {
+            crate::ui::settings::draw(ctx, atmosphere, day_cycle, show_settings);
+        }
+    });
+
+    egui_state
+        .winit_state
+        .handle_platform_output(&state.window, egui_output.platform_output);
+
+    let tris = egui_state
+        .context
+        .tessellate(egui_output.shapes, egui_output.pixels_per_point);
+
+    for (id, image_delta) in &egui_output.textures_delta.set {
+        egui_state
+            .renderer
+            .update_texture(&state.device, &state.queue, *id, image_delta);
+    }
+    egui_state.renderer.update_buffers(
+        &state.device,
+        &state.queue,
+        &mut encoder,
+        &tris,
+        &screen_descriptor,
+    );
+
+    {
+        let pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("egui render pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: Operations {
+                    load: LoadOp::Load,
+                    store: StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        egui_state
+            .renderer
+            .render(&mut pass.forget_lifetime(), &tris, &screen_descriptor);
     }
 
     let screenshot_buffer = if screenshot_path.is_some() {

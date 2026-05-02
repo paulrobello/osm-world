@@ -15,13 +15,15 @@ impl ApplicationHandler for App {
                 self.opts.window_height,
                 self.opts.input_path.as_deref(),
                 self.opts.srtm_dir.as_deref(),
+                self.opts.cam_override.as_ref(),
             ) {
-                Ok(state) => {
+                Ok((state, egui)) => {
                     log::info!("WGPU initialized: {:?}", state.device.adapter_info());
                     log::info!(
-                        "Controls: [P]ause cycle  [BracketLeft/BracketRight] time  [C]louds  [Minus/Equal] fog  [9/0] coverage"
+                        "Controls: [P]ause cycle  [BracketLeft/BracketRight] time  [C]louds  [Minus/Equal] fog  [9/0] coverage  [F1] settings"
                     );
                     self.state = Some(state);
+                    self.egui = Some(egui);
                     self.render_start = Some(std::time::Instant::now());
                 }
                 Err(e) => {
@@ -38,6 +40,14 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Route events through egui first
+        if let (Some(state), Some(egui)) = (&self.state, &mut self.egui) {
+            let response = egui.winit_state.on_window_event(&state.window, &event);
+            if response.consumed {
+                return;
+            }
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -114,6 +124,9 @@ impl ApplicationHandler for App {
                                 self.atmosphere.cloud_coverage =
                                     (self.atmosphere.cloud_coverage + 0.05).min(1.0);
                             }
+                            KeyCode::F1 => {
+                                self.show_settings = !self.show_settings;
+                            }
                             _ => {}
                         }
                     }
@@ -125,10 +138,17 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 update::update(self);
 
-                let screenshot_path = self.check_screenshot();
+                let screenshot_path = self.check_screenshot_cloned();
 
-                if let Some(state) = &self.state {
-                    render_loop::render(state, screenshot_path);
+                if let (Some(state), Some(egui)) = (&self.state, &mut self.egui) {
+                    render_loop::render(
+                        state,
+                        egui,
+                        screenshot_path.as_deref(),
+                        &mut self.atmosphere,
+                        &mut self.day_cycle,
+                        &mut self.show_settings,
+                    );
                 }
 
                 if screenshot_path.is_some() {
@@ -167,7 +187,7 @@ impl ApplicationHandler for App {
 }
 
 impl App {
-    fn check_screenshot(&self) -> Option<&str> {
+    fn check_screenshot_cloned(&self) -> Option<String> {
         if self.screenshot_taken {
             return None;
         }
@@ -175,7 +195,7 @@ impl App {
         let start = self.render_start?;
         let elapsed = start.elapsed().as_secs_f32();
         if elapsed >= self.opts.screenshot_delay {
-            Some(path.as_str())
+            Some(path.clone())
         } else {
             None
         }

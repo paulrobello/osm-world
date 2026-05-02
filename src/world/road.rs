@@ -19,7 +19,7 @@ pub fn generate_road(
 ) {
     let half_width = width / 2.0;
     let normal = [0.0, 1.0, 0.0];
-    let y = y + 0.1; // small offset above terrain
+    let y = y + 1.0; // offset above terrain to avoid z-fighting
 
     for i in 0..points.len().saturating_sub(1) {
         let (x0, z0) = points[i];

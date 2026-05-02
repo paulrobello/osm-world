@@ -15,7 +15,7 @@ pub fn generate_landuse(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
-    let y = y + 0.05; // small offset above terrain
+    let y = y + 0.5; // offset above terrain to avoid z-fighting
     let normal = [0.0, 1.0, 0.0];
 
     let base = verts.len() as u32;

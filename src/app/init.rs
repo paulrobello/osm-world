@@ -95,9 +95,9 @@ pub fn init_wgpu(
             let srtm = srtm_dir.map(std::path::Path::new);
             let world = crate::world::loader::load_world(std::path::Path::new(path), srtm)?;
             camera.position =
-                glam::Vec3::new(world.center.0, world.center.1 + 80.0, world.center.2);
+                glam::Vec3::new(world.center.0, world.center.1 + 200.0, world.center.2);
             camera.yaw = -std::f32::consts::FRAC_PI_2;
-            camera.pitch = -0.4;
+            camera.pitch = -0.6;
             SceneBuffers::from_mesh(&device, world.vertices, world.indices)
         }
         None => SceneBuffers::new(&device),

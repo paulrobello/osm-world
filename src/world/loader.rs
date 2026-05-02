@@ -185,6 +185,34 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
 
     // 7. Generate meshes in order: terrain, landuse, water, roads, buildings
 
+    // Ensure CCW winding for all polygon-based features (OSM data can be either winding)
+    fn ensure_ccw(poly: &mut [(f32, f32)]) {
+        if poly.len() < 3 {
+            return;
+        }
+        let area: f32 = poly
+            .iter()
+            .enumerate()
+            .map(|(i, (x0, y0))| {
+                let (x1, y1) = poly[(i + 1) % poly.len()];
+                x0 * y1 - x1 * y0
+            })
+            .sum();
+        if area < 0.0 {
+            poly.reverse();
+        }
+    }
+
+    for b in &mut buildings {
+        ensure_ccw(&mut b.points);
+    }
+    for w in &mut waters {
+        ensure_ccw(&mut w.points);
+    }
+    for lu in &mut landuses {
+        ensure_ccw(&mut lu.points);
+    }
+
     // Terrain
     super::terrain::generate_terrain(
         min_lat,
@@ -206,7 +234,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
 
     // Water
     for w in &waters {
-        let y = 0.0; // sea level
+        let y = elev(w.rep_lat, w.rep_lon) + 0.3;
         super::water::generate_water(&w.points, y, &mut verts, &mut idxs);
     }
 

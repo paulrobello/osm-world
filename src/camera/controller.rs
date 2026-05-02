@@ -61,10 +61,12 @@ impl CameraController {
         self.mouse_dx = 0.0;
         self.mouse_dy = 0.0;
 
-        let speed = camera.speed * dt;
+        use winit::keyboard::KeyCode;
+        let boost = self.keys_pressed.contains(&KeyCode::ShiftLeft)
+            || self.keys_pressed.contains(&KeyCode::ShiftRight);
+        let speed = camera.speed * if boost { 2.0 } else { 1.0 } * dt;
         let forward = camera.forward();
         let right = camera.right();
-        use winit::keyboard::KeyCode;
         if self.keys_pressed.contains(&KeyCode::KeyW) {
             camera.position += forward * speed;
         }
@@ -77,10 +79,10 @@ impl CameraController {
         if self.keys_pressed.contains(&KeyCode::KeyD) {
             camera.position += right * speed;
         }
-        if self.keys_pressed.contains(&KeyCode::Space) {
+        if self.keys_pressed.contains(&KeyCode::KeyE) {
             camera.position.y += speed;
         }
-        if self.keys_pressed.contains(&KeyCode::ShiftLeft) {
+        if self.keys_pressed.contains(&KeyCode::KeyQ) {
             camera.position.y -= speed;
         }
     }

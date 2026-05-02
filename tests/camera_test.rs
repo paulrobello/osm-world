@@ -61,3 +61,40 @@ fn uniform_has_correct_size_and_padding() {
     assert_eq!(uniforms._pad0, 0.0);
     assert_eq!(std::mem::size_of::<osm_world::camera::SceneUniforms>(), 256);
 }
+
+#[test]
+fn q_and_e_move_camera_down_and_up() {
+    use winit::event::ElementState;
+    use winit::keyboard::KeyCode;
+
+    let mut cam = build_camera();
+    let mut controller = osm_world::camera::CameraController::new();
+
+    controller.process_keyboard(KeyCode::KeyQ, ElementState::Pressed);
+    controller.update_camera(&mut cam, 1.0);
+    assert_eq!(cam.position.y, -50.0);
+
+    controller.process_keyboard(KeyCode::KeyQ, ElementState::Released);
+    controller.process_keyboard(KeyCode::KeyE, ElementState::Pressed);
+    controller.update_camera(&mut cam, 1.0);
+    assert_eq!(cam.position.y, 50.0);
+}
+
+#[test]
+fn shift_doubles_movement_speed_without_moving_vertically() {
+    use winit::event::ElementState;
+    use winit::keyboard::KeyCode;
+
+    let mut cam = build_camera();
+    cam.yaw = 0.0;
+    cam.pitch = 0.0;
+    let start_y = cam.position.y;
+    let mut controller = osm_world::camera::CameraController::new();
+
+    controller.process_keyboard(KeyCode::ShiftLeft, ElementState::Pressed);
+    controller.process_keyboard(KeyCode::KeyW, ElementState::Pressed);
+    controller.update_camera(&mut cam, 1.0);
+
+    assert_eq!(cam.position.x, 200.0);
+    assert_eq!(cam.position.y, start_y);
+}

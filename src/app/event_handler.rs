@@ -18,6 +18,7 @@ impl ApplicationHandler for App {
             ) {
                 Ok(state) => {
                     log::info!("WGPU initialized: {:?}", state.device.adapter_info());
+                    log::info!("Controls: [P]ause cycle  [BracketLeft/BracketRight] time  [C]louds  [Minus/Equal] fog  [9/0] coverage");
                     self.state = Some(state);
                     self.render_start = Some(std::time::Instant::now());
                 }
@@ -62,6 +63,38 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let winit::keyboard::PhysicalKey::Code(key) = event.physical_key {
                     self.controller.process_keyboard(key, event.state);
+                    if event.state == winit::event::ElementState::Pressed {
+                        use winit::keyboard::KeyCode;
+                        match key {
+                            KeyCode::KeyP => {
+                                self.day_cycle.paused = !self.day_cycle.paused;
+                                log::info!("Day cycle {}", if self.day_cycle.paused { "paused" } else { "running" });
+                            }
+                            KeyCode::BracketLeft => {
+                                self.day_cycle.time_of_day = (self.day_cycle.time_of_day - 0.01).rem_euclid(1.0);
+                            }
+                            KeyCode::BracketRight => {
+                                self.day_cycle.time_of_day = (self.day_cycle.time_of_day + 0.01).rem_euclid(1.0);
+                            }
+                            KeyCode::KeyC => {
+                                self.atmosphere.clouds_enabled = !self.atmosphere.clouds_enabled;
+                                log::info!("Clouds {}", if self.atmosphere.clouds_enabled { "enabled" } else { "disabled" });
+                            }
+                            KeyCode::Minus => {
+                                self.atmosphere.fog_density = (self.atmosphere.fog_density - 0.0005).max(0.0);
+                            }
+                            KeyCode::Equal => {
+                                self.atmosphere.fog_density = (self.atmosphere.fog_density + 0.0005).min(0.05);
+                            }
+                            KeyCode::Digit9 => {
+                                self.atmosphere.cloud_coverage = (self.atmosphere.cloud_coverage - 0.05).max(0.0);
+                            }
+                            KeyCode::Digit0 => {
+                                self.atmosphere.cloud_coverage = (self.atmosphere.cloud_coverage + 0.05).min(1.0);
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             WindowEvent::MouseInput { button, state, .. } => {

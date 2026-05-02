@@ -42,7 +42,7 @@ impl Default for DayCycleState {
         Self {
             time_of_day: DEFAULT_TIME_OF_DAY,
             animation_time: 0.0,
-            paused: false,
+            paused: true,
         }
     }
 }
@@ -62,4 +62,17 @@ pub fn sun_direction(time_of_day: f32) -> [f32; 3] {
     let xz = angle.sin();
     let len = (xz * xz + y * y + 0.09_f32).sqrt();
     [xz / len, y / len, 0.3 / len]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_day_cycle_starts_paused_at_1400() {
+        let day_cycle = DayCycleState::default();
+
+        assert!(day_cycle.paused);
+        assert_eq!(day_cycle.time_of_day, 14.0 / 24.0);
+    }
 }

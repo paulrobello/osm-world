@@ -28,8 +28,42 @@ pub fn generate_water(points: &[(f32, f32)], y: f32, verts: &mut Vec<Vertex>, id
         .flat_map(|&(x, z)| [x as f64, z as f64])
         .collect();
     if let Ok(triangles) = earcutr::earcut(&earcut_pts, &[], 2) {
-        for idx in triangles {
-            idxs.push(base + idx as u32);
+        for tri in triangles.chunks_exact(3) {
+            // earcut positive X/Z winding faces -Y in this coordinate system.
+            idxs.push(base + tri[0] as u32);
+            idxs.push(base + tri[2] as u32);
+            idxs.push(base + tri[1] as u32);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn triangle_normal_y(a: Vertex, b: Vertex, c: Vertex) -> f32 {
+        let ux = b.position[0] - a.position[0];
+        let uz = b.position[2] - a.position[2];
+        let vx = c.position[0] - a.position[0];
+        let vz = c.position[2] - a.position[2];
+        uz * vx - ux * vz
+    }
+
+    #[test]
+    fn water_triangles_face_up_for_back_face_culling() {
+        let points = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        generate_water(&points, 5.0, &mut vertices, &mut indices);
+        assert!(!indices.is_empty(), "expected water triangles");
+
+        for tri in indices.chunks_exact(3) {
+            let normal_y = triangle_normal_y(
+                vertices[tri[0] as usize],
+                vertices[tri[1] as usize],
+                vertices[tri[2] as usize],
+            );
+            assert!(normal_y > 0.0, "water triangle {tri:?} normal_y={normal_y}");
         }
     }
 }

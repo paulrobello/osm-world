@@ -14,6 +14,25 @@ pub struct WorldMesh {
     pub center: (f32, f32, f32),
 }
 
+// Ensure CCW winding for polygon features while keeping per-vertex data aligned.
+fn ensure_ccw(poly: &mut [(f32, f32)], elevations: &mut [f32]) {
+    if poly.len() < 3 {
+        return;
+    }
+    let area: f32 = poly
+        .iter()
+        .enumerate()
+        .map(|(i, (x0, y0))| {
+            let (x1, y1) = poly[(i + 1) % poly.len()];
+            x0 * y1 - x1 * y0
+        })
+        .sum();
+    if area < 0.0 {
+        poly.reverse();
+        elevations.reverse();
+    }
+}
+
 /// Load and process OSM data, generating all meshes.
 pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldMesh> {
     // 1. Parse PBF
@@ -49,6 +68,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     struct ResolvedWay {
         tags: HashMap<String, String>,
         points: Vec<(f32, f32)>,
+        elevations: Vec<f32>,
         // Lat/lon of a representative point for elevation lookup
         rep_lat: f64,
         rep_lon: f64,
@@ -62,6 +82,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     for way in &osm_data.ways {
         // Resolve node references to world coordinates
         let mut points = Vec::with_capacity(way.node_refs.len());
+        let mut elevations = Vec::with_capacity(way.node_refs.len());
         let mut sum_lat = 0.0f64;
         let mut sum_lon = 0.0f64;
         let mut count = 0usize;
@@ -70,6 +91,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
             if let Some(node) = osm_data.nodes.get(&node_id) {
                 let (x, z) = conv.to_world_xz(node.lat, node.lon);
                 points.push((x, z));
+                elevations.push(elev(node.lat, node.lon));
                 sum_lat += node.lat;
                 sum_lon += node.lon;
                 count += 1;
@@ -97,6 +119,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         let resolved = ResolvedWay {
             tags: way.tags.clone(),
             points,
+            elevations,
             rep_lat,
             rep_lon,
         };
@@ -135,6 +158,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     // Also process multipolygon relations as potential landuse/water features
     for rel in &osm_data.relations {
         let mut all_points: Vec<(f32, f32)> = Vec::new();
+        let mut elevations: Vec<f32> = Vec::new();
         let mut sum_lat = 0.0f64;
         let mut sum_lon = 0.0f64;
         let mut count = 0usize;
@@ -147,6 +171,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
                         if let Some(node) = osm_data.nodes.get(&node_id) {
                             let (x, z) = conv.to_world_xz(node.lat, node.lon);
                             all_points.push((x, z));
+                            elevations.push(elev(node.lat, node.lon));
                             sum_lat += node.lat;
                             sum_lon += node.lon;
                             count += 1;
@@ -172,6 +197,7 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         let resolved = ResolvedWay {
             tags: rel.tags.clone(),
             points: all_points,
+            elevations,
             rep_lat,
             rep_lon,
         };
@@ -186,31 +212,14 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     // 7. Generate meshes in order: terrain, landuse, water, roads, buildings
 
     // Ensure CCW winding for all polygon-based features (OSM data can be either winding)
-    fn ensure_ccw(poly: &mut [(f32, f32)]) {
-        if poly.len() < 3 {
-            return;
-        }
-        let area: f32 = poly
-            .iter()
-            .enumerate()
-            .map(|(i, (x0, y0))| {
-                let (x1, y1) = poly[(i + 1) % poly.len()];
-                x0 * y1 - x1 * y0
-            })
-            .sum();
-        if area < 0.0 {
-            poly.reverse();
-        }
-    }
-
     for b in &mut buildings {
-        ensure_ccw(&mut b.points);
+        ensure_ccw(&mut b.points, &mut b.elevations);
     }
     for w in &mut waters {
-        ensure_ccw(&mut w.points);
+        ensure_ccw(&mut w.points, &mut w.elevations);
     }
     for lu in &mut landuses {
-        ensure_ccw(&mut lu.points);
+        ensure_ccw(&mut lu.points, &mut lu.elevations);
     }
 
     // Terrain
@@ -228,8 +237,15 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     // Landuse
     for lu in &landuses {
         let color = super::color::landuse_color(&lu.tags);
-        let y = elev(lu.rep_lat, lu.rep_lon);
-        super::landuse::generate_landuse(&lu.points, y, color, &mut verts, &mut idxs);
+        let y_offset = super::landuse::landuse_y_offset(&lu.tags);
+        super::landuse::generate_landuse_with_elevations_and_offset(
+            &lu.points,
+            &lu.elevations,
+            y_offset,
+            color,
+            &mut verts,
+            &mut idxs,
+        );
     }
 
     // Water
@@ -239,11 +255,98 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
     }
 
     // Roads
+    type RoadPointKey = (i32, i32);
+    struct RoadCap {
+        point: (f32, f32),
+        elevation: f32,
+        width: f32,
+        radius_scale: f32,
+        color: [f32; 3],
+    }
+
+    let road_key = |point: (f32, f32)| -> RoadPointKey {
+        (
+            (point.0 * 10.0).round() as i32,
+            (point.1 * 10.0).round() as i32,
+        )
+    };
+    let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
     for r in &roads {
-        let y = elev(r.rep_lat, r.rep_lon);
+        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
+        let count_len = if is_closed {
+            r.points.len() - 1
+        } else {
+            r.points.len()
+        };
+        for &point in &r.points[..count_len] {
+            *road_point_counts.entry(road_key(point)).or_default() += 1;
+        }
+    }
+
+    let road_layer_offset = |width: f32| -> f32 {
+        if width >= 5.0 {
+            0.30
+        } else if width >= 3.5 {
+            0.20
+        } else {
+            0.10
+        }
+    };
+
+    let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
+    for r in &roads {
         let width = super::color::road_width(&r.tags);
         let color = super::color::road_color(&r.tags);
-        super::road::generate_road(&r.points, y, width, color, &mut verts, &mut idxs);
+        let layer_offset = road_layer_offset(width);
+        let road_elevations: Vec<f32> = r.elevations.iter().map(|e| e + layer_offset).collect();
+        super::road::generate_road_with_elevations(
+            &r.points,
+            &road_elevations,
+            width,
+            color,
+            &mut verts,
+            &mut idxs,
+        );
+
+        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
+        for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
+            let key = road_key(point);
+            let count = road_point_counts.get(&key).copied().unwrap_or(0);
+            let is_dead_end = !is_closed && (i == 0 || i + 1 == r.points.len()) && count == 1;
+            if !is_dead_end {
+                continue;
+            }
+
+            let radius_scale = super::road::ROAD_CAP_RADIUS_SCALE;
+
+            road_caps
+                .entry(key)
+                .and_modify(|cap| {
+                    cap.elevation = cap.elevation.max(elevation);
+                    if width < cap.width {
+                        cap.width = width;
+                        cap.color = color;
+                    }
+                })
+                .or_insert(RoadCap {
+                    point,
+                    elevation,
+                    width,
+                    radius_scale,
+                    color,
+                });
+        }
+    }
+    for (_key, cap) in road_caps {
+        super::road::append_road_cap_with_radius_scale(
+            cap.point,
+            cap.elevation,
+            cap.width,
+            cap.radius_scale,
+            cap.color,
+            &mut verts,
+            &mut idxs,
+        );
     }
 
     // Buildings
@@ -280,4 +383,23 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
         indices: idxs,
         center: (cx, cy, cz),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_ccw_keeps_elevations_aligned_when_reversing() {
+        let mut points = vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)];
+        let mut elevations = vec![1.0, 2.0, 3.0, 4.0];
+
+        ensure_ccw(&mut points, &mut elevations);
+
+        assert_eq!(
+            points,
+            vec![(10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
+        );
+        assert_eq!(elevations, vec![4.0, 3.0, 2.0, 1.0]);
+    }
 }

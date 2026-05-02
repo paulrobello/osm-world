@@ -53,6 +53,10 @@ struct Args {
     /// Override initial camera pitch in degrees
     #[arg(long)]
     cam_pitch: Option<f32>,
+
+    /// Start with the in-game settings panel open
+    #[arg(long)]
+    show_settings: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -88,9 +92,20 @@ fn main() -> anyhow::Result<()> {
         input_path: args.input,
         srtm_dir: args.srtm_dir,
         cam_override,
-        show_settings: false,
+        show_settings: args.show_settings,
     });
     event_loop.run_app(&mut app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_show_settings_flag() {
+        let args = Args::try_parse_from(["osm-world", "--show-settings"]).unwrap();
+        assert!(args.show_settings);
+    }
 }

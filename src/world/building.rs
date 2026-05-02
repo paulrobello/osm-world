@@ -27,8 +27,8 @@ pub fn parse_building_height(tags: &HashMap<String, String>) -> f32 {
 
 /// Generate a building mesh from a closed footprint polygon.
 ///
-/// `footprint` is the polygon as (x, z) world-space coordinates (first and last
-/// point should NOT be duplicated).
+/// `footprint` is the polygon as (x, z) world-space coordinates in CCW order
+/// (first and last point should NOT be duplicated).
 /// `base_y` is the terrain height at the building base.
 /// `height` is the building height in metres.
 /// `color` is the RGB colour for all vertices.
@@ -61,9 +61,10 @@ pub fn generate_building(
             continue;
         }
 
-        // Outward normal (perpendicular pointing away from the polygon interior)
-        let nx = -ez / len;
-        let nz = ex / len;
+        // Outward normal for a CCW footprint in X/Z. The polygon interior is
+        // to the left of each edge in X/Z, so outward is the right-hand side.
+        let nx = ez / len;
+        let nz = -ex / len;
         let normal = [nx, 0.0, nz];
 
         let base_idx = verts.len() as u32;
@@ -122,8 +123,69 @@ pub fn generate_building(
         .flat_map(|&(x, z)| [x as f64, z as f64])
         .collect();
     if let Ok(triangles) = earcutr::earcut(&earcut_pts, &[], 2) {
-        for idx in triangles {
-            idxs.push(roof_base + idx as u32);
+        for tri in triangles.chunks_exact(3) {
+            // earcut returns triangles with positive 2D winding for CCW X/Z input.
+            // In the X/Y/Z coordinate system, a positive X/Z winding faces -Y,
+            // so reverse each roof triangle to make flat roofs front-facing upward.
+            idxs.push(roof_base + tri[0] as u32);
+            idxs.push(roof_base + tri[2] as u32);
+            idxs.push(roof_base + tri[1] as u32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn generated_square() -> (Vec<Vertex>, Vec<u32>) {
+        let footprint = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        generate_building(
+            &footprint,
+            10.0,
+            5.0,
+            [1.0, 1.0, 1.0],
+            &mut vertices,
+            &mut indices,
+        );
+        (vertices, indices)
+    }
+
+    fn triangle_normal_y(a: Vertex, b: Vertex, c: Vertex) -> f32 {
+        let ux = b.position[0] - a.position[0];
+        let uz = b.position[2] - a.position[2];
+        let vx = c.position[0] - a.position[0];
+        let vz = c.position[2] - a.position[2];
+        uz * vx - ux * vz
+    }
+
+    #[test]
+    fn roof_triangles_face_up_for_ccw_footprint() {
+        let (vertices, indices) = generated_square();
+        assert!(indices.len() >= 6, "expected at least two roof triangles");
+        let roof_indices = &indices[indices.len() - 6..];
+
+        for tri in roof_indices.chunks_exact(3) {
+            let normal_y = triangle_normal_y(
+                vertices[tri[0] as usize],
+                vertices[tri[1] as usize],
+                vertices[tri[2] as usize],
+            );
+            assert!(normal_y > 0.0, "roof triangle {tri:?} normal_y={normal_y}");
+        }
+    }
+
+    #[test]
+    fn wall_normals_point_outward_for_ccw_footprint() {
+        let (vertices, _) = generated_square();
+
+        // First footprint edge is (0,0) -> (1,0). For a CCW polygon in X/Z,
+        // the interior is +Z, so the outward normal is -Z.
+        assert_eq!(vertices[0].normal, [0.0, 0.0, -1.0]);
+        assert_eq!(vertices[1].normal, [0.0, 0.0, -1.0]);
+        assert_eq!(vertices[2].normal, [0.0, 0.0, -1.0]);
+        assert_eq!(vertices[3].normal, [0.0, 0.0, -1.0]);
     }
 }

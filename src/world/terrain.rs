@@ -34,6 +34,68 @@ pub fn generate_terrain(
     let (min_x, min_z) = conv.to_world_xz(max_lat, min_lon);
     let (_max_x, _max_z) = conv.to_world_xz(min_lat, max_lon);
 
+    append_terrain_grid(
+        min_x,
+        min_z,
+        cols,
+        rows,
+        GRID_SPACING,
+        conv,
+        elevation,
+        verts,
+        idxs,
+    );
+}
+
+/// Generate a terrain heightfield mesh for the given world-space rectangle.
+///
+/// Creates a regular grid whose X/Z bounds come from the supplied rectangle,
+/// samples elevation at each vertex, and computes per-vertex normals via finite
+/// differences.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_terrain_for_world_rect(
+    min_x: f32,
+    min_z: f32,
+    max_x: f32,
+    max_z: f32,
+    grid_spacing: f32,
+    conv: &CoordConverter,
+    elevation: Option<&ElevationData>,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let cols = ((max_x - min_x) / grid_spacing).ceil() as usize + 1;
+    let rows = ((max_z - min_z) / grid_spacing).abs().ceil() as usize + 1;
+
+    if cols < 2 || rows < 2 {
+        return;
+    }
+
+    append_terrain_grid(
+        min_x,
+        min_z,
+        cols,
+        rows,
+        grid_spacing,
+        conv,
+        elevation,
+        verts,
+        idxs,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_terrain_grid(
+    min_x: f32,
+    min_z: f32,
+    cols: usize,
+    rows: usize,
+    grid_spacing: f32,
+    conv: &CoordConverter,
+    elevation: Option<&ElevationData>,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     let color = super::color::terrain_color();
 
     // Sample heights into a 2D array
@@ -41,8 +103,8 @@ pub fn generate_terrain(
 
     for r in 0..rows {
         for c in 0..cols {
-            let x = min_x + (c as f32) * GRID_SPACING;
-            let z = min_z + (r as f32) * GRID_SPACING;
+            let x = min_x + (c as f32) * grid_spacing;
+            let z = min_z + (r as f32) * grid_spacing;
 
             // Reverse world coords to lat/lon for elevation lookup
             let lat = conv.origin_lat - (z as f64) / 111_320.0;
@@ -62,8 +124,8 @@ pub fn generate_terrain(
 
     for r in 0..rows {
         for c in 0..cols {
-            let x = min_x + (c as f32) * GRID_SPACING;
-            let z = min_z + (r as f32) * GRID_SPACING;
+            let x = min_x + (c as f32) * grid_spacing;
+            let z = min_z + (r as f32) * grid_spacing;
             let h = heights[r * cols + c];
 
             // Finite difference normals
@@ -88,11 +150,11 @@ pub fn generate_terrain(
                 h
             };
 
-            // dx = (2 * GRID_SPACING, h_right - h_left, 0)
-            // dz = (0, h_down - h_up, 2 * GRID_SPACING)
+            // dx = (2 * grid_spacing, h_right - h_left, 0)
+            // dz = (0, h_down - h_up, 2 * grid_spacing)
             // normal = cross(dx, dz) but we use cross(dz, dx) for upward facing
-            let dhdx = (h_right - h_left) / (2.0 * GRID_SPACING);
-            let dhdz = (h_down - h_up) / (2.0 * GRID_SPACING);
+            let dhdx = (h_right - h_left) / (2.0 * grid_spacing);
+            let dhdz = (h_down - h_up) / (2.0 * grid_spacing);
             let nx = -dhdx;
             let ny = 1.0;
             let nz = -dhdz;
@@ -128,5 +190,22 @@ pub fn generate_terrain(
             idxs.push(i01);
             idxs.push(i11);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile_terrain_generates_grid_for_bounds() {
+        let conv = CoordConverter::new(38.0, -122.0);
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        generate_terrain_for_world_rect(
+            0.0, -100.0, 100.0, 0.0, 50.0, &conv, None, &mut verts, &mut idxs,
+        );
+        assert_eq!(verts.len(), 9);
+        assert_eq!(idxs.len(), 24);
     }
 }

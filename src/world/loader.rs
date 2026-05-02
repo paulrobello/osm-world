@@ -15,6 +15,19 @@ pub struct WorldMesh {
 }
 
 #[derive(Clone, Debug)]
+pub struct CpuMesh {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TileMeshSet {
+    pub coord: crate::stream::TileCoord,
+    pub aabb: crate::stream::TileAabb,
+    pub lods: [CpuMesh; 3],
+}
+
+#[derive(Clone, Debug)]
 pub struct ResolvedFeature {
     pub tags: HashMap<String, String>,
     pub points: Vec<(f32, f32)>,
@@ -43,6 +56,82 @@ impl WorldSource {
             .and_then(|e| e.elevation_at(lat, lon))
             .unwrap_or(0.0) as f32
     }
+
+    pub fn feature_index_for_tile_size(
+        &self,
+        tile_size: f32,
+    ) -> HashMap<crate::stream::TileCoord, crate::stream::tile::TileFeatureRefs> {
+        let mut index = HashMap::new();
+
+        for (feature_idx, feature) in self.buildings.iter().enumerate() {
+            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
+                for coord in
+                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
+                {
+                    index
+                        .entry(coord)
+                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                        .buildings
+                        .push(feature_idx);
+                }
+            }
+        }
+        for (feature_idx, feature) in self.roads.iter().enumerate() {
+            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
+                for coord in
+                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
+                {
+                    index
+                        .entry(coord)
+                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                        .roads
+                        .push(feature_idx);
+                }
+            }
+        }
+        for (feature_idx, feature) in self.waters.iter().enumerate() {
+            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
+                for coord in
+                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
+                {
+                    index
+                        .entry(coord)
+                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                        .waters
+                        .push(feature_idx);
+                }
+            }
+        }
+        for (feature_idx, feature) in self.landuses.iter().enumerate() {
+            if let Some((min_x, min_z, max_x, max_z)) = feature_bbox(feature) {
+                for coord in
+                    crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
+                {
+                    index
+                        .entry(coord)
+                        .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                        .landuses
+                        .push(feature_idx);
+                }
+            }
+        }
+
+        index
+    }
+}
+
+fn feature_bbox(feature: &ResolvedFeature) -> Option<(f32, f32, f32, f32)> {
+    let mut iter = feature.points.iter();
+    let &(first_x, first_z) = iter.next()?;
+    let (mut min_x, mut max_x) = (first_x, first_x);
+    let (mut min_z, mut max_z) = (first_z, first_z);
+    for &(x, z) in iter {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_z = min_z.min(z);
+        max_z = max_z.max(z);
+    }
+    Some((min_x, min_z, max_x, max_z))
 }
 
 // Ensure CCW winding for polygon features while keeping per-vertex data aligned.
@@ -427,6 +516,231 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
     );
 }
 
+pub fn generate_tile_mesh_set(
+    source: &WorldSource,
+    coord: crate::stream::TileCoord,
+    refs: &crate::stream::tile::TileFeatureRefs,
+    tile_size: f32,
+) -> TileMeshSet {
+    let lods = [
+        generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Near),
+        generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Mid),
+        generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Far),
+    ];
+    let rect = coord.rect(tile_size);
+    let max_y = lods
+        .iter()
+        .flat_map(|m| m.vertices.iter().map(|v| v.position[1]))
+        .fold(0.0_f32, f32::max)
+        .max(100.0);
+    TileMeshSet {
+        coord,
+        aabb: crate::stream::TileAabb {
+            min: glam::Vec3::new(rect.min_x, -100.0, rect.min_z),
+            max: glam::Vec3::new(rect.max_x, max_y + 10.0, rect.max_z),
+        },
+        lods,
+    }
+}
+
+fn generate_tile_lod_mesh(
+    source: &WorldSource,
+    coord: crate::stream::TileCoord,
+    refs: &crate::stream::tile::TileFeatureRefs,
+    tile_size: f32,
+    lod: crate::stream::TileLod,
+) -> CpuMesh {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let rect = coord.rect(tile_size);
+
+    super::terrain::generate_terrain_for_world_rect(
+        rect.min_x,
+        rect.min_z,
+        rect.max_x,
+        rect.max_z,
+        crate::stream::LodConfig::terrain_spacing(lod),
+        &source.conv,
+        source.elevation.as_ref(),
+        &mut vertices,
+        &mut indices,
+    );
+
+    append_tile_features_mesh(source, refs, lod, &mut vertices, &mut indices);
+
+    CpuMesh { vertices, indices }
+}
+
+fn append_tile_features_mesh(
+    source: &WorldSource,
+    refs: &crate::stream::tile::TileFeatureRefs,
+    lod: crate::stream::TileLod,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    for &feature_idx in &refs.landuses {
+        let Some(lu) = source.landuses.get(feature_idx) else {
+            continue;
+        };
+        if lod == crate::stream::TileLod::Far && is_green_landuse_overlay(&lu.tags) {
+            continue;
+        }
+        let color = super::color::landuse_color(&lu.tags);
+        let y_offset = super::landuse::landuse_y_offset(&lu.tags);
+        super::landuse::generate_landuse_with_elevations_and_offset(
+            &lu.points,
+            &lu.elevations,
+            y_offset,
+            color,
+            verts,
+            idxs,
+        );
+    }
+
+    for &feature_idx in &refs.waters {
+        let Some(w) = source.waters.get(feature_idx) else {
+            continue;
+        };
+        super::water::generate_water_with_elevations(&w.points, &w.elevations, verts, idxs);
+    }
+
+    append_tile_roads_mesh(source, &refs.roads, lod, verts, idxs);
+
+    for &feature_idx in &refs.buildings {
+        let Some(b) = source.buildings.get(feature_idx) else {
+            continue;
+        };
+        let color = super::color::building_color(&b.tags);
+        let base_y = source.elevation_at(b.rep_lat, b.rep_lon);
+        let height = super::building::parse_building_height(&b.tags);
+        let mut footprint = b.points.clone();
+        if footprint.len() > 3 && footprint.first() == footprint.last() {
+            footprint.pop();
+        }
+        super::building::generate_building(&footprint, base_y, height, color, verts, idxs);
+    }
+}
+
+fn append_tile_roads_mesh(
+    source: &WorldSource,
+    road_refs: &[usize],
+    lod: crate::stream::TileLod,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    type RoadPointKey = (i32, i32);
+    struct RoadCap {
+        point: (f32, f32),
+        elevation: f32,
+        width: f32,
+        radius_scale: f32,
+        color: [f32; 3],
+    }
+
+    let road_key = |point: (f32, f32)| -> RoadPointKey {
+        (
+            (point.0 * 10.0).round() as i32,
+            (point.1 * 10.0).round() as i32,
+        )
+    };
+
+    let selected_roads: Vec<&ResolvedFeature> = road_refs
+        .iter()
+        .filter_map(|&feature_idx| source.roads.get(feature_idx))
+        .filter(|road| lod != crate::stream::TileLod::Far || !is_minor_highway(&road.tags))
+        .collect();
+
+    let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
+    for r in &selected_roads {
+        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
+        let count_len = if is_closed {
+            r.points.len() - 1
+        } else {
+            r.points.len()
+        };
+        for &point in &r.points[..count_len] {
+            *road_point_counts.entry(road_key(point)).or_default() += 1;
+        }
+    }
+
+    let road_layer_offset = |width: f32| -> f32 {
+        if width >= 5.0 {
+            0.30
+        } else if width >= 3.5 {
+            0.20
+        } else {
+            0.10
+        }
+    };
+
+    let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
+    for r in selected_roads {
+        let width = super::color::road_width(&r.tags);
+        let color = super::color::road_color(&r.tags);
+        let layer_offset = road_layer_offset(width);
+        let road_elevations: Vec<f32> = r.elevations.iter().map(|e| e + layer_offset).collect();
+        super::road::generate_road_with_elevations(
+            &r.points,
+            &road_elevations,
+            width,
+            color,
+            verts,
+            idxs,
+        );
+
+        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
+        for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
+            let key = road_key(point);
+            let count = road_point_counts.get(&key).copied().unwrap_or(0);
+            let is_dead_end = !is_closed && (i == 0 || i + 1 == r.points.len()) && count == 1;
+            if !is_dead_end {
+                continue;
+            }
+
+            let radius_scale = super::road::ROAD_CAP_RADIUS_SCALE;
+
+            road_caps
+                .entry(key)
+                .and_modify(|cap| {
+                    cap.elevation = cap.elevation.max(elevation);
+                    if width < cap.width {
+                        cap.width = width;
+                        cap.color = color;
+                    }
+                })
+                .or_insert(RoadCap {
+                    point,
+                    elevation,
+                    width,
+                    radius_scale,
+                    color,
+                });
+        }
+    }
+    for (_key, cap) in road_caps {
+        super::road::append_road_cap_with_radius_scale(
+            cap.point,
+            cap.elevation,
+            cap.width,
+            cap.radius_scale,
+            cap.color,
+            verts,
+            idxs,
+        );
+    }
+}
+
+fn is_green_landuse_overlay(tags: &HashMap<String, String>) -> bool {
+    super::landuse::landuse_y_offset(tags) > super::landuse::LANDUSE_Y_OFFSET
+}
+
+fn is_minor_highway(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("highway").map(String::as_str),
+        Some("footway" | "path" | "cycleway" | "steps")
+    )
+}
+
 /// Load and process OSM data, generating all meshes.
 pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldMesh> {
     let source = load_world_source(pbf_path, srtm_dir)?;
@@ -474,5 +788,163 @@ mod tests {
             vec![(10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
         );
         assert_eq!(elevations, vec![4.0, 3.0, 2.0, 1.0]);
+    }
+
+    fn feature(tag_key: &str, tag_value: &str, points: Vec<(f32, f32)>) -> ResolvedFeature {
+        let mut tags = HashMap::new();
+        tags.insert(tag_key.to_string(), tag_value.to_string());
+        let elevations = vec![0.0; points.len()];
+        ResolvedFeature {
+            tags,
+            points,
+            elevations,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        }
+    }
+
+    fn empty_source() -> WorldSource {
+        WorldSource {
+            min_lat: 1.0,
+            min_lon: 2.0,
+            max_lat: 1.1,
+            max_lon: 2.2,
+            conv: CoordConverter::new(1.0, 2.0),
+            elevation: None,
+            buildings: Vec::new(),
+            roads: Vec::new(),
+            waters: Vec::new(),
+            landuses: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn feature_index_maps_feature_bboxes_to_tiles() {
+        let mut source = empty_source();
+        source.buildings.push(feature(
+            "building",
+            "yes",
+            vec![(10.0, -10.0), (20.0, -10.0), (20.0, -20.0)],
+        ));
+        source.roads.push(feature(
+            "highway",
+            "residential",
+            vec![(110.0, -10.0), (120.0, -10.0)],
+        ));
+        source.waters.push(feature(
+            "natural",
+            "water",
+            vec![(-10.0, -10.0), (10.0, -10.0), (10.0, -20.0)],
+        ));
+        source.landuses.push(feature(
+            "landuse",
+            "residential",
+            vec![(10.0, -210.0), (20.0, -210.0), (20.0, -220.0)],
+        ));
+
+        let index = source.feature_index_for_tile_size(100.0);
+
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: 0, z: -1 })
+                .unwrap()
+                .buildings,
+            vec![0]
+        );
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: 1, z: -1 })
+                .unwrap()
+                .roads,
+            vec![0]
+        );
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: -1, z: -1 })
+                .unwrap()
+                .waters,
+            vec![0]
+        );
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: 0, z: -3 })
+                .unwrap()
+                .landuses,
+            vec![0]
+        );
+    }
+
+    #[test]
+    fn tile_mesh_lods_filter_far_details_and_keep_water_elevations() {
+        let mut source = empty_source();
+        source.landuses.push(feature(
+            "leisure",
+            "park",
+            vec![(10.0, -10.0), (20.0, -10.0), (20.0, -20.0), (10.0, -20.0)],
+        ));
+        source.waters.push(ResolvedFeature {
+            tags: HashMap::from([("natural".to_string(), "water".to_string())]),
+            points: vec![(30.0, -30.0), (40.0, -30.0), (40.0, -40.0), (30.0, -40.0)],
+            elevations: vec![5.0, 6.0, 7.0, 8.0],
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        source.roads.push(feature(
+            "highway",
+            "footway",
+            vec![(50.0, -50.0), (60.0, -50.0)],
+        ));
+
+        let refs = crate::stream::tile::TileFeatureRefs {
+            landuses: vec![0],
+            waters: vec![0],
+            roads: vec![0],
+            ..Default::default()
+        };
+        let meshes = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+        );
+
+        let near = &meshes.lods[crate::stream::TileLod::Near as usize];
+        let far = &meshes.lods[crate::stream::TileLod::Far as usize];
+        assert!(
+            near.vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::LANDUSE)
+        );
+        assert!(
+            near.vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+        );
+        assert!(
+            !far.vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::LANDUSE)
+        );
+        assert!(
+            !far.vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+        );
+
+        let water_ys: Vec<f32> = near
+            .vertices
+            .iter()
+            .filter(|v| v.feature_type == crate::render::vertex::feature::WATER)
+            .map(|v| v.position[1])
+            .collect();
+        assert_eq!(
+            water_ys,
+            vec![
+                5.0 + super::super::water::WATER_Y_OFFSET,
+                6.0 + super::super::water::WATER_Y_OFFSET,
+                7.0 + super::super::water::WATER_Y_OFFSET,
+                8.0 + super::super::water::WATER_Y_OFFSET,
+            ]
+        );
     }
 }

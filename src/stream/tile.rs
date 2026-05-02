@@ -1,3 +1,11 @@
+#[derive(Clone, Debug, Default)]
+pub struct TileFeatureRefs {
+    pub buildings: Vec<usize>,
+    pub roads: Vec<usize>,
+    pub waters: Vec<usize>,
+    pub landuses: Vec<usize>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TileCoord {
     pub x: i32,
@@ -102,5 +110,14 @@ mod tests {
         assert!(tiles.contains(&TileCoord { x: 0, z: -2 }));
         assert!(tiles.contains(&TileCoord { x: 2, z: 0 }));
         assert_eq!(tiles.len(), 9);
+    }
+
+    #[test]
+    fn feature_refs_default_to_empty_vectors() {
+        let refs = TileFeatureRefs::default();
+        assert!(refs.buildings.is_empty());
+        assert!(refs.roads.is_empty());
+        assert!(refs.waters.is_empty());
+        assert!(refs.landuses.is_empty());
     }
 }

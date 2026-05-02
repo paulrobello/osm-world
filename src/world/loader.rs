@@ -64,8 +64,7 @@ impl WorldSource {
         let mut index = HashMap::new();
 
         if let Some((min_x, min_z, max_x, max_z)) = self.world_bbox() {
-            for coord in crate::stream::tile::tiles_for_bbox(min_x, min_z, max_x, max_z, tile_size)
-            {
+            for coord in tiles_for_half_open_bbox(min_x, min_z, max_x, max_z, tile_size) {
                 index
                     .entry(coord)
                     .or_insert_with(crate::stream::tile::TileFeatureRefs::default);
@@ -122,6 +121,50 @@ impl WorldSource {
         (min_x.is_finite() && min_z.is_finite() && max_x.is_finite() && max_z.is_finite())
             .then_some((min_x, min_z, max_x, max_z))
     }
+}
+
+fn next_down_f32(value: f32) -> f32 {
+    if value.is_nan() || value == f32::NEG_INFINITY {
+        value
+    } else if value == f32::INFINITY {
+        f32::MAX
+    } else if value == 0.0 {
+        -f32::MIN_POSITIVE
+    } else if value > 0.0 {
+        f32::from_bits(value.to_bits() - 1)
+    } else {
+        f32::from_bits(value.to_bits() + 1)
+    }
+}
+
+fn tiles_for_half_open_bbox(
+    min_x: f32,
+    min_z: f32,
+    max_x: f32,
+    max_z: f32,
+    tile_size: f32,
+) -> Vec<crate::stream::TileCoord> {
+    if tile_size <= 0.0
+        || !min_x.is_finite()
+        || !min_z.is_finite()
+        || !max_x.is_finite()
+        || !max_z.is_finite()
+        || min_x >= max_x
+        || min_z >= max_z
+    {
+        return Vec::new();
+    }
+
+    let start = crate::stream::TileCoord::from_world(min_x, min_z, tile_size);
+    let end =
+        crate::stream::TileCoord::from_world(next_down_f32(max_x), next_down_f32(max_z), tile_size);
+    let mut out = Vec::new();
+    for z in start.z..=end.z {
+        for x in start.x..=end.x {
+            out.push(crate::stream::TileCoord { x, z });
+        }
+    }
+    out
 }
 
 fn feature_bbox(feature: &ResolvedFeature) -> Option<(f32, f32, f32, f32)> {
@@ -682,7 +725,7 @@ fn append_tile_roads_mesh(
         .collect();
 
     let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
-    for r in &selected_roads {
+    for r in &source.roads {
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
         let count_len = if is_closed {
             r.points.len() - 1
@@ -946,11 +989,60 @@ mod tests {
 
         assert!(!index.is_empty());
         assert!(index.contains_key(&crate::stream::TileCoord { x: 0, z: -3 }));
-        assert!(index.contains_key(&crate::stream::TileCoord { x: 2, z: 0 }));
+        assert!(index.contains_key(&crate::stream::TileCoord { x: 2, z: -1 }));
+        assert!(!index.contains_key(&crate::stream::TileCoord { x: 2, z: 0 }));
         assert!(index.values().all(|refs| refs.buildings.is_empty()
             && refs.roads.is_empty()
             && refs.waters.is_empty()
             && refs.landuses.is_empty()));
+    }
+
+    #[test]
+    fn terrain_seeding_treats_world_bbox_max_as_half_open_on_tile_boundary() {
+        let mut source = empty_source();
+        let metres_per_deg_lon = 111_320.0 * source.min_lat.to_radians().cos();
+        source.max_lat = source.min_lat + 200.0 / 111_320.0;
+        source.max_lon = source.min_lon + 50.0 / metres_per_deg_lon;
+
+        let index = source.feature_index_for_tile_size(100.0);
+        let mut z_tiles: Vec<_> = index.keys().map(|coord| coord.z).collect();
+        z_tiles.sort_unstable();
+        z_tiles.dedup();
+
+        assert_eq!(z_tiles, vec![-2, -1]);
+        assert!(!index.contains_key(&crate::stream::TileCoord { x: 0, z: 0 }));
+    }
+
+    #[test]
+    fn tile_roads_do_not_cap_endpoint_connected_to_neighbor_owned_road() {
+        let mut source = empty_source();
+        source.roads.push(feature(
+            "highway",
+            "residential",
+            vec![(0.0, -50.0), (100.0, -50.0)],
+        ));
+        source.roads.push(feature(
+            "highway",
+            "residential",
+            vec![(100.0, -50.0), (200.0, -50.0)],
+        ));
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_tile_roads_mesh(
+            &source,
+            &[0],
+            crate::stream::TileLod::Near,
+            &mut vertices,
+            &mut indices,
+        );
+
+        let has_shared_endpoint_cap_center = vertices.iter().any(|v| {
+            v.feature_type == crate::render::vertex::feature::ROAD
+                && (v.position[0] - 100.0).abs() < 1e-4
+                && (v.position[2] + 50.0).abs() < 1e-4
+                && v.position[1] > super::super::road::ROAD_Y_OFFSET
+        });
+        assert!(!has_shared_endpoint_cap_center);
     }
 
     #[test]

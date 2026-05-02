@@ -1,5 +1,29 @@
 use clap::Parser;
 
+fn positive_f32(s: &str) -> Result<f32, String> {
+    let value = s
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err("must be a finite positive number".to_string())
+    }
+}
+
+fn positive_usize(s: &str) -> Result<usize, String> {
+    let value = s
+        .parse::<usize>()
+        .map_err(|err| format!("invalid integer: {err}"))?;
+
+    if value >= 1 {
+        Ok(value)
+    } else {
+        Err("must be at least 1".to_string())
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "osm-world",
@@ -63,23 +87,23 @@ struct Args {
     no_streaming: bool,
 
     /// Streaming tile size in metres
-    #[arg(long, default_value = "1000.0")]
+    #[arg(long, default_value = "1000.0", value_parser = positive_f32)]
     tile_size: f32,
 
     /// Streaming radius in metres
-    #[arg(long, default_value = "15000.0")]
+    #[arg(long, default_value = "15000.0", value_parser = positive_f32)]
     stream_radius: f32,
 
     /// Per-frame GPU upload budget in MiB
-    #[arg(long, default_value = "4.0")]
+    #[arg(long, default_value = "4.0", value_parser = positive_f32)]
     upload_budget_mb: f32,
 
     /// Maximum number of uploaded streaming tiles
-    #[arg(long, default_value = "256")]
+    #[arg(long, default_value = "256", value_parser = positive_usize)]
     max_uploaded_tiles: usize,
 
     /// Maximum estimated uploaded tile memory in MiB
-    #[arg(long, default_value = "512.0")]
+    #[arg(long, default_value = "512.0", value_parser = positive_f32)]
     max_uploaded_mb: f32,
 }
 
@@ -165,5 +189,19 @@ mod tests {
         assert_eq!(args.upload_budget_mb, 2.5);
         assert_eq!(args.max_uploaded_tiles, 64);
         assert_eq!(args.max_uploaded_mb, 128.0);
+    }
+
+    #[test]
+    fn rejects_invalid_streaming_numeric_flags() {
+        for (flag, value) in [
+            ("--tile-size", "0"),
+            ("--stream-radius", "-1"),
+            ("--upload-budget-mb", "NaN"),
+            ("--max-uploaded-tiles", "0"),
+            ("--max-uploaded-mb", "inf"),
+        ] {
+            let result = Args::try_parse_from(["osm-world", flag, value]);
+            assert!(result.is_err(), "expected {flag} {value} to be rejected");
+        }
     }
 }

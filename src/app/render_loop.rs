@@ -36,9 +36,9 @@ pub fn render(state: &AppState, screenshot_path: Option<&str>) {
                 depth_slice: None,
                 ops: Operations {
                     load: LoadOp::Clear(Color {
-                        r: 0.53,
-                        g: 0.81,
-                        b: 0.92,
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
                         a: 1.0,
                     }),
                     store: StoreOp::Store,
@@ -57,6 +57,12 @@ pub fn render(state: &AppState, screenshot_path: Option<&str>) {
             occlusion_query_set: None,
         });
 
+        // Sky pass (full-screen triangle, depth LessEqual, no depth write)
+        pass.set_pipeline(&state.sky_pipeline.pipeline);
+        pass.set_bind_group(0, &state.camera_bg.group, &[]);
+        pass.draw(0..3, 0..1);
+
+        // City pass
         pass.set_pipeline(&state.pipeline.pipeline);
         pass.set_bind_group(0, &state.camera_bg.group, &[]);
         pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));

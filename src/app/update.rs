@@ -6,6 +6,7 @@ pub fn update(app: &mut App) {
     app.last_frame_time = now;
 
     if let Some(state) = &mut app.state {
+        app.day_cycle.update(dt);
         app.controller.update_camera(&mut state.camera, dt);
         let uniforms = state.camera.uniforms(&app.day_cycle, &app.atmosphere);
         state.camera_bg.update(&state.queue, &uniforms);

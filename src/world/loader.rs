@@ -305,8 +305,7 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
 
     // Water
     for w in &source.waters {
-        let y = source.elevation_at(w.rep_lat, w.rep_lon) + 0.3;
-        super::water::generate_water(&w.points, y, verts, idxs);
+        super::water::generate_water_with_elevations(&w.points, &w.elevations, verts, idxs);
     }
 
     // Roads

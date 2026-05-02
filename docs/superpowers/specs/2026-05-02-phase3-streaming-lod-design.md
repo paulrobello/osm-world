@@ -65,8 +65,9 @@ The parser/classifier remains deterministic and CPU-only. GPU resources stay on 
   - `tile_x = floor(world_x / 1000.0)`
   - `tile_z = floor(world_z / 1000.0)`
 - Tile bounds are half-open in X/Z: `[min_x, max_x) × [min_z, max_z)`.
-- A feature is assigned to every tile touched by its X/Z bounding box.
-- For polygons and long roads, each assigned tile initially receives the full feature geometry. This avoids clipping artifacts in Phase 3 and keeps correctness ahead of optimization. Later phases can add geometric clipping.
+- Terrain tiles are seeded for the full world bounding box using half-open tile bounds.
+- Each non-terrain feature is assigned to one deterministic owner tile, currently the tile containing the feature bounding-box center. This prevents duplicate full-feature meshes from z-fighting when neighboring tiles render together.
+- Long features may extend outside their owner tile; each tile AABB is computed from actual generated vertices across all LODs so frustum culling still bounds owner-tile geometry correctly. Later phases can add geometric clipping or dependency loading for very long features.
 - Terrain is generated per tile from tile bounds plus the shared coordinate converter and SRTM elevation source.
 
 ## LOD Levels
@@ -318,7 +319,7 @@ Phase 3 is complete when:
 
 ## Risks and Mitigations
 
-- **Large feature duplication across tiles:** assigning full features to each touched tile may duplicate geometry. Mitigation: bounded cache and upload budget keep this acceptable for Phase 3; clipping can be a later optimization.
+- **Long feature ownership:** owner-tile assignment prevents duplicate z-fighting, but a very long feature depends on its owner tile being requested before it appears far from that owner. Mitigation: actual-vertex AABBs preserve culling correctness for uploaded owner tiles; later phases can add clipping or owner dependency requests.
 - **Visual seams between terrain tiles:** generate terrain on shared tile boundaries using the same world coordinates and SRTM sampler. Shared boundaries should sample identical heights.
 - **Worker staleness during fast camera movement:** epoch cancellation discards stale results.
 - **GPU memory growth:** uploaded byte limit and LRU eviction are mandatory in the first streaming implementation, not optional polish.

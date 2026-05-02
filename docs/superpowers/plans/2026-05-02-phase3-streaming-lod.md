@@ -826,12 +826,21 @@ impl WorldSource {
         tile_size: f32,
     ) -> HashMap<crate::stream::TileCoord, crate::stream::tile::TileFeatureRefs> {
         let mut index = HashMap::new();
-        // For each feature vector, compute feature_bbox(), convert bbox to tiles_for_bbox(),
-        // and push the feature index into the matching TileFeatureRefs vector.
+        // Seed terrain-only tiles for the whole world bbox using half-open max bounds.
+        // For each non-terrain feature, compute feature_bbox(), choose one deterministic
+        // owner tile from the bbox center, and push the feature index into only that
+        // owner's TileFeatureRefs. Do not duplicate full feature geometry into every
+        // touched tile because adjacent rendered tiles would z-fight.
         index
     }
 }
 ```
+
+Required regression coverage for this step:
+
+- a source with no features still seeds terrain tile entries for the world bbox,
+- a bbox ending exactly on a tile boundary uses half-open max semantics and does not seed the outside max tile,
+- a feature spanning two tiles is owned/emitted by one tile only.
 
 - [ ] **Step 6: Add tile mesh generation**
 
@@ -849,31 +858,28 @@ pub fn generate_tile_mesh_set(
         generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Mid),
         generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Far),
     ];
-    let rect = coord.rect(tile_size);
-    let max_y = lods.iter()
-        .flat_map(|m| m.vertices.iter().map(|v| v.position[1]))
-        .fold(0.0_f32, f32::max)
-        .max(100.0);
-    TileMeshSet {
-        coord,
-        aabb: crate::stream::TileAabb {
-            min: glam::Vec3::new(rect.min_x, -100.0, rect.min_z),
-            max: glam::Vec3::new(rect.max_x, max_y + 10.0, rect.max_z),
-        },
-        lods,
-    }
+    let aabb = aabb_from_lod_vertices(&lods).unwrap_or_else(|| {
+        let rect = coord.rect(tile_size);
+        crate::stream::TileAabb {
+            min: glam::Vec3::new(rect.min_x, 0.0, rect.min_z),
+            max: glam::Vec3::new(rect.max_x, 1.0, rect.max_z),
+        }
+    });
+    TileMeshSet { coord, aabb, lods }
 }
 ```
+
+Compute the tile AABB from actual generated vertices across all LODs, including negative Y and any owner-tile geometry that extends outside the nominal tile rect.
 
 Implement `generate_tile_lod_mesh()` by reusing the same emission order as `append_world_mesh()`:
 
 1. terrain using `generate_terrain_for_world_rect()` and `LodConfig::terrain_spacing(lod)`,
 2. landuse from `refs.landuses`, skipping green overlays only for Far LOD,
-3. water from `refs.waters`,
+3. water from `refs.waters` using `generate_water_with_elevations`,
 4. roads from `refs.roads`, skipping footway/path/cycleway/steps only for Far LOD,
 5. buildings from `refs.buildings`.
 
-Keep the current dead-end road cap logic scoped to the roads included in the tile.
+Road geometry is emitted only for owner-tile roads, but dead-end cap endpoint counts must be computed from the global `source.roads` set so cross-tile connected roads are not misclassified as dead ends. Add a regression test for connected cross-tile roads not producing a false dead-end cap at their shared endpoint.
 
 - [ ] **Step 7: Verify tile mesh generation**
 

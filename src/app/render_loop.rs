@@ -70,6 +70,14 @@ pub fn render(
         shadow_pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
     }
 
+    // Resolve previous frame's occlusion queries
+    encoder.resolve_query_set(
+        &state.occlusion.query_set,
+        0..state.occlusion.query_count,
+        &state.occlusion.result_buffer,
+        0,
+    );
+
     {
         let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
             label: Some("main render pass"),

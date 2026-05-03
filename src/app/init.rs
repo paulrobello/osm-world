@@ -6,6 +6,7 @@ use crate::render::bind_groups::SceneBindGroup;
 use crate::render::buffers::SceneBuffers;
 use crate::render::pipelines::CityPipeline;
 use crate::render::shadow_bind_group::ShadowBindGroup;
+use crate::render::occlusion::OcclusionQueries;
 use crate::render::shadow_pipeline::ShadowPipeline;
 use crate::render::sky_pipeline::SkyPipeline;
 
@@ -24,6 +25,7 @@ pub struct AppState {
     pub shadow_bg: ShadowBindGroup,
     pub shadow_pipeline: ShadowPipeline,
     pub scene: SceneBuffers,
+    pub occlusion: OcclusionQueries,
 }
 
 pub fn init_wgpu(
@@ -95,6 +97,7 @@ pub fn init_wgpu(
     let pipeline = CityPipeline::new(&device, &camera_bg.layout, &shadow_bg.layout, surface_format);
     let sky_pipeline = SkyPipeline::new(&device, &camera_bg.layout, surface_format);
     let shadow_pipeline = ShadowPipeline::new(&device, &shadow_bg.layout);
+    let occlusion = OcclusionQueries::new(&device, 256);
 
     let scene = match input_path {
         Some(path) => {
@@ -142,6 +145,7 @@ pub fn init_wgpu(
             shadow_bg,
             shadow_pipeline,
             scene,
+            occlusion,
         },
         egui,
     ))

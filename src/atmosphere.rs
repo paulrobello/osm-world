@@ -12,6 +12,7 @@ pub struct AtmosphereSettings {
     pub clouds_enabled: bool,
     pub sky_color_zenith: [f32; 3],
     pub sky_color_horizon: [f32; 3],
+    pub ground_color: [f32; 3],
 }
 
 impl Default for AtmosphereSettings {
@@ -26,6 +27,7 @@ impl Default for AtmosphereSettings {
             clouds_enabled: true,
             sky_color_zenith: [0.25, 0.45, 0.85],
             sky_color_horizon: [0.6, 0.75, 0.95],
+            ground_color: [0.15, 0.12, 0.08],
         }
     }
 }

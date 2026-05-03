@@ -13,7 +13,7 @@ pub struct CameraOverride {
     pub pitch: Option<f32>,
 }
 
-/// Scene uniform buffer layout (GPU). 256 bytes: camera + atmosphere.
+/// Scene uniform buffer layout (GPU). 272 bytes: camera + atmosphere.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct SceneUniforms {
@@ -39,6 +39,8 @@ pub struct SceneUniforms {
     pub _pad6: [f32; 2],
     pub cloud_color: [f32; 3],
     pub clouds_enabled: u32,
+    pub ground_color: [f32; 3],
+    pub _pad7: f32,
 }
 
 /// Flycam: free-flight camera controlled by WASD + mouse.
@@ -120,6 +122,8 @@ impl Flycam {
             _pad6: [0.0; 2],
             cloud_color: atm.cloud_color,
             clouds_enabled: atm.clouds_enabled as u32,
+            ground_color: atm.ground_color,
+            _pad7: 0.0,
         }
     }
 }

@@ -24,6 +24,8 @@ struct SceneUniforms {
     _pad6: vec2<f32>,
     cloud_color: vec3<f32>,
     clouds_enabled: u32,
+    ground_color: vec3<f32>,
+    _pad7: f32,
 };
 
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;

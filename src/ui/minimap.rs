@@ -1,12 +1,29 @@
 use crate::camera::Flycam;
 
 fn player_arrow_direction(camera: &Flycam, rotate_with_camera: bool) -> egui::Vec2 {
-    if rotate_with_camera {
-        return egui::vec2(0.0, -1.0);
-    }
+    let forward = horizontal_forward(camera);
+    let map_up = minimap_up(camera, rotate_with_camera);
+    let view = glam::Mat4::look_to_rh(glam::Vec3::ZERO, glam::Vec3::NEG_Y, map_up);
+    let screen_direction = view.transform_vector3(forward);
+    egui::vec2(screen_direction.x, screen_direction.y).normalized()
+}
 
+fn horizontal_forward(camera: &Flycam) -> glam::Vec3 {
     let forward = camera.forward();
-    egui::Vec2::new(forward.x, forward.z).normalized()
+    let horizontal = glam::vec3(forward.x, 0.0, forward.z).normalize_or_zero();
+    if horizontal.length_squared() > 0.0 {
+        horizontal
+    } else {
+        glam::Vec3::NEG_Z
+    }
+}
+
+fn minimap_up(camera: &Flycam, rotate_with_camera: bool) -> glam::Vec3 {
+    if rotate_with_camera {
+        -horizontal_forward(camera)
+    } else {
+        glam::Vec3::Z
+    }
 }
 
 pub struct MinimapState {
@@ -94,15 +111,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn arrow_points_in_camera_direction_on_north_up_map() {
+    fn arrow_points_north_when_camera_faces_north_on_fixed_map() {
         let mut camera = Flycam::new(1.0);
-        camera.yaw = 0.0;
+        camera.yaw = -std::f32::consts::FRAC_PI_2;
         camera.pitch = 0.0;
 
         let direction = player_arrow_direction(&camera, false);
 
-        assert!(direction.x > 0.99);
-        assert!(direction.y.abs() < 0.001);
+        assert!(direction.x.abs() < 0.001);
+        assert!(direction.y < -0.99);
     }
 
     #[test]

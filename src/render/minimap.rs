@@ -69,16 +69,19 @@ impl MinimapTarget {
         zoom_radius: f32,
         rotate_with_camera: bool,
     ) -> SceneUniforms {
-        let map_up = if rotate_with_camera {
+        let horizontal_forward = {
             let forward = main_camera.forward();
-            glam::Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero()
-        } else {
-            glam::Vec3::NEG_Z
+            let horizontal = glam::Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+            if horizontal.length_squared() > 0.0 {
+                horizontal
+            } else {
+                glam::Vec3::NEG_Z
+            }
         };
-        let map_up = if map_up.length_squared() > 0.0 {
-            map_up
+        let map_up = if rotate_with_camera {
+            -horizontal_forward
         } else {
-            glam::Vec3::NEG_Z
+            glam::Vec3::Z
         };
         let view = glam::Mat4::look_to_rh(main_camera.position, glam::Vec3::NEG_Y, map_up);
         let proj = glam::Mat4::orthographic_rh(

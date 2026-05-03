@@ -248,7 +248,16 @@ pub fn render(
     let raw_input = egui_state.winit_state.take_egui_input(&state.window);
     #[allow(deprecated)]
     let egui_output = egui_state.context.run(raw_input, |ctx| {
-        crate::ui::hud::draw(ctx, &state.camera, ui_state.day_cycle, ui_state.performance);
+        let camera_lat_lon = state
+            .coord_converter
+            .map(|conv| conv.world_xz_to_lat_lon(state.camera.position.x, state.camera.position.z));
+        crate::ui::hud::draw(
+            ctx,
+            &state.camera,
+            camera_lat_lon,
+            ui_state.day_cycle,
+            ui_state.performance,
+        );
         if *ui_state.show_settings {
             crate::ui::settings::draw(
                 ctx,

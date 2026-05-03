@@ -1,6 +1,7 @@
 pub fn draw(
     ctx: &egui::Context,
     camera: &crate::camera::Flycam,
+    camera_lat_lon: Option<(f64, f64)>,
     day_cycle: &crate::atmosphere::DayCycleState,
     performance: &crate::app::PerformanceState,
 ) {
@@ -21,6 +22,9 @@ pub fn draw(
 
                     let p = camera.position;
                     ui.label(format!("Pos:  ({:.1}, {:.1}, {:.1})", p.x, p.y, p.z));
+                    if let Some((lat, lon)) = camera_lat_lon {
+                        ui.label(format!("Lat/Lon: {:.6}, {:.6}", lat, lon));
+                    }
                     ui.label(format!(
                         "Yaw:  {:.1}°  Pitch: {:.1}°",
                         camera.yaw.to_degrees(),

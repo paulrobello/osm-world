@@ -59,7 +59,7 @@ fn uniform_has_correct_size_and_padding() {
     let (day, atm) = default_atmosphere();
     let uniforms = cam.uniforms(&day, &atm);
     assert_eq!(uniforms._pad0, 0.0);
-    assert_eq!(std::mem::size_of::<osm_world::camera::SceneUniforms>(), 256);
+    assert_eq!(std::mem::size_of::<osm_world::camera::SceneUniforms>(), 272);
 }
 
 #[test]

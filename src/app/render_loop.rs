@@ -125,13 +125,14 @@ pub fn render(
 
     // Minimap pass
     if minimap.visible {
-        let minimap_uniforms = state.minimap_target.uniforms(
-            &state.camera,
-            day_cycle,
-            atmosphere,
-            minimap.zoom,
-        );
-        state.minimap_target.bind_group.update(&state.queue, &minimap_uniforms);
+        let minimap_uniforms =
+            state
+                .minimap_target
+                .uniforms(&state.camera, day_cycle, atmosphere, minimap.zoom);
+        state
+            .minimap_target
+            .bind_group
+            .update(&state.queue, &minimap_uniforms);
 
         {
             let mut minimap_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -141,7 +142,12 @@ pub fn render(
                     resolve_target: None,
                     depth_slice: None,
                     ops: Operations {
-                        load: LoadOp::Clear(Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                        load: LoadOp::Clear(Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
                         store: StoreOp::Store,
                     },
                 })],
@@ -178,13 +184,11 @@ pub fn render(
     };
 
     if minimap.texture_id.is_none() {
-        minimap.texture_id = Some(
-            egui_state.renderer.register_native_texture(
-                &state.device,
-                &state.minimap_target.color_view,
-                wgpu::FilterMode::Linear,
-            ),
-        );
+        minimap.texture_id = Some(egui_state.renderer.register_native_texture(
+            &state.device,
+            &state.minimap_target.color_view,
+            wgpu::FilterMode::Linear,
+        ));
     }
 
     let raw_input = egui_state.winit_state.take_egui_input(&state.window);

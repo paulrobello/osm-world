@@ -70,7 +70,7 @@ impl App {
             screenshot_taken: false,
             atmosphere: crate::atmosphere::AtmosphereSettings::default(),
             day_cycle: crate::atmosphere::DayCycleState::default(),
-            minimap: crate::ui::minimap::MinimapState::new(),
+            minimap: crate::ui::minimap::MinimapState::default(),
         }
     }
 }

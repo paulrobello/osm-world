@@ -138,9 +138,12 @@ impl Flycam {
         let light_view = glam::Mat4::look_to_rh(light_pos, -sun_dir, glam::Vec3::Y);
 
         let light_proj = glam::Mat4::orthographic_rh(
-            -half_extent, half_extent,
-            -half_extent, half_extent,
-            0.0, half_extent * 3.0,
+            -half_extent,
+            half_extent,
+            -half_extent,
+            half_extent,
+            0.0,
+            half_extent * 3.0,
         );
 
         light_proj * light_view

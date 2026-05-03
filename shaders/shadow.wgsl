@@ -1,8 +1,11 @@
 // Shadow pass vertex shader — transforms world positions to light clip space.
 
+const SHADOW_CASCADE_COUNT: u32 = 4u;
+
 struct LightUniforms {
-    light_view_proj: array<mat4x4<f32>, 2>,
+    light_view_proj: array<mat4x4<f32>, 4>,
     cascade_radii: vec4<f32>,
+    shadow_params: vec4<f32>,
     shadow_pass_params: vec4<u32>,
 };
 
@@ -17,5 +20,6 @@ struct VertexInput {
 
 @vertex
 fn vs_main(in: VertexInput) -> @builtin(position) vec4<f32> {
-    return light.light_view_proj[light.shadow_pass_params.x] * vec4<f32>(in.position, 1.0);
+    let cascade_index = min(light.shadow_pass_params.x, SHADOW_CASCADE_COUNT - 1u);
+    return light.light_view_proj[cascade_index] * vec4<f32>(in.position, 1.0);
 }

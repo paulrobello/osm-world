@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the single city-scale shadow map with a two-cascade dynamic shadow LOD system.
+**Goal:** Replace the single city-scale shadow map with a four-cascade dynamic shadow LOD system plus a lightweight screen-space contact-shadow pass.
 
-**Architecture:** Use two shadow-map array layers, one near cascade and one mid cascade. Compute both light view-projection matrices each frame from the dominant celestial light direction (sun by day, moon by night) and texel-snap each cascade independently. Render the caster-only index buffer once per cascade and choose/fade cascades in the city shader by camera distance.
+**Architecture:** Use four shadow-map array layers. Compute all light view-projection matrices each frame from the dominant celestial light direction (sun by day, moon by night) and texel-snap each cascade independently. Render the caster-only index buffer once per cascade, batch those cascade passes into one shadow submit, and choose/fade cascades in the city shader by camera distance.
 
 **Tech Stack:** Rust 2024, wgpu 29, glam, WGSL, cargo tests.
 
@@ -13,8 +13,9 @@
 ## File Responsibilities
 
 - `src/camera/mod.rs`: cascade constants, cascade light matrix generation, testable cascade selection/fade helpers.
-- `src/render/shadow_bind_group.rs`: shadow uniform layout and 2-layer depth texture/bind group resources.
-- `src/app/render_loop.rs`: per-frame cascade uniform upload and two shadow render passes, one per array layer.
+- `src/render/shadow_bind_group.rs`: shadow uniform layout, 4-layer depth texture/bind group resources, and per-cascade pass uniform buffers.
+- `src/render/contact_shadow.rs`: fullscreen contact-shadow composite resources and pipeline.
+- `src/app/render_loop.rs`: per-frame cascade uniform upload, four batched shadow render passes, offscreen scene render, and contact-shadow composite pass.
 - `src/atmosphere.rs`: sun/moon dominant light helpers for day/night shadows.
 - `shaders/shadow.wgsl`: use cascade index to render the correct light matrix.
 - `shaders/city.wgsl`: sample a depth texture array, blend/fade cascade shadow factors, and optionally tint cascade bands for debugging.
@@ -37,6 +38,8 @@
 
 ## Task 2: Shadow uniform/resources
 
+Status: implemented. The shadow uniform now carries four matrices, four radii, shader parameters including shadow-map size, and pass/debug parameters. The shadow map uses four array layers.
+
 **Files:**
 - Modify: `src/render/shadow_bind_group.rs`
 
@@ -48,6 +51,8 @@
 
 ## Task 3: Render loop cascade passes
 
+Status: implemented. All four cascade passes are encoded into one shadow command encoder and submitted once before the main scene render.
+
 **Files:**
 - Modify: `src/app/render_loop.rs`
 
@@ -58,6 +63,8 @@
 - [ ] Upload the final cascade uniform before city/minimap rendering.
 
 ## Task 4: WGSL shader updates
+
+Status: implemented. WGSL now samples four cascades, reads shadow-map size from the uniform instead of hardcoding `2048`, and supports cascade debug tinting.
 
 **Files:**
 - Modify: `shaders/shadow.wgsl`
@@ -72,7 +79,9 @@
 - [ ] Add settings/CLI cascade debug tint to make the smooth LOD bands visible.
 - [ ] Use `scene.light_direction` for direct city lighting and shadow bias while preserving `scene.sun_direction` for sky/fog.
 
-## Task 5: Verification and screenshots
+## Task 5: Contact shadows and verification
+
+Status: implemented. The scene renders to an offscreen color target, then a fullscreen post pass samples scene depth to add short-range screen-space contact shadows before compositing to the surface.
 
 **Files:**
 - No source file changes expected.

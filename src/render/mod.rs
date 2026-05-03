@@ -1,5 +1,6 @@
 pub mod bind_groups;
 pub mod buffers;
+pub mod contact_shadow;
 pub mod frustum;
 pub mod minimap;
 pub mod occlusion;

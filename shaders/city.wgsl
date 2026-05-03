@@ -31,9 +31,12 @@ struct SceneUniforms {
 
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 
+const SHADOW_CASCADE_COUNT: u32 = 4u;
+
 struct ShadowUniforms {
-    light_view_proj: array<mat4x4<f32>, 2>,
+    light_view_proj: array<mat4x4<f32>, 4>,
     cascade_radii: vec4<f32>,
+    shadow_params: vec4<f32>,
     shadow_pass_params: vec4<u32>,
 };
 
@@ -116,32 +119,39 @@ fn get_material(feature: f32) -> Material {
     }
 }
 
-fn shadow_cascade_blend(distance_to_camera: f32) -> vec3<f32> {
-    let near_radius = shadow.cascade_radii.x;
-    let mid_radius = shadow.cascade_radii.y;
-    let near_blend_distance = shadow.cascade_radii.z;
-    let mid_fade_distance = shadow.cascade_radii.w;
+fn cascade_blend_distance(cascade_index: u32) -> f32 {
+    return shadow.shadow_params.y + f32(cascade_index) * 0.0;
+}
 
-    let near_blend_start = max(near_radius - near_blend_distance, 0.0);
-    if (distance_to_camera <= near_blend_start) {
-        return vec3<f32>(1.0, 0.0, 1.0);
+fn shadow_cascade_blend(distance_to_camera: f32) -> vec4<f32> {
+    var weights = vec4<f32>(0.0);
+
+    for (var cascade_index = 0u; cascade_index < SHADOW_CASCADE_COUNT - 1u; cascade_index += 1u) {
+        let radius = shadow.cascade_radii[cascade_index];
+        let blend_distance = cascade_blend_distance(cascade_index);
+        let blend_start = max(radius - blend_distance, 0.0);
+
+        if (distance_to_camera <= blend_start) {
+            weights[cascade_index] = 1.0;
+            return weights;
+        }
+
+        if (distance_to_camera < radius) {
+            let next_weight = smoothstep(blend_start, radius, distance_to_camera);
+            weights[cascade_index] = 1.0 - next_weight;
+            weights[cascade_index + 1u] = next_weight;
+            return weights;
+        }
     }
 
-    if (distance_to_camera < near_radius) {
-        let mid_weight = smoothstep(near_blend_start, near_radius, distance_to_camera);
-        return vec3<f32>(1.0 - mid_weight, mid_weight, 1.0);
+    let last_index = SHADOW_CASCADE_COUNT - 1u;
+    let last_radius = shadow.cascade_radii[last_index];
+    let fade_start = max(last_radius - shadow.shadow_params.z, 0.0);
+    if (distance_to_camera < last_radius) {
+        weights[last_index] = 1.0 - smoothstep(fade_start, last_radius, distance_to_camera);
     }
 
-    let mid_fade_start = max(near_radius, mid_radius - mid_fade_distance);
-    if (distance_to_camera <= mid_fade_start) {
-        return vec3<f32>(0.0, 1.0, 1.0);
-    }
-
-    if (distance_to_camera < mid_radius) {
-        return vec3<f32>(0.0, 1.0, 1.0 - smoothstep(mid_fade_start, mid_radius, distance_to_camera));
-    }
-
-    return vec3<f32>(0.0, 0.0, 0.0);
+    return weights;
 }
 
 fn sample_shadow_cascade(world_pos: vec3<f32>, normal: vec3<f32>, cascade_index: u32) -> f32 {
@@ -155,7 +165,7 @@ fn sample_shadow_cascade(world_pos: vec3<f32>, normal: vec3<f32>, cascade_index:
     let uv = vec2f(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     let bias = max(0.002 * (1.0 - dot(normal, scene.light_direction)), 0.001);
 
-    let texel_size = 1.0 / 2048.0;
+    let texel_size = 1.0 / shadow.shadow_params.x;
     var shadow_factor = 0.0;
     for (var x = -1; x <= 1; x += 2) {
         for (var y = -1; y <= 1; y += 2) {
@@ -174,23 +184,20 @@ fn sample_shadow_cascade(world_pos: vec3<f32>, normal: vec3<f32>, cascade_index:
 
 fn sample_shadow(world_pos: vec3<f32>, normal: vec3<f32>, distance_to_camera: f32) -> f32 {
     let blend = shadow_cascade_blend(distance_to_camera);
+    let shadow_strength = clamp(blend.x + blend.y + blend.z + blend.w, 0.0, 1.0);
 
-    if (blend.z <= 0.0) {
+    if (shadow_strength <= 0.0) {
         return 1.0;
     }
 
-    var shadow_factor = 1.0;
-    if (blend.x > 0.0 && blend.y > 0.0) {
-        let near_shadow = sample_shadow_cascade(world_pos, normal, 0u);
-        let mid_shadow = sample_shadow_cascade(world_pos, normal, 1u);
-        shadow_factor = near_shadow * blend.x + mid_shadow * blend.y;
-    } else if (blend.x > 0.0) {
-        shadow_factor = sample_shadow_cascade(world_pos, normal, 0u);
-    } else if (blend.y > 0.0) {
-        shadow_factor = sample_shadow_cascade(world_pos, normal, 1u);
+    var shadow_factor = 0.0;
+    for (var cascade_index = 0u; cascade_index < SHADOW_CASCADE_COUNT; cascade_index += 1u) {
+        if (blend[cascade_index] > 0.0) {
+            shadow_factor += sample_shadow_cascade(world_pos, normal, cascade_index) * blend[cascade_index];
+        }
     }
 
-    return mix(1.0, shadow_factor, blend.z);
+    return mix(1.0, shadow_factor / shadow_strength, shadow_strength);
 }
 
 @vertex
@@ -207,10 +214,15 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 fn shadow_cascade_debug_color(distance_to_camera: f32) -> vec3<f32> {
     let blend = shadow_cascade_blend(distance_to_camera);
-    let near_color = vec3<f32>(0.1, 0.45, 1.0);
-    let mid_color = vec3<f32>(1.0, 0.65, 0.1);
-    let far_color = vec3<f32>(0.65, 0.2, 0.9);
-    return near_color * blend.x + mid_color * blend.y + far_color * (1.0 - blend.z);
+    let colors = array<vec3<f32>, 5>(
+        vec3<f32>(0.1, 0.45, 1.0),
+        vec3<f32>(0.2, 0.9, 0.45),
+        vec3<f32>(1.0, 0.65, 0.1),
+        vec3<f32>(0.95, 0.2, 0.2),
+        vec3<f32>(0.65, 0.2, 0.9),
+    );
+    let shadow_strength = clamp(blend.x + blend.y + blend.z + blend.w, 0.0, 1.0);
+    return colors[0] * blend.x + colors[1] * blend.y + colors[2] * blend.z + colors[3] * blend.w + colors[4] * (1.0 - shadow_strength);
 }
 
 @fragment

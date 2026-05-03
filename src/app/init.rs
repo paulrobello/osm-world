@@ -4,6 +4,7 @@ use wgpu::*;
 use crate::camera::Flycam;
 use crate::render::bind_groups::SceneBindGroup;
 use crate::render::buffers::SceneBuffers;
+use crate::render::contact_shadow::ContactShadowPass;
 use crate::render::minimap::MinimapTarget;
 use crate::render::occlusion::OcclusionQueries;
 use crate::render::pipelines::CityPipeline;
@@ -25,6 +26,7 @@ pub struct AppState {
     pub sky_pipeline: SkyPipeline,
     pub shadow_bg: ShadowBindGroup,
     pub shadow_pipeline: ShadowPipeline,
+    pub contact_shadow: ContactShadowPass,
     pub scene: SceneBuffers,
     pub occlusion: OcclusionQueries,
     pub minimap_target: MinimapTarget,
@@ -104,6 +106,14 @@ pub fn init_wgpu(
     );
     let sky_pipeline = SkyPipeline::new(&device, &camera_bg.layout, surface_format);
     let shadow_pipeline = ShadowPipeline::new(&device, &shadow_bg.pass_layout);
+    let contact_shadow = ContactShadowPass::new(
+        &device,
+        &camera_bg.layout,
+        surface_format,
+        surface_config.width,
+        surface_config.height,
+        &depth_view,
+    );
     let occlusion = OcclusionQueries::new(&device, 256);
     let minimap_target = MinimapTarget::new(&device, surface_format);
 
@@ -152,6 +162,7 @@ pub fn init_wgpu(
             sky_pipeline,
             shadow_bg,
             shadow_pipeline,
+            contact_shadow,
             scene,
             occlusion,
             minimap_target,

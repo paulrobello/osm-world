@@ -111,17 +111,18 @@ fn light_view_projection_is_stable_for_sub_texel_camera_motion() {
     let world_point = glam::Vec3::new(123.0, 12.0, -456.0);
 
     let before = cam.shadow_cascades(sun_direction);
-    cam.position.x += 0.5;
+    cam.position.x += 0.1;
     let after = cam.shadow_cascades(sun_direction);
 
-    for (label, before_matrix, after_matrix) in [
-        (
-            "near",
-            before.near.light_view_proj,
-            after.near.light_view_proj,
-        ),
-        ("mid", before.mid.light_view_proj, after.mid.light_view_proj),
-    ] {
+    for (cascade_index, (before_cascade, after_cascade)) in before
+        .cascades
+        .iter()
+        .zip(after.cascades.iter())
+        .enumerate()
+    {
+        let label = format!("cascade {cascade_index}");
+        let before_matrix = before_cascade.light_view_proj;
+        let after_matrix = after_cascade.light_view_proj;
         let before_clip = before_matrix * world_point.extend(1.0);
         let after_clip = after_matrix * world_point.extend(1.0);
 
@@ -137,63 +138,50 @@ fn light_view_projection_is_stable_for_sub_texel_camera_motion() {
 }
 
 #[test]
-fn shadow_cascade_blend_transitions_from_near_to_mid_to_far() {
+fn shadow_cascade_blend_transitions_across_four_cascades() {
     use osm_world::camera::{
-        SHADOW_MID_RADIUS, SHADOW_NEAR_RADIUS, ShadowCascadeBlend, shadow_cascade_blend,
+        SHADOW_CASCADE_BLEND_DISTANCE, SHADOW_CASCADE_RADII, SHADOW_FAR_FADE_DISTANCE,
+        ShadowCascadeBlend, shadow_cascade_blend,
     };
 
-    let exact_near = shadow_cascade_blend(100.0, SHADOW_NEAR_RADIUS, SHADOW_MID_RADIUS);
+    let exact_near = shadow_cascade_blend(100.0, SHADOW_CASCADE_RADII);
     assert_eq!(
         exact_near,
         ShadowCascadeBlend {
-            near_weight: 1.0,
-            mid_weight: 0.0,
+            weights: [1.0, 0.0, 0.0, 0.0],
             shadow_strength: 1.0,
         }
     );
 
     let near_transition = shadow_cascade_blend(
-        SHADOW_NEAR_RADIUS - osm_world::camera::SHADOW_NEAR_BLEND_DISTANCE * 0.5,
-        SHADOW_NEAR_RADIUS,
-        SHADOW_MID_RADIUS,
+        SHADOW_CASCADE_RADII[0] - SHADOW_CASCADE_BLEND_DISTANCE * 0.5,
+        SHADOW_CASCADE_RADII,
     );
-    assert!((near_transition.near_weight - 0.5).abs() < 1e-6);
-    assert!((near_transition.mid_weight - 0.5).abs() < 1e-6);
+    assert!((near_transition.weights[0] - 0.5).abs() < 1e-6);
+    assert!((near_transition.weights[1] - 0.5).abs() < 1e-6);
     assert!((near_transition.shadow_strength - 1.0).abs() < 1e-6);
 
-    let exact_mid = shadow_cascade_blend(
-        SHADOW_MID_RADIUS - osm_world::camera::SHADOW_MID_FADE_DISTANCE,
-        SHADOW_NEAR_RADIUS,
-        SHADOW_MID_RADIUS,
-    );
+    let exact_third = shadow_cascade_blend(SHADOW_CASCADE_RADII[1] + 100.0, SHADOW_CASCADE_RADII);
     assert_eq!(
-        exact_mid,
+        exact_third,
         ShadowCascadeBlend {
-            near_weight: 0.0,
-            mid_weight: 1.0,
+            weights: [0.0, 0.0, 1.0, 0.0],
             shadow_strength: 1.0,
         }
     );
 
     let far_transition = shadow_cascade_blend(
-        SHADOW_MID_RADIUS - osm_world::camera::SHADOW_MID_FADE_DISTANCE * 0.5,
-        SHADOW_NEAR_RADIUS,
-        SHADOW_MID_RADIUS,
+        SHADOW_CASCADE_RADII[3] - SHADOW_FAR_FADE_DISTANCE * 0.5,
+        SHADOW_CASCADE_RADII,
     );
-    assert!((far_transition.near_weight - 0.0).abs() < 1e-6);
-    assert!((far_transition.mid_weight - 1.0).abs() < 1e-6);
+    assert_eq!(far_transition.weights, [0.0, 0.0, 0.0, 1.0]);
     assert!((far_transition.shadow_strength - 0.5).abs() < 1e-6);
 
-    let fully_lit = shadow_cascade_blend(
-        SHADOW_MID_RADIUS + 10.0,
-        SHADOW_NEAR_RADIUS,
-        SHADOW_MID_RADIUS,
-    );
+    let fully_lit = shadow_cascade_blend(SHADOW_CASCADE_RADII[3] + 10.0, SHADOW_CASCADE_RADII);
     assert_eq!(
         fully_lit,
         ShadowCascadeBlend {
-            near_weight: 0.0,
-            mid_weight: 0.0,
+            weights: [0.0, 0.0, 0.0, 0.0],
             shadow_strength: 0.0,
         }
     );

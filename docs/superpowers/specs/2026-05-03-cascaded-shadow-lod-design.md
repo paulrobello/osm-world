@@ -18,19 +18,25 @@ The caster-only and texel-snapping fixes reduce artifacts, but the architecture 
 
 ## Selected Approach
 
-Use a compact cascaded shadow map system with two dynamic cascades:
+Use a compact cascaded shadow map system with four dynamic cascades:
 
-1. **Near cascade**
-   - Covers nearby city geometry where shadow quality matters most.
+1. **Contact/near cascade**
+   - Covers nearby city geometry where contact and street-level shadow quality matters most.
+   - Target radius: about 350 m from the camera.
+
+2. **Near cascade**
+   - Covers nearby blocks where building shadows should remain crisp.
    - Target radius: about 900 m from the camera.
-   - Uses high effective resolution.
 
-2. **Mid cascade**
+3. **Mid cascade**
    - Covers medium-distance city geometry.
-   - Target radius: about 2800 m from the camera.
-   - Lower effective texel density than the near cascade.
+   - Target radius: about 2200 m from the camera.
 
-Fragments beyond the mid cascade fade to fully lit direct light instead of sampling a low-quality whole-city shadow.
+4. **Far cascade**
+   - Covers wider city context without returning to a single whole-city shadow map.
+   - Target radius: about 5200 m from the camera.
+
+Fragments beyond the far cascade fade to fully lit direct light instead of sampling a low-quality whole-city shadow.
 
 ## Dynamic Day/Night Behavior
 
@@ -56,7 +62,7 @@ The same uniform is used by:
 
 ## GPU Resources
 
-Use a single depth texture with two array layers, one layer per cascade. This keeps binding simple and avoids atlas coordinate math.
+Use a single depth texture with four array layers, one layer per cascade. This keeps binding simple and avoids atlas coordinate math.
 
 Shadow bind group layout:
 
@@ -66,20 +72,20 @@ Shadow bind group layout:
 
 Shadow pass:
 
-- render layer 0 with near cascade matrix;
-- render layer 1 with mid cascade matrix;
+- render one layer per cascade matrix;
 - render only the dedicated shadow caster index buffer.
 
 ## Shader Sampling
 
 The city shader chooses a cascade by camera distance to the fragment:
 
-- distance <= near radius: sample near cascade;
-- distance <= mid radius: sample mid cascade;
-- near/mid transition: blend between cascades over a small band;
-- mid/far transition: fade shadow influence to fully lit.
+- choose cascade weights from camera distance to the fragment;
+- blend each cascade into the next over a small transition band;
+- fade the final cascade to fully lit near the far radius.
 
-Out-of-cascade samples return fully lit. A settings/CLI debug mode tints geometry by selected cascade so the otherwise smoothly blended LOD bands are visible: blue for near, orange for mid, purple for far fade.
+Out-of-cascade samples return fully lit. A settings/CLI debug mode tints geometry by selected cascade so the otherwise smoothly blended LOD bands are visible.
+
+A fullscreen contact-shadow composite pass samples the resolved scene color plus scene depth, reconstructs nearby world positions, and ray-marches a short distance toward the dominant light direction. This adds screen-space contact darkening near buildings without putting receiver geometry back into the shadow caster pass.
 
 ## Caster Policy
 
@@ -106,6 +112,5 @@ Manual screenshot checks:
 
 ## Out of Scope
 
-- more than two cascades;
-- screen-space ambient occlusion/contact shadows;
+- screen-space ambient occlusion beyond the lightweight contact-shadow pass;
 - obstacle placement/editor UX, which belongs to `par-particle-life`, not this repo.

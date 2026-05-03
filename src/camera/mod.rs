@@ -4,11 +4,14 @@ use bytemuck::{Pod, Zeroable};
 
 pub use controller::CameraController;
 
-pub const SHADOW_NEAR_RADIUS: f32 = 900.0;
-pub const SHADOW_MID_RADIUS: f32 = 2800.0;
-pub const SHADOW_NEAR_BLEND_DISTANCE: f32 = 150.0;
-pub const SHADOW_MID_FADE_DISTANCE: f32 = 300.0;
-const SHADOW_MAP_SIZE: f32 = 2048.0;
+pub const SHADOW_CASCADE_COUNT: usize = 4;
+pub const SHADOW_MAP_SIZE: u32 = 2048;
+pub const SHADOW_CASCADE_RADII: [f32; SHADOW_CASCADE_COUNT] = [350.0, 900.0, 2200.0, 5200.0];
+pub const SHADOW_CASCADE_BLEND_DISTANCE: f32 = 150.0;
+pub const SHADOW_FAR_FADE_DISTANCE: f32 = 650.0;
+pub const CONTACT_SHADOW_MAX_DISTANCE: f32 = 260.0;
+pub const CONTACT_SHADOW_STRENGTH: f32 = 0.35;
+const SHADOW_MAP_SIZE_F32: f32 = SHADOW_MAP_SIZE as f32;
 
 #[derive(Copy, Clone, Debug)]
 pub struct ShadowCascade {
@@ -18,62 +21,73 @@ pub struct ShadowCascade {
 
 #[derive(Copy, Clone, Debug)]
 pub struct ShadowCascadeSet {
-    pub near: ShadowCascade,
-    pub mid: ShadowCascade,
+    pub cascades: [ShadowCascade; SHADOW_CASCADE_COUNT],
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ShadowCascadeBlend {
-    pub near_weight: f32,
-    pub mid_weight: f32,
+    pub weights: [f32; SHADOW_CASCADE_COUNT],
     pub shadow_strength: f32,
 }
 
 pub fn shadow_cascade_blend(
     distance: f32,
-    near_radius: f32,
-    mid_radius: f32,
+    radii: [f32; SHADOW_CASCADE_COUNT],
 ) -> ShadowCascadeBlend {
-    let near_blend_start = (near_radius - SHADOW_NEAR_BLEND_DISTANCE).max(0.0);
-    if distance <= near_blend_start {
+    let mut weights = [0.0; SHADOW_CASCADE_COUNT];
+
+    for cascade_index in 0..(SHADOW_CASCADE_COUNT - 1) {
+        let radius = radii[cascade_index];
+        let blend_distance = cascade_blend_distance(cascade_index, radii);
+        let blend_start = (radius - blend_distance).max(0.0);
+
+        if distance <= blend_start {
+            weights[cascade_index] = 1.0;
+            return ShadowCascadeBlend {
+                weights,
+                shadow_strength: 1.0,
+            };
+        }
+
+        if distance < radius {
+            let next_weight = smoothstep(blend_start, radius, distance);
+            weights[cascade_index] = 1.0 - next_weight;
+            weights[cascade_index + 1] = next_weight;
+            return ShadowCascadeBlend {
+                weights,
+                shadow_strength: 1.0,
+            };
+        }
+    }
+
+    let last_index = SHADOW_CASCADE_COUNT - 1;
+    let last_radius = radii[last_index];
+    let fade_start = (last_radius - SHADOW_FAR_FADE_DISTANCE).max(0.0);
+
+    if distance <= fade_start {
+        weights[last_index] = 1.0;
         return ShadowCascadeBlend {
-            near_weight: 1.0,
-            mid_weight: 0.0,
+            weights,
             shadow_strength: 1.0,
         };
     }
 
-    if distance < near_radius {
-        let mid_weight = smoothstep(near_blend_start, near_radius, distance);
+    if distance < last_radius {
+        weights[last_index] = 1.0;
         return ShadowCascadeBlend {
-            near_weight: 1.0 - mid_weight,
-            mid_weight,
-            shadow_strength: 1.0,
-        };
-    }
-
-    let mid_fade_start = near_radius.max(mid_radius - SHADOW_MID_FADE_DISTANCE);
-    if distance <= mid_fade_start {
-        return ShadowCascadeBlend {
-            near_weight: 0.0,
-            mid_weight: 1.0,
-            shadow_strength: 1.0,
-        };
-    }
-
-    if distance < mid_radius {
-        return ShadowCascadeBlend {
-            near_weight: 0.0,
-            mid_weight: 1.0,
-            shadow_strength: 1.0 - smoothstep(mid_fade_start, mid_radius, distance),
+            weights,
+            shadow_strength: 1.0 - smoothstep(fade_start, last_radius, distance),
         };
     }
 
     ShadowCascadeBlend {
-        near_weight: 0.0,
-        mid_weight: 0.0,
+        weights,
         shadow_strength: 0.0,
     }
+}
+
+fn cascade_blend_distance(_index: usize, _radii: [f32; SHADOW_CASCADE_COUNT]) -> f32 {
+    SHADOW_CASCADE_BLEND_DISTANCE
 }
 
 fn smoothstep(start: f32, end: f32, value: f32) -> f32 {
@@ -210,30 +224,27 @@ impl Flycam {
         }
     }
 
-    pub fn shadow_cascades(&self, sun_direction: [f32; 3]) -> ShadowCascadeSet {
-        let sun_dir = glam::Vec3::from(sun_direction).normalize();
+    pub fn shadow_cascades(&self, light_direction: [f32; 3]) -> ShadowCascadeSet {
+        let light_dir = glam::Vec3::from(light_direction).normalize();
 
         ShadowCascadeSet {
-            near: ShadowCascade {
-                light_view_proj: self.shadow_light_view_proj(sun_dir, SHADOW_NEAR_RADIUS),
-                radius: SHADOW_NEAR_RADIUS,
-            },
-            mid: ShadowCascade {
-                light_view_proj: self.shadow_light_view_proj(sun_dir, SHADOW_MID_RADIUS),
-                radius: SHADOW_MID_RADIUS,
-            },
+            cascades: SHADOW_CASCADE_RADII.map(|radius| ShadowCascade {
+                light_view_proj: self.shadow_light_view_proj(light_dir, radius),
+                radius,
+            }),
         }
     }
 
     /// Compatibility helper for callers/tests that still expect a single matrix.
-    pub fn light_view_proj(&self, sun_direction: [f32; 3]) -> glam::Mat4 {
-        self.shadow_cascades(sun_direction).mid.light_view_proj
+    pub fn light_view_proj(&self, light_direction: [f32; 3]) -> glam::Mat4 {
+        self.shadow_cascades(light_direction).cascades[1].light_view_proj
     }
 
-    fn shadow_light_view_proj(&self, sun_dir: glam::Vec3, half_extent: f32) -> glam::Mat4 {
-        let light_view_rotation = glam::Mat4::look_to_rh(glam::Vec3::ZERO, -sun_dir, glam::Vec3::Y);
+    fn shadow_light_view_proj(&self, light_dir: glam::Vec3, half_extent: f32) -> glam::Mat4 {
+        let light_view_rotation =
+            glam::Mat4::look_to_rh(glam::Vec3::ZERO, -light_dir, glam::Vec3::Y);
         let camera_light_space = light_view_rotation.transform_point3(self.position);
-        let texel_size = (half_extent * 2.0) / SHADOW_MAP_SIZE;
+        let texel_size = (half_extent * 2.0) / SHADOW_MAP_SIZE_F32;
         let snapped_camera_light_space = glam::Vec3::new(
             (camera_light_space.x / texel_size).round() * texel_size,
             (camera_light_space.y / texel_size).round() * texel_size,
@@ -243,8 +254,8 @@ impl Flycam {
             .inverse()
             .transform_point3(snapped_camera_light_space);
 
-        let light_pos = snapped_camera_world + sun_dir * half_extent;
-        let light_view = glam::Mat4::look_to_rh(light_pos, -sun_dir, glam::Vec3::Y);
+        let light_pos = snapped_camera_world + light_dir * half_extent;
+        let light_view = glam::Mat4::look_to_rh(light_pos, -light_dir, glam::Vec3::Y);
         let light_proj = glam::Mat4::orthographic_rh(
             -half_extent,
             half_extent,

@@ -67,6 +67,12 @@ impl ApplicationHandler for App {
                         );
                         state.depth_texture = dt;
                         state.depth_view = dv;
+                        state.contact_shadow.resize(
+                            &state.device,
+                            physical_size.width,
+                            physical_size.height,
+                            &state.depth_view,
+                        );
                         state.camera.aspect =
                             physical_size.width as f32 / physical_size.height as f32;
                     }

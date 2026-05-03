@@ -1,6 +1,7 @@
 use wgpu::*;
 
 use super::AppState;
+use crate::render::shadow_bind_group::LightUniforms;
 use crate::ui::EguiState;
 
 pub fn render(
@@ -34,6 +35,40 @@ pub fn render(
         .create_command_encoder(&CommandEncoderDescriptor {
             label: Some("render encoder"),
         });
+
+    // Upload light VP for shadow mapping
+    let sun_dir = crate::atmosphere::sun_direction(day_cycle.time_of_day);
+    let light_vp = state.camera.light_view_proj(sun_dir);
+    state.shadow_bg.update(
+        &state.queue,
+        &LightUniforms {
+            light_view_proj: light_vp.to_cols_array_2d(),
+        },
+    );
+
+    // Shadow pass
+    {
+        let mut shadow_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("shadow render pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                view: &state.shadow_bg.depth_view,
+                depth_ops: Some(Operations {
+                    load: LoadOp::Clear(1.0),
+                    store: StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            multiview_mask: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        shadow_pass.set_pipeline(&state.shadow_pipeline.pipeline);
+        shadow_pass.set_bind_group(0, &state.shadow_bg.group, &[]);
+        shadow_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
+        shadow_pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
+        shadow_pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
+    }
 
     {
         let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -73,6 +108,7 @@ pub fn render(
         // City pass
         pass.set_pipeline(&state.pipeline.pipeline);
         pass.set_bind_group(0, &state.camera_bg.group, &[]);
+        pass.set_bind_group(1, &state.shadow_bg.group, &[]);
         pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
         pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
         pass.draw_indexed(0..state.scene.index_count, 0, 0..1);

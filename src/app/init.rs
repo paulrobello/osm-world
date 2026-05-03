@@ -5,6 +5,8 @@ use crate::camera::Flycam;
 use crate::render::bind_groups::SceneBindGroup;
 use crate::render::buffers::SceneBuffers;
 use crate::render::pipelines::CityPipeline;
+use crate::render::shadow_bind_group::ShadowBindGroup;
+use crate::render::shadow_pipeline::ShadowPipeline;
 use crate::render::sky_pipeline::SkyPipeline;
 
 pub struct AppState {
@@ -19,6 +21,8 @@ pub struct AppState {
     pub camera_bg: SceneBindGroup,
     pub pipeline: CityPipeline,
     pub sky_pipeline: SkyPipeline,
+    pub shadow_bg: ShadowBindGroup,
+    pub shadow_pipeline: ShadowPipeline,
     pub scene: SceneBuffers,
 }
 
@@ -87,8 +91,10 @@ pub fn init_wgpu(
 
     let mut camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
     let camera_bg = SceneBindGroup::new(&device);
-    let pipeline = CityPipeline::new(&device, &camera_bg.layout, surface_format);
+    let shadow_bg = ShadowBindGroup::new(&device);
+    let pipeline = CityPipeline::new(&device, &camera_bg.layout, &shadow_bg.layout, surface_format);
     let sky_pipeline = SkyPipeline::new(&device, &camera_bg.layout, surface_format);
+    let shadow_pipeline = ShadowPipeline::new(&device, &shadow_bg.layout);
 
     let scene = match input_path {
         Some(path) => {
@@ -133,6 +139,8 @@ pub fn init_wgpu(
             camera_bg,
             pipeline,
             sky_pipeline,
+            shadow_bg,
+            shadow_pipeline,
             scene,
         },
         egui,

@@ -11,6 +11,7 @@ impl CityPipeline {
     pub fn new(
         device: &Device,
         scene_layout: &BindGroupLayout,
+        shadow_layout: &BindGroupLayout,
         surface_format: TextureFormat,
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
@@ -20,7 +21,7 @@ impl CityPipeline {
 
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("city pipeline layout"),
-            bind_group_layouts: &[Some(scene_layout)],
+            bind_group_layouts: &[Some(scene_layout), Some(shadow_layout)],
             immediate_size: 0,
         });
 

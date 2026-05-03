@@ -29,6 +29,14 @@ struct SceneUniforms {
 
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 
+struct ShadowUniforms {
+    light_view_proj: mat4x4<f32>,
+};
+
+@group(1) @binding(0) var shadow_map: texture_depth_2d;
+@group(1) @binding(1) var shadow_sampler: sampler_comparison;
+@group(1) @binding(2) var<uniform> shadow: ShadowUniforms;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -104,6 +112,28 @@ fn get_material(feature: f32) -> Material {
     }
 }
 
+fn sample_shadow(world_pos: vec3<f32>, normal: vec3<f32>) -> f32 {
+    let light_space = shadow.light_view_proj * vec4f(world_pos, 1.0);
+    let ndc = light_space.xyz / light_space.w;
+
+    if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) {
+        return 1.0;
+    }
+
+    let uv = ndc.xy * 0.5 + 0.5;
+    let bias = max(0.002 * (1.0 - dot(normal, scene.sun_direction)), 0.001);
+
+    let texel_size = 1.0 / 2048.0;
+    var shadow = 0.0;
+    for (var x = -1; x <= 1; x += 2) {
+        for (var y = -1; y <= 1; y += 2) {
+            let offset = vec2f(f32(x), f32(y)) * texel_size;
+            shadow += textureSampleCompare(shadow_map, shadow_sampler, uv + offset, ndc.z - bias);
+        }
+    }
+    return shadow / 4.0;
+}
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -127,6 +157,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Diffuse
     let diffuse = max(dot(normal, light_dir), 0.0);
+    let shadow_factor = sample_shadow(in.world_position, normal);
+    let diffuse = diffuse * shadow_factor;
 
     // Specular (Blinn-Phong)
     let view_dir = normalize(scene.camera_pos - in.world_position);

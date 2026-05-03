@@ -40,3 +40,4 @@ test_images/
 *.log
 graphify-out/
 statusline-*.json
+.superpowers/

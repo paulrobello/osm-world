@@ -4,6 +4,83 @@ use bytemuck::{Pod, Zeroable};
 
 pub use controller::CameraController;
 
+pub const SHADOW_NEAR_RADIUS: f32 = 900.0;
+pub const SHADOW_MID_RADIUS: f32 = 2800.0;
+pub const SHADOW_NEAR_BLEND_DISTANCE: f32 = 150.0;
+pub const SHADOW_MID_FADE_DISTANCE: f32 = 300.0;
+const SHADOW_MAP_SIZE: f32 = 2048.0;
+
+#[derive(Copy, Clone, Debug)]
+pub struct ShadowCascade {
+    pub light_view_proj: glam::Mat4,
+    pub radius: f32,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ShadowCascadeSet {
+    pub near: ShadowCascade,
+    pub mid: ShadowCascade,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ShadowCascadeBlend {
+    pub near_weight: f32,
+    pub mid_weight: f32,
+    pub shadow_strength: f32,
+}
+
+pub fn shadow_cascade_blend(
+    distance: f32,
+    near_radius: f32,
+    mid_radius: f32,
+) -> ShadowCascadeBlend {
+    let near_blend_start = (near_radius - SHADOW_NEAR_BLEND_DISTANCE).max(0.0);
+    if distance <= near_blend_start {
+        return ShadowCascadeBlend {
+            near_weight: 1.0,
+            mid_weight: 0.0,
+            shadow_strength: 1.0,
+        };
+    }
+
+    if distance < near_radius {
+        let mid_weight = smoothstep(near_blend_start, near_radius, distance);
+        return ShadowCascadeBlend {
+            near_weight: 1.0 - mid_weight,
+            mid_weight,
+            shadow_strength: 1.0,
+        };
+    }
+
+    let mid_fade_start = near_radius.max(mid_radius - SHADOW_MID_FADE_DISTANCE);
+    if distance <= mid_fade_start {
+        return ShadowCascadeBlend {
+            near_weight: 0.0,
+            mid_weight: 1.0,
+            shadow_strength: 1.0,
+        };
+    }
+
+    if distance < mid_radius {
+        return ShadowCascadeBlend {
+            near_weight: 0.0,
+            mid_weight: 1.0,
+            shadow_strength: 1.0 - smoothstep(mid_fade_start, mid_radius, distance),
+        };
+    }
+
+    ShadowCascadeBlend {
+        near_weight: 0.0,
+        mid_weight: 0.0,
+        shadow_strength: 0.0,
+    }
+}
+
+fn smoothstep(start: f32, end: f32, value: f32) -> f32 {
+    let t = ((value - start) / (end - start)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Optional overrides for the initial camera position and orientation.
 pub struct CameraOverride {
     pub x: Option<f32>,
@@ -13,7 +90,7 @@ pub struct CameraOverride {
     pub pitch: Option<f32>,
 }
 
-/// Scene uniform buffer layout (GPU). 272 bytes: camera + atmosphere.
+/// Scene uniform buffer layout (GPU). 288 bytes: camera + atmosphere.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct SceneUniforms {
@@ -27,6 +104,8 @@ pub struct SceneUniforms {
     pub _pad1: f32,
     pub sun_direction: [f32; 3],
     pub _pad2: f32,
+    pub light_direction: [f32; 3],
+    pub light_intensity: f32,
     pub fog_density: f32,
     pub fog_start: f32,
     pub _pad3: [f32; 2],
@@ -99,6 +178,8 @@ impl Flycam {
         let proj = self.projection_matrix();
         let vp = proj * view;
         let sun_dir = crate::atmosphere::sun_direction(day.time_of_day);
+        let light_dir = crate::atmosphere::dominant_light_direction(day.time_of_day);
+        let light_intensity = crate::atmosphere::dominant_light_intensity(day.time_of_day);
         SceneUniforms {
             view_proj: vp.to_cols_array_2d(),
             inv_view_proj: vp.inverse().to_cols_array_2d(),
@@ -110,6 +191,8 @@ impl Flycam {
             _pad1: 0.0,
             sun_direction: sun_dir,
             _pad2: 0.0,
+            light_direction: light_dir,
+            light_intensity,
             fog_density: atm.fog_density,
             fog_start: atm.fog_start,
             _pad3: [0.0; 2],
@@ -127,18 +210,41 @@ impl Flycam {
         }
     }
 
-    /// Compute the light view-projection matrix for directional shadow mapping.
-    /// Fits an orthographic projection around the camera frustum as seen from the sun.
-    pub fn light_view_proj(&self, sun_direction: [f32; 3]) -> glam::Mat4 {
+    pub fn shadow_cascades(&self, sun_direction: [f32; 3]) -> ShadowCascadeSet {
         let sun_dir = glam::Vec3::from(sun_direction).normalize();
 
-        // Shadow cascade covers a large area around the camera so the shadow
-        // square edge isn't visible at city scale.
-        let half_extent = 5000.0;
+        ShadowCascadeSet {
+            near: ShadowCascade {
+                light_view_proj: self.shadow_light_view_proj(sun_dir, SHADOW_NEAR_RADIUS),
+                radius: SHADOW_NEAR_RADIUS,
+            },
+            mid: ShadowCascade {
+                light_view_proj: self.shadow_light_view_proj(sun_dir, SHADOW_MID_RADIUS),
+                radius: SHADOW_MID_RADIUS,
+            },
+        }
+    }
 
-        let light_pos = self.position + sun_dir * half_extent;
+    /// Compatibility helper for callers/tests that still expect a single matrix.
+    pub fn light_view_proj(&self, sun_direction: [f32; 3]) -> glam::Mat4 {
+        self.shadow_cascades(sun_direction).mid.light_view_proj
+    }
+
+    fn shadow_light_view_proj(&self, sun_dir: glam::Vec3, half_extent: f32) -> glam::Mat4 {
+        let light_view_rotation = glam::Mat4::look_to_rh(glam::Vec3::ZERO, -sun_dir, glam::Vec3::Y);
+        let camera_light_space = light_view_rotation.transform_point3(self.position);
+        let texel_size = (half_extent * 2.0) / SHADOW_MAP_SIZE;
+        let snapped_camera_light_space = glam::Vec3::new(
+            (camera_light_space.x / texel_size).round() * texel_size,
+            (camera_light_space.y / texel_size).round() * texel_size,
+            camera_light_space.z,
+        );
+        let snapped_camera_world = light_view_rotation
+            .inverse()
+            .transform_point3(snapped_camera_light_space);
+
+        let light_pos = snapped_camera_world + sun_dir * half_extent;
         let light_view = glam::Mat4::look_to_rh(light_pos, -sun_dir, glam::Vec3::Y);
-
         let light_proj = glam::Mat4::orthographic_rh(
             -half_extent,
             half_extent,

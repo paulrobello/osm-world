@@ -24,6 +24,18 @@ fn positive_usize(s: &str) -> Result<usize, String> {
     }
 }
 
+fn hour_of_day(s: &str) -> Result<f32, String> {
+    let value = s
+        .parse::<f32>()
+        .map_err(|err| format!("invalid hour: {err}"))?;
+
+    if value.is_finite() && (0.0..=24.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err("must be a finite hour in the range 0..=24".to_string())
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "osm-world",
@@ -81,6 +93,14 @@ struct Args {
     /// Start with the in-game settings panel open
     #[arg(long)]
     show_settings: bool,
+
+    /// Initial time of day in hours, where 0/24 is midnight and 12 is noon
+    #[arg(long, value_parser = hour_of_day)]
+    time_of_day: Option<f32>,
+
+    /// Tint geometry by shadow cascade: blue near, orange mid, purple far fade
+    #[arg(long)]
+    debug_shadow_cascades: bool,
 
     /// Disable tile streaming and use the legacy single-mesh renderer
     #[arg(long)]
@@ -141,6 +161,8 @@ fn main() -> anyhow::Result<()> {
         srtm_dir: args.srtm_dir,
         cam_override,
         show_settings: args.show_settings,
+        initial_time_of_day: args.time_of_day.map(|hours| hours / 24.0),
+        debug_shadow_cascades: args.debug_shadow_cascades,
         streaming: osm_world::app::StreamingOptions {
             enabled: !args.no_streaming,
             tile_size: args.tile_size,
@@ -163,6 +185,20 @@ mod tests {
     fn parses_show_settings_flag() {
         let args = Args::try_parse_from(["osm-world", "--show-settings"]).unwrap();
         assert!(args.show_settings);
+    }
+
+    #[test]
+    fn parses_shadow_debug_and_time_flags() {
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--time-of-day",
+            "21.5",
+            "--debug-shadow-cascades",
+        ])
+        .unwrap();
+
+        assert_eq!(args.time_of_day, Some(21.5));
+        assert!(args.debug_shadow_cascades);
     }
 
     #[test]
@@ -199,6 +235,7 @@ mod tests {
             ("--upload-budget-mb", "NaN"),
             ("--max-uploaded-tiles", "0"),
             ("--max-uploaded-mb", "inf"),
+            ("--time-of-day", "25"),
         ] {
             let result = Args::try_parse_from(["osm-world", flag, value]);
             assert!(result.is_err(), "expected {flag} {value} to be rejected");

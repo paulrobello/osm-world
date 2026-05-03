@@ -12,6 +12,8 @@ struct SceneUniforms {
     _pad1: f32,
     sun_direction: vec3<f32>,
     _pad2: f32,
+    light_direction: vec3<f32>,
+    light_intensity: f32,
     fog_density: f32,
     fog_start: f32,
     _pad3: vec2<f32>,
@@ -120,16 +122,36 @@ fn get_moon(ray: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(0.7, 0.75, 0.9) * (disk + glow);
 }
 
+fn star_layer(ray: vec3<f32>, scale: f32, threshold: f32, radius: f32, speed: f32, offset: vec2<f32>) -> f32 {
+    let star_coord = ray.xz / (abs(ray.y) + 0.001) * scale + offset;
+    let cell = floor(star_coord);
+    let local = fract(star_coord);
+    let seed = hash(cell);
+    if (seed < threshold) { return 0.0; }
+
+    let star_pos = vec2<f32>(
+        hash(cell + vec2<f32>(17.1, 29.4)),
+        hash(cell + vec2<f32>(43.7, 11.9)),
+    );
+    let dist = distance(local, star_pos);
+    let disk = smoothstep(radius + 0.02, radius, dist);
+
+    let phase = hash(cell + vec2<f32>(101.3, 77.7)) * 6.2831;
+    let twinkle = 0.65 + 0.35 * sin(scene.animation_time * speed + phase);
+    let brightness = mix(0.45, 1.0, hash(cell + vec2<f32>(9.2, 63.4)));
+
+    return disk * twinkle * brightness;
+}
+
 fn get_stars(ray: vec3<f32>) -> vec3<f32> {
     let daylight = get_daylight(scene.sun_direction.y);
     if (daylight > 0.5) { return vec3<f32>(0.0); }
 
-    let star_coord = ray.xz / (abs(ray.y) + 0.001) * 200.0;
-    let cell = floor(star_coord);
-    let h = hash(cell);
-    let star = step(0.995, h);
-    let twinkle = 0.5 + 0.5 * sin(hash(cell + vec2<f32>(0.5, 0.5)) * 6.2831 + scene.animation_time * 2.0);
-    return vec3<f32>(star * twinkle * (1.0 - daylight * 2.0));
+    let night_fade = clamp(1.0 - daylight * 2.0, 0.0, 1.0);
+    let large_stars = star_layer(ray, 180.0, 0.992, 0.035, 1.7, vec2<f32>(0.0, 0.0));
+    let small_stars = star_layer(ray, 360.0, 0.996, 0.025, 2.6, vec2<f32>(53.2, 19.7));
+
+    return vec3<f32>((large_stars + small_stars * 0.7) * night_fade);
 }
 
 // --- Clouds ---

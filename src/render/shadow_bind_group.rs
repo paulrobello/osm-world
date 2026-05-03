@@ -3,7 +3,9 @@ use wgpu::*;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LightUniforms {
-    pub light_view_proj: [[f32; 4]; 4],
+    pub light_view_proj: [[[f32; 4]; 4]; 2],
+    pub cascade_radii: [f32; 4],
+    pub shadow_pass_params: [u32; 4],
 }
 
 pub struct ShadowBindGroup {
@@ -17,7 +19,8 @@ pub struct ShadowBindGroup {
     pub pass_group: BindGroup,
     pub uniform_buffer: Buffer,
     pub depth_texture: Texture,
-    pub depth_view: TextureView,
+    pub depth_array_view: TextureView,
+    pub cascade_views: [TextureView; 2],
     pub sampler: Sampler,
 }
 
@@ -35,7 +38,7 @@ impl ShadowBindGroup {
             size: Extent3d {
                 width: 2048,
                 height: 2048,
-                depth_or_array_layers: 1,
+                depth_or_array_layers: 2,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -44,7 +47,20 @@ impl ShadowBindGroup {
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
-        let depth_view = depth_texture.create_view(&TextureViewDescriptor::default());
+        let depth_array_view = depth_texture.create_view(&TextureViewDescriptor {
+            label: Some("shadow depth array view"),
+            dimension: Some(TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let cascade_views = [0u32, 1u32].map(|layer| {
+            depth_texture.create_view(&TextureViewDescriptor {
+                label: Some("shadow cascade view"),
+                dimension: Some(TextureViewDimension::D2),
+                base_array_layer: layer,
+                array_layer_count: Some(1),
+                ..Default::default()
+            })
+        });
 
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("shadow comparison sampler"),
@@ -66,7 +82,7 @@ impl ShadowBindGroup {
                     visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Texture {
                         multisampled: false,
-                        view_dimension: TextureViewDimension::D2,
+                        view_dimension: TextureViewDimension::D2Array,
                         sample_type: TextureSampleType::Depth,
                     },
                     count: None,
@@ -96,7 +112,7 @@ impl ShadowBindGroup {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::TextureView(&depth_view),
+                    resource: BindingResource::TextureView(&depth_array_view),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -140,7 +156,8 @@ impl ShadowBindGroup {
             pass_group,
             uniform_buffer,
             depth_texture,
-            depth_view,
+            depth_array_view,
+            cascade_views,
             sampler,
         }
     }

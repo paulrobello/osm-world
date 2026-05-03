@@ -79,6 +79,8 @@ impl MinimapTarget {
         );
         let vp = proj * view;
         let sun_dir = crate::atmosphere::sun_direction(day.time_of_day);
+        let light_dir = crate::atmosphere::dominant_light_direction(day.time_of_day);
+        let light_intensity = crate::atmosphere::dominant_light_intensity(day.time_of_day);
 
         SceneUniforms {
             view_proj: vp.to_cols_array_2d(),
@@ -91,6 +93,8 @@ impl MinimapTarget {
             _pad1: 0.0,
             sun_direction: sun_dir,
             _pad2: 0.0,
+            light_direction: light_dir,
+            light_intensity,
             fog_density: 0.0,
             fog_start: 99999.0,
             _pad3: [0.0; 2],

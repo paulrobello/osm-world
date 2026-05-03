@@ -46,6 +46,9 @@ fn day_cycle_section(
                     .step_by(0.01)
                     .text("Ambient Light"),
             );
+
+            ui.checkbox(&mut atm.shadow_cascade_debug, "Debug shadow cascades");
+            ui.label("Debug colors: blue = near, orange = mid, purple = far fade");
         });
 }
 

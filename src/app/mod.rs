@@ -40,6 +40,8 @@ pub struct AppOptions {
     pub srtm_dir: Option<String>,
     pub cam_override: Option<crate::camera::CameraOverride>,
     pub show_settings: bool,
+    pub initial_time_of_day: Option<f32>,
+    pub debug_shadow_cascades: bool,
     pub streaming: StreamingOptions,
 }
 
@@ -59,6 +61,16 @@ pub struct App {
 
 impl App {
     pub fn new(opts: AppOptions) -> Self {
+        let atmosphere = crate::atmosphere::AtmosphereSettings {
+            shadow_cascade_debug: opts.debug_shadow_cascades,
+            ..Default::default()
+        };
+
+        let mut day_cycle = crate::atmosphere::DayCycleState::default();
+        if let Some(time_of_day) = opts.initial_time_of_day {
+            day_cycle.time_of_day = time_of_day;
+        }
+
         Self {
             state: None,
             egui: None,
@@ -68,8 +80,8 @@ impl App {
             opts,
             render_start: None,
             screenshot_taken: false,
-            atmosphere: crate::atmosphere::AtmosphereSettings::default(),
-            day_cycle: crate::atmosphere::DayCycleState::default(),
+            atmosphere,
+            day_cycle,
             minimap: crate::ui::minimap::MinimapState::default(),
         }
     }

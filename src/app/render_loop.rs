@@ -1,6 +1,7 @@
 use wgpu::*;
 
 use super::AppState;
+use crate::camera::{SHADOW_MID_FADE_DISTANCE, SHADOW_NEAR_BLEND_DISTANCE};
 use crate::render::shadow_bind_group::LightUniforms;
 use crate::ui::EguiState;
 
@@ -31,45 +32,67 @@ pub fn render(
         .texture
         .create_view(&TextureViewDescriptor::default());
 
+    let light_dir = crate::atmosphere::dominant_light_direction(day_cycle.time_of_day);
+    let cascades = state.camera.shadow_cascades(light_dir);
+    let mut light_uniforms = LightUniforms {
+        light_view_proj: [
+            cascades.near.light_view_proj.to_cols_array_2d(),
+            cascades.mid.light_view_proj.to_cols_array_2d(),
+        ],
+        cascade_radii: [
+            cascades.near.radius,
+            cascades.mid.radius,
+            SHADOW_NEAR_BLEND_DISTANCE,
+            SHADOW_MID_FADE_DISTANCE,
+        ],
+        shadow_pass_params: [0, atmosphere.shadow_cascade_debug as u32, 0, 0],
+    };
+
+    for (cascade_index, cascade_view) in state.shadow_bg.cascade_views.iter().enumerate() {
+        light_uniforms.shadow_pass_params[0] = cascade_index as u32;
+        state.shadow_bg.update(&state.queue, &light_uniforms);
+
+        let mut shadow_encoder = state
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("shadow render encoder"),
+            });
+        {
+            let mut shadow_pass = shadow_encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("shadow render pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: cascade_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Clear(1.0),
+                        store: StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                multiview_mask: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            shadow_pass.set_pipeline(&state.shadow_pipeline.pipeline);
+            shadow_pass.set_bind_group(0, &state.shadow_bg.pass_group, &[]);
+            shadow_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
+            shadow_pass.set_index_buffer(
+                state.scene.shadow_index_buffer.slice(..),
+                IndexFormat::Uint32,
+            );
+            shadow_pass.draw_indexed(0..state.scene.shadow_index_count, 0, 0..1);
+        }
+        state.queue.submit(std::iter::once(shadow_encoder.finish()));
+    }
+
+    light_uniforms.shadow_pass_params[0] = 0;
+    state.shadow_bg.update(&state.queue, &light_uniforms);
+
     let mut encoder = state
         .device
         .create_command_encoder(&CommandEncoderDescriptor {
             label: Some("render encoder"),
         });
-
-    // Upload light VP for shadow mapping
-    let sun_dir = crate::atmosphere::sun_direction(day_cycle.time_of_day);
-    let light_vp = state.camera.light_view_proj(sun_dir);
-    state.shadow_bg.update(
-        &state.queue,
-        &LightUniforms {
-            light_view_proj: light_vp.to_cols_array_2d(),
-        },
-    );
-
-    // Shadow pass
-    {
-        let mut shadow_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("shadow render pass"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                view: &state.shadow_bg.depth_view,
-                depth_ops: Some(Operations {
-                    load: LoadOp::Clear(1.0),
-                    store: StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            multiview_mask: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        shadow_pass.set_pipeline(&state.shadow_pipeline.pipeline);
-        shadow_pass.set_bind_group(0, &state.shadow_bg.pass_group, &[]);
-        shadow_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
-        shadow_pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
-        shadow_pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
-    }
 
     // Resolve previous frame's occlusion queries
     encoder.resolve_query_set(

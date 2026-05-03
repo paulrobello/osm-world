@@ -11,6 +11,8 @@ struct SceneUniforms {
     _pad1: f32,
     sun_direction: vec3<f32>,
     _pad2: f32,
+    light_direction: vec3<f32>,
+    light_intensity: f32,
     fog_density: f32,
     fog_start: f32,
     _pad3: vec2<f32>,
@@ -30,10 +32,12 @@ struct SceneUniforms {
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 
 struct ShadowUniforms {
-    light_view_proj: mat4x4<f32>,
+    light_view_proj: array<mat4x4<f32>, 2>,
+    cascade_radii: vec4<f32>,
+    shadow_pass_params: vec4<u32>,
 };
 
-@group(1) @binding(0) var shadow_map: texture_depth_2d;
+@group(1) @binding(0) var shadow_map: texture_depth_2d_array;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
 @group(1) @binding(2) var<uniform> shadow: ShadowUniforms;
 
@@ -112,26 +116,81 @@ fn get_material(feature: f32) -> Material {
     }
 }
 
-fn sample_shadow(world_pos: vec3<f32>, normal: vec3<f32>) -> f32 {
-    let light_space = shadow.light_view_proj * vec4f(world_pos, 1.0);
+fn shadow_cascade_blend(distance_to_camera: f32) -> vec3<f32> {
+    let near_radius = shadow.cascade_radii.x;
+    let mid_radius = shadow.cascade_radii.y;
+    let near_blend_distance = shadow.cascade_radii.z;
+    let mid_fade_distance = shadow.cascade_radii.w;
+
+    let near_blend_start = max(near_radius - near_blend_distance, 0.0);
+    if (distance_to_camera <= near_blend_start) {
+        return vec3<f32>(1.0, 0.0, 1.0);
+    }
+
+    if (distance_to_camera < near_radius) {
+        let mid_weight = smoothstep(near_blend_start, near_radius, distance_to_camera);
+        return vec3<f32>(1.0 - mid_weight, mid_weight, 1.0);
+    }
+
+    let mid_fade_start = max(near_radius, mid_radius - mid_fade_distance);
+    if (distance_to_camera <= mid_fade_start) {
+        return vec3<f32>(0.0, 1.0, 1.0);
+    }
+
+    if (distance_to_camera < mid_radius) {
+        return vec3<f32>(0.0, 1.0, 1.0 - smoothstep(mid_fade_start, mid_radius, distance_to_camera));
+    }
+
+    return vec3<f32>(0.0, 0.0, 0.0);
+}
+
+fn sample_shadow_cascade(world_pos: vec3<f32>, normal: vec3<f32>, cascade_index: u32) -> f32 {
+    let light_space = shadow.light_view_proj[cascade_index] * vec4f(world_pos, 1.0);
     let ndc = light_space.xyz / light_space.w;
 
     if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) {
         return 1.0;
     }
 
-    let uv = ndc.xy * 0.5 + 0.5;
-    let bias = max(0.002 * (1.0 - dot(normal, scene.sun_direction)), 0.001);
+    let uv = vec2f(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let bias = max(0.002 * (1.0 - dot(normal, scene.light_direction)), 0.001);
 
     let texel_size = 1.0 / 2048.0;
-    var shadow = 0.0;
+    var shadow_factor = 0.0;
     for (var x = -1; x <= 1; x += 2) {
         for (var y = -1; y <= 1; y += 2) {
             let offset = vec2f(f32(x), f32(y)) * texel_size;
-            shadow += textureSampleCompare(shadow_map, shadow_sampler, uv + offset, ndc.z - bias);
+            shadow_factor += textureSampleCompare(
+                shadow_map,
+                shadow_sampler,
+                uv + offset,
+                i32(cascade_index),
+                ndc.z - bias,
+            );
         }
     }
-    return shadow / 4.0;
+    return shadow_factor / 4.0;
+}
+
+fn sample_shadow(world_pos: vec3<f32>, normal: vec3<f32>, distance_to_camera: f32) -> f32 {
+    let blend = shadow_cascade_blend(distance_to_camera);
+
+    if (blend.z <= 0.0) {
+        return 1.0;
+    }
+
+    var shadow_factor = 1.0;
+    if (blend.x > 0.0 && blend.y > 0.0) {
+        let near_shadow = sample_shadow_cascade(world_pos, normal, 0u);
+        let mid_shadow = sample_shadow_cascade(world_pos, normal, 1u);
+        shadow_factor = near_shadow * blend.x + mid_shadow * blend.y;
+    } else if (blend.x > 0.0) {
+        shadow_factor = sample_shadow_cascade(world_pos, normal, 0u);
+    } else if (blend.y > 0.0) {
+        shadow_factor = sample_shadow_cascade(world_pos, normal, 1u);
+    }
+
+    return mix(1.0, shadow_factor, blend.z);
 }
 
 @vertex
@@ -146,17 +205,27 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return out;
 }
 
+fn shadow_cascade_debug_color(distance_to_camera: f32) -> vec3<f32> {
+    let blend = shadow_cascade_blend(distance_to_camera);
+    let near_color = vec3<f32>(0.1, 0.45, 1.0);
+    let mid_color = vec3<f32>(1.0, 0.65, 0.1);
+    let far_color = vec3<f32>(0.65, 0.2, 0.9);
+    return near_color * blend.x + mid_color * blend.y + far_color * (1.0 - blend.z);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(in.world_normal);
-    let light_dir = normalize(scene.sun_direction);
+    let light_dir = normalize(scene.light_direction);
 
     // Hemisphere ambient
     let hemisphere = mix(scene.ground_color, scene.sky_zenith, normal.y * 0.5 + 0.5);
     let ambient = hemisphere * scene.ambient_light;
 
+    let dist = distance(in.world_position, scene.camera_pos);
+
     // Diffuse + shadow
-    let shadow_factor = sample_shadow(in.world_position, normal);
+    let shadow_factor = sample_shadow(in.world_position, normal, dist);
     let diffuse = max(dot(normal, light_dir), 0.0) * shadow_factor;
 
     // Specular (Blinn-Phong)
@@ -166,15 +235,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let spec = pow(max(dot(normal, half_vec), 0.0), mat.shininess);
     let specular = mat.specular_strength * spec;
 
-    let lighting = ambient + (diffuse + specular) * (1.0 - scene.ambient_light);
+    let lighting = ambient + (diffuse + specular) * scene.light_intensity * (1.0 - scene.ambient_light);
     let lit_color = in.color * lighting;
 
     // Fog
-    let dist = distance(in.world_position, scene.camera_pos);
     let fog_factor = get_fog_factor(dist);
     let fog_view_dir = normalize(in.world_position - scene.camera_pos);
     let fog_color = get_sky_color(fog_view_dir);
-    let final_color = mix(lit_color, fog_color, fog_factor);
+    var final_color = mix(lit_color, fog_color, fog_factor);
+
+    if (shadow.shadow_pass_params.y != 0u) {
+        final_color = mix(final_color, shadow_cascade_debug_color(dist), 0.55);
+    }
 
     return vec4<f32>(final_color, 1.0);
 }

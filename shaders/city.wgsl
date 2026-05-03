@@ -41,6 +41,7 @@ struct VertexOutput {
     @location(0) world_position: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) color: vec3<f32>,
+    @location(3) feature_type: f32,
 }
 
 // --- Sky color helpers (duplicated from sky.wgsl for fog) ---
@@ -84,6 +85,25 @@ fn get_fog_factor(distance: f32) -> f32 {
 
 // --- City shaders ---
 
+struct Material {
+    specular_strength: f32,
+    shininess: f32,
+}
+
+fn get_material(feature: f32) -> Material {
+    if (feature < 0.5) {
+        return Material(0.0, 1.0);           // terrain
+    } else if (feature < 1.5) {
+        return Material(0.15, 32.0);          // building
+    } else if (feature < 2.5) {
+        return Material(0.08, 16.0);          // road
+    } else if (feature < 3.5) {
+        return Material(0.4, 64.0);           // water
+    } else {
+        return Material(0.0, 1.0);            // landuse
+    }
+}
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -92,22 +112,37 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.world_position = world_pos;
     out.world_normal = in.normal;
     out.color = in.color;
+    out.feature_type = in.feature_type;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let normal = normalize(in.world_normal);
     let light_dir = normalize(scene.sun_direction);
-    let ambient = scene.ambient_light;
-    let diffuse = max(dot(normalize(in.world_normal), light_dir), 0.0);
-    let lighting = ambient + diffuse * (1.0 - ambient);
+
+    // Hemisphere ambient
+    let hemisphere = mix(scene.ground_color, scene.sky_zenith, normal.y * 0.5 + 0.5);
+    let ambient = hemisphere * scene.ambient_light;
+
+    // Diffuse
+    let diffuse = max(dot(normal, light_dir), 0.0);
+
+    // Specular (Blinn-Phong)
+    let view_dir = normalize(scene.camera_pos - in.world_position);
+    let half_vec = normalize(light_dir + view_dir);
+    let mat = get_material(in.feature_type);
+    let spec = pow(max(dot(normal, half_vec), 0.0), mat.shininess);
+    let specular = mat.specular_strength * spec;
+
+    let lighting = ambient + (diffuse + specular) * (1.0 - scene.ambient_light);
     let lit_color = in.color * lighting;
 
     // Fog
     let dist = distance(in.world_position, scene.camera_pos);
     let fog_factor = get_fog_factor(dist);
-    let view_dir = normalize(in.world_position - scene.camera_pos);
-    let fog_color = get_sky_color(view_dir);
+    let fog_view_dir = normalize(in.world_position - scene.camera_pos);
+    let fog_color = get_sky_color(fog_view_dir);
     let final_color = mix(lit_color, fog_color, fog_factor);
 
     return vec4<f32>(final_color, 1.0);

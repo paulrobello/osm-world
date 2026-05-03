@@ -54,6 +54,7 @@ pub struct App {
     pub atmosphere: crate::atmosphere::AtmosphereSettings,
     pub day_cycle: crate::atmosphere::DayCycleState,
     pub show_settings: bool,
+    pub minimap: crate::ui::minimap::MinimapState,
 }
 
 impl App {
@@ -69,6 +70,7 @@ impl App {
             screenshot_taken: false,
             atmosphere: crate::atmosphere::AtmosphereSettings::default(),
             day_cycle: crate::atmosphere::DayCycleState::default(),
+            minimap: crate::ui::minimap::MinimapState::new(),
         }
     }
 }

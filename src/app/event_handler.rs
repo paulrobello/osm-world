@@ -127,6 +127,9 @@ impl ApplicationHandler for App {
                             KeyCode::F1 => {
                                 self.show_settings = !self.show_settings;
                             }
+                            KeyCode::KeyM => {
+                                self.minimap.visible = !self.minimap.visible;
+                            }
                             _ => {}
                         }
                     }
@@ -148,6 +151,7 @@ impl ApplicationHandler for App {
                         &mut self.atmosphere,
                         &mut self.day_cycle,
                         &mut self.show_settings,
+                        &mut self.minimap,
                     );
                 }
 

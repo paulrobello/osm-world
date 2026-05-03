@@ -11,6 +11,7 @@ pub fn render(
     atmosphere: &mut crate::atmosphere::AtmosphereSettings,
     day_cycle: &mut crate::atmosphere::DayCycleState,
     show_settings: &mut bool,
+    minimap: &mut crate::ui::minimap::MinimapState,
 ) {
     let output = match state.surface.get_current_texture() {
         CurrentSurfaceTexture::Success(frame) => frame,
@@ -122,11 +123,69 @@ pub fn render(
         pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
     }
 
+    // Minimap pass
+    if minimap.visible {
+        let minimap_uniforms = state.minimap_target.uniforms(
+            &state.camera,
+            day_cycle,
+            atmosphere,
+            minimap.zoom,
+        );
+        state.minimap_target.bind_group.update(&state.queue, &minimap_uniforms);
+
+        {
+            let mut minimap_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("minimap render pass"),
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: &state.minimap_target.color_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: Operations {
+                        load: LoadOp::Clear(Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                        store: StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: &state.minimap_target.depth_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Clear(1.0),
+                        store: StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                multiview_mask: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            minimap_pass.set_pipeline(&state.sky_pipeline.pipeline);
+            minimap_pass.set_bind_group(0, &state.minimap_target.bind_group.group, &[]);
+            minimap_pass.draw(0..3, 0..1);
+
+            minimap_pass.set_pipeline(&state.pipeline.pipeline);
+            minimap_pass.set_bind_group(0, &state.minimap_target.bind_group.group, &[]);
+            minimap_pass.set_bind_group(1, &state.shadow_bg.group, &[]);
+            minimap_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
+            minimap_pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
+            minimap_pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
+        }
+    }
+
     // egui pass
     let screen_descriptor = egui_wgpu::ScreenDescriptor {
         size_in_pixels: [state.surface_config.width, state.surface_config.height],
         pixels_per_point: state.window.scale_factor() as f32,
     };
+
+    if minimap.texture_id.is_none() {
+        minimap.texture_id = Some(
+            egui_state.renderer.register_native_texture(
+                &state.device,
+                &state.minimap_target.color_view,
+                wgpu::FilterMode::Linear,
+            ),
+        );
+    }
 
     let raw_input = egui_state.winit_state.take_egui_input(&state.window);
     #[allow(deprecated)]
@@ -135,6 +194,7 @@ pub fn render(
         if *show_settings {
             crate::ui::settings::draw(ctx, atmosphere, day_cycle, show_settings);
         }
+        crate::ui::minimap::draw(ctx, &state.camera, minimap);
     });
 
     egui_state

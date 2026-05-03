@@ -1,4 +1,5 @@
 pub mod hud;
+pub mod minimap;
 pub mod settings;
 
 pub struct EguiState {

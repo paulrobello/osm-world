@@ -1,6 +1,7 @@
 pub mod bind_groups;
 pub mod buffers;
 pub mod frustum;
+pub mod minimap;
 pub mod occlusion;
 pub mod pipelines;
 pub mod shadow_bind_group;

@@ -4,6 +4,7 @@ pub fn draw(
     ctx: &egui::Context,
     atm: &mut crate::atmosphere::AtmosphereSettings,
     day: &mut crate::atmosphere::DayCycleState,
+    performance: &mut crate::app::PerformanceState,
     show: &mut bool,
 ) {
     egui::Window::new("Settings")
@@ -12,6 +13,7 @@ pub fn draw(
         .show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
                 day_cycle_section(ui, day, atm);
+                performance_section(ui, performance);
                 clouds_section(ui, atm);
                 fog_section(ui, atm);
                 sky_colors_section(ui, atm);
@@ -49,6 +51,15 @@ fn day_cycle_section(
 
             ui.checkbox(&mut atm.shadow_cascade_debug, "Debug shadow cascades");
             ui.label("Debug colors: blue = near, orange = mid, purple = far fade");
+        });
+}
+
+fn performance_section(ui: &mut egui::Ui, performance: &mut crate::app::PerformanceState) {
+    CollapsingHeader::new(RichText::new("Performance").strong())
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.checkbox(&mut performance.show_fps, "Show FPS counter");
+            ui.label(format!("Current FPS: {:.0}", performance.fps));
         });
 }
 

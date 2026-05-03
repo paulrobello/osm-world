@@ -2,6 +2,7 @@ pub fn draw(
     ctx: &egui::Context,
     camera: &crate::camera::Flycam,
     day_cycle: &crate::atmosphere::DayCycleState,
+    performance: &crate::app::PerformanceState,
 ) {
     egui::Area::new(egui::Id::new("camera_hud"))
         .anchor(egui::Align2::LEFT_TOP, [8.0, 8.0])
@@ -13,6 +14,10 @@ pub fn draw(
                 .show(ui, |ui| {
                     ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
                     ui.set_min_width(280.0);
+
+                    if performance.show_fps {
+                        ui.label(format!("FPS:  {:.0}", performance.fps));
+                    }
 
                     let p = camera.position;
                     ui.label(format!("Pos:  ({:.1}, {:.1}, {:.1})", p.x, p.y, p.z));

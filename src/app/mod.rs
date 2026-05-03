@@ -45,6 +45,38 @@ pub struct AppOptions {
     pub streaming: StreamingOptions,
 }
 
+#[derive(Clone, Debug)]
+pub struct PerformanceState {
+    pub show_fps: bool,
+    pub fps: f32,
+    smoothed_frame_time: f32,
+}
+
+impl Default for PerformanceState {
+    fn default() -> Self {
+        Self {
+            show_fps: true,
+            fps: 0.0,
+            smoothed_frame_time: 0.0,
+        }
+    }
+}
+
+impl PerformanceState {
+    pub fn update(&mut self, dt: f32) {
+        if dt <= 0.0 {
+            return;
+        }
+
+        self.smoothed_frame_time = if self.smoothed_frame_time == 0.0 {
+            dt
+        } else {
+            self.smoothed_frame_time * 0.9 + dt * 0.1
+        };
+        self.fps = 1.0 / self.smoothed_frame_time;
+    }
+}
+
 pub struct App {
     pub state: Option<AppState>,
     pub egui: Option<crate::ui::EguiState>,
@@ -55,6 +87,7 @@ pub struct App {
     pub screenshot_taken: bool,
     pub atmosphere: crate::atmosphere::AtmosphereSettings,
     pub day_cycle: crate::atmosphere::DayCycleState,
+    pub performance: PerformanceState,
     pub show_settings: bool,
     pub minimap: crate::ui::minimap::MinimapState,
 }
@@ -82,6 +115,7 @@ impl App {
             screenshot_taken: false,
             atmosphere,
             day_cycle,
+            performance: PerformanceState::default(),
             minimap: crate::ui::minimap::MinimapState::default(),
         }
     }

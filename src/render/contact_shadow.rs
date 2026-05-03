@@ -1,14 +1,17 @@
 use wgpu::util::DeviceExt;
 use wgpu::*;
 
-use crate::camera::{CONTACT_SHADOW_MAX_DISTANCE, CONTACT_SHADOW_STRENGTH};
+use crate::camera::{
+    CONTACT_SHADOW_MAX_DISTANCE, CONTACT_SHADOW_MIN_OCCLUDER_HEIGHT, CONTACT_SHADOW_STRENGTH,
+};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct ContactShadowUniforms {
     max_distance: f32,
     strength: f32,
-    _pad: [f32; 2],
+    min_occluder_height: f32,
+    _pad: f32,
 }
 
 pub struct ContactShadowPass {
@@ -126,7 +129,8 @@ impl ContactShadowPass {
             contents: bytemuck::cast_slice(&[ContactShadowUniforms {
                 max_distance: CONTACT_SHADOW_MAX_DISTANCE,
                 strength: CONTACT_SHADOW_STRENGTH,
-                _pad: [0.0; 2],
+                min_occluder_height: CONTACT_SHADOW_MIN_OCCLUDER_HEIGHT,
+                _pad: 0.0,
             }]),
             usage: BufferUsages::UNIFORM,
         });

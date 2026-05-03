@@ -33,7 +33,8 @@ struct SceneUniforms {
 struct ContactShadowUniforms {
     max_distance: f32,
     strength: f32,
-    _pad: vec2<f32>,
+    min_occluder_height: f32,
+    _pad: f32,
 };
 
 @group(1) @binding(0) var scene_color: texture_2d<f32>;
@@ -98,8 +99,10 @@ fn contact_shadow(uv: vec2<f32>, world_pos: vec3<f32>) -> f32 {
         }
 
         let sampled_depth = load_scene_depth(ray_screen.xy);
+        let sampled_world = world_from_uv_depth(ray_screen.xy, sampled_depth);
+        let height_delta = sampled_world.y - world_pos.y;
         let depth_delta = ray_screen.z - sampled_depth;
-        if (depth_delta > 0.00002 && depth_delta < 0.01) {
+        if (height_delta > contact.min_occluder_height && depth_delta > 0.00002 && depth_delta < 0.01) {
             let step_weight = 1.0 - f32(step_index - 1u) / 6.0;
             occlusion = max(occlusion, step_weight);
         }

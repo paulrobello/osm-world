@@ -154,10 +154,13 @@ impl ApplicationHandler for App {
                         state,
                         egui,
                         screenshot_path.as_deref(),
-                        &mut self.atmosphere,
-                        &mut self.day_cycle,
-                        &mut self.show_settings,
-                        &mut self.minimap,
+                        render_loop::RenderUiState {
+                            atmosphere: &mut self.atmosphere,
+                            day_cycle: &mut self.day_cycle,
+                            show_settings: &mut self.show_settings,
+                            minimap: &mut self.minimap,
+                            performance: &mut self.performance,
+                        },
                     );
                 }
 

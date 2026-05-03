@@ -7,14 +7,19 @@ use crate::camera::{
 use crate::render::shadow_bind_group::LightUniforms;
 use crate::ui::EguiState;
 
+pub struct RenderUiState<'a> {
+    pub atmosphere: &'a mut crate::atmosphere::AtmosphereSettings,
+    pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
+    pub show_settings: &'a mut bool,
+    pub minimap: &'a mut crate::ui::minimap::MinimapState,
+    pub performance: &'a mut crate::app::PerformanceState,
+}
+
 pub fn render(
     state: &AppState,
     egui_state: &mut EguiState,
     screenshot_path: Option<&str>,
-    atmosphere: &mut crate::atmosphere::AtmosphereSettings,
-    day_cycle: &mut crate::atmosphere::DayCycleState,
-    show_settings: &mut bool,
-    minimap: &mut crate::ui::minimap::MinimapState,
+    ui_state: RenderUiState<'_>,
 ) {
     let output = match state.surface.get_current_texture() {
         CurrentSurfaceTexture::Success(frame) => frame,
@@ -34,7 +39,7 @@ pub fn render(
         .texture
         .create_view(&TextureViewDescriptor::default());
 
-    let light_dir = crate::atmosphere::dominant_light_direction(day_cycle.time_of_day);
+    let light_dir = crate::atmosphere::dominant_light_direction(ui_state.day_cycle.time_of_day);
     let cascades = state.camera.shadow_cascades(light_dir);
     let light_uniforms = LightUniforms {
         light_view_proj: cascades
@@ -49,7 +54,7 @@ pub fn render(
         ],
         shadow_pass_params: [
             0,
-            atmosphere.shadow_cascade_debug as u32,
+            ui_state.atmosphere.shadow_cascade_debug as u32,
             SHADOW_CASCADE_COUNT as u32,
             0,
         ],
@@ -147,11 +152,13 @@ pub fn render(
     }
 
     // Minimap pass
-    if minimap.visible {
-        let minimap_uniforms =
-            state
-                .minimap_target
-                .uniforms(&state.camera, day_cycle, atmosphere, minimap.zoom);
+    if ui_state.minimap.visible {
+        let minimap_uniforms = state.minimap_target.uniforms(
+            &state.camera,
+            ui_state.day_cycle,
+            ui_state.atmosphere,
+            ui_state.minimap.zoom,
+        );
         state
             .minimap_target
             .bind_group
@@ -229,8 +236,8 @@ pub fn render(
         pixels_per_point: state.window.scale_factor() as f32,
     };
 
-    if minimap.texture_id.is_none() {
-        minimap.texture_id = Some(egui_state.renderer.register_native_texture(
+    if ui_state.minimap.texture_id.is_none() {
+        ui_state.minimap.texture_id = Some(egui_state.renderer.register_native_texture(
             &state.device,
             &state.minimap_target.color_view,
             wgpu::FilterMode::Linear,
@@ -240,11 +247,17 @@ pub fn render(
     let raw_input = egui_state.winit_state.take_egui_input(&state.window);
     #[allow(deprecated)]
     let egui_output = egui_state.context.run(raw_input, |ctx| {
-        crate::ui::hud::draw(ctx, &state.camera, day_cycle);
-        if *show_settings {
-            crate::ui::settings::draw(ctx, atmosphere, day_cycle, show_settings);
+        crate::ui::hud::draw(ctx, &state.camera, ui_state.day_cycle, ui_state.performance);
+        if *ui_state.show_settings {
+            crate::ui::settings::draw(
+                ctx,
+                ui_state.atmosphere,
+                ui_state.day_cycle,
+                ui_state.performance,
+                ui_state.show_settings,
+            );
         }
-        crate::ui::minimap::draw(ctx, &state.camera, minimap);
+        crate::ui::minimap::draw(ctx, &state.camera, ui_state.minimap);
     });
 
     egui_state

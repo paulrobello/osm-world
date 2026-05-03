@@ -67,8 +67,20 @@ impl MinimapTarget {
         day: &crate::atmosphere::DayCycleState,
         atm: &crate::atmosphere::AtmosphereSettings,
         zoom_radius: f32,
+        rotate_with_camera: bool,
     ) -> SceneUniforms {
-        let view = glam::Mat4::look_to_rh(main_camera.position, glam::Vec3::NEG_Y, glam::Vec3::Z);
+        let map_up = if rotate_with_camera {
+            let forward = main_camera.forward();
+            glam::Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero()
+        } else {
+            glam::Vec3::NEG_Z
+        };
+        let map_up = if map_up.length_squared() > 0.0 {
+            map_up
+        } else {
+            glam::Vec3::NEG_Z
+        };
+        let view = glam::Mat4::look_to_rh(main_camera.position, glam::Vec3::NEG_Y, map_up);
         let proj = glam::Mat4::orthographic_rh(
             -zoom_radius,
             zoom_radius,

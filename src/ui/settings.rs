@@ -5,6 +5,7 @@ pub fn draw(
     atm: &mut crate::atmosphere::AtmosphereSettings,
     day: &mut crate::atmosphere::DayCycleState,
     performance: &mut crate::app::PerformanceState,
+    minimap: &mut crate::ui::minimap::MinimapState,
     show: &mut bool,
 ) {
     egui::Window::new("Settings")
@@ -14,6 +15,7 @@ pub fn draw(
             ScrollArea::vertical().show(ui, |ui| {
                 day_cycle_section(ui, day, atm);
                 performance_section(ui, performance);
+                minimap_section(ui, minimap);
                 clouds_section(ui, atm);
                 fog_section(ui, atm);
                 sky_colors_section(ui, atm);
@@ -60,6 +62,15 @@ fn performance_section(ui: &mut egui::Ui, performance: &mut crate::app::Performa
         .show(ui, |ui| {
             ui.checkbox(&mut performance.show_fps, "Show FPS counter");
             ui.label(format!("Current FPS: {:.0}", performance.fps));
+        });
+}
+
+fn minimap_section(ui: &mut egui::Ui, minimap: &mut crate::ui::minimap::MinimapState) {
+    CollapsingHeader::new(RichText::new("Minimap").strong())
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.checkbox(&mut minimap.visible, "Visible");
+            ui.checkbox(&mut minimap.rotate_with_camera, "Rotate map with camera");
         });
 }
 

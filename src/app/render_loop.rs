@@ -158,6 +158,7 @@ pub fn render(
             ui_state.day_cycle,
             ui_state.atmosphere,
             ui_state.minimap.zoom,
+            ui_state.minimap.rotate_with_camera,
         );
         state
             .minimap_target
@@ -254,6 +255,7 @@ pub fn render(
                 ui_state.atmosphere,
                 ui_state.day_cycle,
                 ui_state.performance,
+                ui_state.minimap,
                 ui_state.show_settings,
             );
         }

@@ -65,7 +65,7 @@ pub fn render(
             occlusion_query_set: None,
         });
         shadow_pass.set_pipeline(&state.shadow_pipeline.pipeline);
-        shadow_pass.set_bind_group(0, &state.shadow_bg.group, &[]);
+        shadow_pass.set_bind_group(0, &state.shadow_bg.pass_group, &[]);
         shadow_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
         shadow_pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
         shadow_pass.draw_indexed(0..state.scene.index_count, 0, 0..1);

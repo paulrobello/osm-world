@@ -68,11 +68,7 @@ impl MinimapTarget {
         atm: &crate::atmosphere::AtmosphereSettings,
         zoom_radius: f32,
     ) -> SceneUniforms {
-        let view = glam::Mat4::look_to_rh(
-            main_camera.position,
-            glam::Vec3::NEG_Y,
-            glam::Vec3::Z,
-        );
+        let view = glam::Mat4::look_to_rh(main_camera.position, glam::Vec3::NEG_Y, glam::Vec3::Z);
         let proj = glam::Mat4::orthographic_rh(
             -zoom_radius,
             zoom_radius,

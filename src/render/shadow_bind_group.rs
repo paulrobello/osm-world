@@ -7,8 +7,14 @@ pub struct LightUniforms {
 }
 
 pub struct ShadowBindGroup {
+    /// Layout used by the city pipeline's group(1) for shadow sampling (texture + sampler + uniform).
     pub layout: BindGroupLayout,
+    /// Bind group for the city pipeline's group(1).
     pub group: BindGroup,
+    /// Layout used by the shadow pipeline's group(0) for light VP only (uniform at binding 0).
+    pub pass_layout: BindGroupLayout,
+    /// Bind group for the shadow pipeline's group(0).
+    pub pass_group: BindGroup,
     pub uniform_buffer: Buffer,
     pub depth_texture: Texture,
     pub depth_view: TextureView,
@@ -103,9 +109,35 @@ impl ShadowBindGroup {
             ],
         });
 
+        // Shadow pass layout: uniform buffer at binding 0, visible to vertex stage only.
+        let pass_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("shadow pass layout"),
+            entries: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::VERTEX,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let pass_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("shadow pass bind group"),
+            layout: &pass_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+
         Self {
             layout,
             group,
+            pass_layout,
+            pass_group,
             uniform_buffer,
             depth_texture,
             depth_view,

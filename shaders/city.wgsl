@@ -155,10 +155,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let hemisphere = mix(scene.ground_color, scene.sky_zenith, normal.y * 0.5 + 0.5);
     let ambient = hemisphere * scene.ambient_light;
 
-    // Diffuse
-    let diffuse = max(dot(normal, light_dir), 0.0);
+    // Diffuse + shadow
     let shadow_factor = sample_shadow(in.world_position, normal);
-    let diffuse = diffuse * shadow_factor;
+    let diffuse = max(dot(normal, light_dir), 0.0) * shadow_factor;
 
     // Specular (Blinn-Phong)
     let view_dir = normalize(scene.camera_pos - in.world_position);

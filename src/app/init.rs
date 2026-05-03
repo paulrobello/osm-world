@@ -103,7 +103,7 @@ pub fn init_wgpu(
         surface_format,
     );
     let sky_pipeline = SkyPipeline::new(&device, &camera_bg.layout, surface_format);
-    let shadow_pipeline = ShadowPipeline::new(&device, &shadow_bg.layout);
+    let shadow_pipeline = ShadowPipeline::new(&device, &shadow_bg.pass_layout);
     let occlusion = OcclusionQueries::new(&device, 256);
     let minimap_target = MinimapTarget::new(&device, surface_format);
 

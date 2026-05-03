@@ -1,5 +1,5 @@
-use wgpu::*;
 use wgpu::util::DeviceExt;
+use wgpu::*;
 
 /// Manages hardware occlusion queries for tile culling.
 pub struct OcclusionQueries {
@@ -21,22 +21,28 @@ impl OcclusionQueries {
         let result_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("occlusion result buffer"),
             size: (max_queries as u64) * std::mem::size_of::<u64>() as u64,
-            usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ,
+            usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
         // Unit cube: 8 vertices, 12 triangles (36 indices)
         let cube_verts: [[f32; 3]; 8] = [
-            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [0.0, 1.0, 1.0],
         ];
         let cube_indices: [u32; 36] = [
-            0,1,2, 0,2,3, // front
-            4,6,5, 4,7,6, // back
-            0,4,5, 0,5,1, // bottom
-            2,7,3, 2,6,7, // top
-            0,3,7, 0,7,4, // left
-            1,5,6, 1,6,2, // right
+            0, 1, 2, 0, 2, 3, // front
+            4, 6, 5, 4, 7, 6, // back
+            0, 4, 5, 0, 5, 1, // bottom
+            2, 7, 3, 2, 6, 7, // top
+            0, 3, 7, 0, 7, 4, // left
+            1, 5, 6, 1, 6, 2, // right
         ];
 
         let cube_vertices = device.create_buffer_init(&util::BufferInitDescriptor {

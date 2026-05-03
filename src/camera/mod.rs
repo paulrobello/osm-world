@@ -132,7 +132,9 @@ impl Flycam {
     pub fn light_view_proj(&self, sun_direction: [f32; 3]) -> glam::Mat4 {
         let sun_dir = glam::Vec3::from(sun_direction).normalize();
 
-        let half_extent = 1000.0;
+        // Shadow cascade covers a large area around the camera so the shadow
+        // square edge isn't visible at city scale.
+        let half_extent = 5000.0;
 
         let light_pos = self.position + sun_dir * half_extent;
         let light_view = glam::Mat4::look_to_rh(light_pos, -sun_dir, glam::Vec3::Y);

@@ -2,5 +2,7 @@ pub mod bind_groups;
 pub mod buffers;
 pub mod frustum;
 pub mod pipelines;
+pub mod shadow_bind_group;
+pub mod shadow_pipeline;
 pub mod sky_pipeline;
 pub mod vertex;

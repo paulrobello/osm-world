@@ -126,4 +126,23 @@ impl Flycam {
             _pad7: 0.0,
         }
     }
+
+    /// Compute the light view-projection matrix for directional shadow mapping.
+    /// Fits an orthographic projection around the camera frustum as seen from the sun.
+    pub fn light_view_proj(&self, sun_direction: [f32; 3]) -> glam::Mat4 {
+        let sun_dir = glam::Vec3::from(sun_direction).normalize();
+
+        let half_extent = 1000.0;
+
+        let light_pos = self.position + sun_dir * half_extent;
+        let light_view = glam::Mat4::look_to_rh(light_pos, -sun_dir, glam::Vec3::Y);
+
+        let light_proj = glam::Mat4::orthographic_rh(
+            -half_extent, half_extent,
+            -half_extent, half_extent,
+            0.0, half_extent * 3.0,
+        );
+
+        light_proj * light_view
+    }
 }

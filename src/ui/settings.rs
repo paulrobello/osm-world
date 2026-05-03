@@ -95,11 +95,13 @@ fn sky_colors_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::Atmosphere
         .show(ui, |ui| {
             color_edit_rgb(ui, "Zenith", &mut atm.sky_color_zenith);
             color_edit_rgb(ui, "Horizon", &mut atm.sky_color_horizon);
+            color_edit_rgb(ui, "Ground Ambient", &mut atm.ground_color);
 
             if ui.button("Reset to Defaults").clicked() {
                 let defaults = crate::atmosphere::AtmosphereSettings::default();
                 atm.sky_color_zenith = defaults.sky_color_zenith;
                 atm.sky_color_horizon = defaults.sky_color_horizon;
+                atm.ground_color = defaults.ground_color;
             }
         });
 }

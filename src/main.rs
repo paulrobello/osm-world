@@ -50,6 +50,18 @@ struct Args {
     #[arg(long)]
     srtm_dir: Option<String>,
 
+    /// Run the HTTP API server instead of opening the renderer window
+    #[arg(long)]
+    serve: bool,
+
+    /// API server host when --serve is used
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
+    /// API server port when --serve is used
+    #[arg(long, default_value_t = 3030)]
+    port: u16,
+
     /// Save a screenshot to PATH after rendering starts
     #[arg(long)]
     screenshot: Option<String>,
@@ -132,6 +144,15 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     log::info!("osm-world starting");
 
+    if args.serve {
+        let rt = tokio::runtime::Runtime::new()?;
+        return rt.block_on(osm_world::server::run(
+            &args.host,
+            args.port,
+            std::env::current_dir()?,
+        ));
+    }
+
     let event_loop = winit::event_loop::EventLoop::new()?;
 
     let cam_override = if args.cam_x.is_some()
@@ -199,6 +220,23 @@ mod tests {
 
         assert_eq!(args.time_of_day, Some(21.5));
         assert!(args.debug_shadow_cascades);
+    }
+
+    #[test]
+    fn parses_serve_flags() {
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--serve",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "3031",
+        ])
+        .unwrap();
+
+        assert!(args.serve);
+        assert_eq!(args.host, "0.0.0.0");
+        assert_eq!(args.port, 3031);
     }
 
     #[test]

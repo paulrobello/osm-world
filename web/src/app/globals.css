@@ -15,6 +15,8 @@
   --amber-soft: rgba(255, 178, 62, 0.2);
   --green: #65f0a2;
   --green-soft: rgba(101, 240, 162, 0.18);
+  --spawn: #ff4fd8;
+  --spawn-soft: rgba(255, 79, 216, 0.2);
   --danger: #ff6b4a;
   --shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
   --mono: "Berkeley Mono", "TX-02", "Iosevka", "SFMono-Regular", Consolas, monospace;
@@ -404,6 +406,13 @@ h1 .accent,
   background: var(--amber-soft);
 }
 
+.legend-swatch.spawn {
+  border: 2px solid #fff0fb;
+  border-radius: 999px;
+  background: var(--spawn);
+  box-shadow: 0 0 16px var(--spawn-soft);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -621,6 +630,31 @@ h1 .accent,
 
 .copy-button {
   margin-top: 0.75rem;
+}
+
+.spawn-controls {
+  border-color: rgba(255, 79, 216, 0.3);
+}
+
+.spawn-controls .coordinate-grid,
+.button-row {
+  margin-top: 0.7rem;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.button-row .ghost-button {
+  margin-top: 0;
+}
+
+.danger-button {
+  border-color: rgba(255, 107, 74, 0.45);
+  color: #ffd6ca;
+  background: rgba(255, 107, 74, 0.08);
 }
 
 @media (max-width: 860px) {

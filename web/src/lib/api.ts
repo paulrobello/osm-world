@@ -29,6 +29,8 @@ export interface PrepareAreaResponse {
   cache_status: string;
   osm_path: string;
   srtm_dir: string | null;
+  spawn_lat: number | null;
+  spawn_lon: number | null;
   command: string;
   command_cwd: string;
   command_program: string;
@@ -59,6 +61,8 @@ export function prepareArea(body: {
   filter: FeatureFilter;
   use_elevation: boolean;
   force_refresh: boolean;
+  spawn_lat?: number;
+  spawn_lon?: number;
 }): Promise<PrepareAreaResponse> {
   return apiJson('/areas/prepare', {
     method: 'POST',

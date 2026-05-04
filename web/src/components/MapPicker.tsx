@@ -4,23 +4,29 @@ import { useEffect, useRef } from 'react';
 import Feature from 'ol/Feature';
 import Map from 'ol/Map';
 import View from 'ol/View';
-import { fromLonLat, transformExtent } from 'ol/proj';
+import { fromLonLat, toLonLat, transformExtent } from 'ol/proj';
 import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
 import OSM from 'ol/source/OSM';
 import VectorSource from 'ol/source/Vector';
 import Draw, { createBox } from 'ol/interaction/Draw';
-import { Fill, Stroke, Style } from 'ol/style';
+import { Circle as CircleStyle, Fill, Stroke, Style } from 'ol/style';
+import Point from 'ol/geom/Point';
 import { fromExtent } from 'ol/geom/Polygon';
 import type { Geometry } from 'ol/geom';
+import { unByKey } from 'ol/Observable';
 import type { CacheEntry } from '@/lib/api';
 
 export type BBox = [south: number, west: number, north: number, east: number];
+export type SpawnPoint = { lat: number; lon: number };
 
 interface MapPickerProps {
   cachedAreas: CacheEntry[];
   selectedBbox: BBox | null;
   onBboxChange: (bbox: BBox) => void;
+  spawnPoint: SpawnPoint | null;
+  onSpawnChange: (spawnPoint: SpawnPoint) => void;
+  spawnMode: boolean;
   disabled?: boolean;
 }
 
@@ -39,10 +45,22 @@ function normalizeBbox([south, west, north, east]: BBox): BBox {
   ];
 }
 
+function normalizeSpawnPoint({ lat, lon }: SpawnPoint): SpawnPoint {
+  return {
+    lat: clamp(lat, -90, 90),
+    lon: clamp(lon, -180, 180),
+  };
+}
+
 function bboxToFeature(bbox: BBox, label: string): Feature {
   const [south, west, north, east] = normalizeBbox(bbox);
   const mercatorExtent = transformExtent([west, south, east, north], 'EPSG:4326', 'EPSG:3857');
   return new Feature({ geometry: fromExtent(mercatorExtent), label });
+}
+
+function spawnToFeature(spawnPoint: SpawnPoint): Feature {
+  const { lat, lon } = normalizeSpawnPoint(spawnPoint);
+  return new Feature({ geometry: new Point(fromLonLat([lon, lat])), label: 'spawn point' });
 }
 
 function extentToBbox(geometry: Geometry): BBox {
@@ -65,17 +83,49 @@ const drawStyle = new Style({
   stroke: new Stroke({ color: '#e8f6dc', width: 2 }),
 });
 
-export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, disabled = false }: MapPickerProps) {
+const spawnStyle = new Style({
+  image: new CircleStyle({
+    radius: 8,
+    fill: new Fill({ color: '#ff4fd8' }),
+    stroke: new Stroke({ color: '#fff0fb', width: 3 }),
+  }),
+});
+
+export default function MapPicker({
+  cachedAreas,
+  selectedBbox,
+  onBboxChange,
+  spawnPoint,
+  onSpawnChange,
+  spawnMode,
+  disabled = false,
+}: MapPickerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const selectedSourceRef = useRef<VectorSource | null>(null);
   const cacheSourceRef = useRef<VectorSource | null>(null);
+  const spawnSourceRef = useRef<VectorSource | null>(null);
   const drawRef = useRef<Draw | null>(null);
   const onBboxChangeRef = useRef(onBboxChange);
+  const onSpawnChangeRef = useRef(onSpawnChange);
+  const disabledRef = useRef(disabled);
+  const spawnModeRef = useRef(spawnMode);
 
   useEffect(() => {
     onBboxChangeRef.current = onBboxChange;
   }, [onBboxChange]);
+
+  useEffect(() => {
+    onSpawnChangeRef.current = onSpawnChange;
+  }, [onSpawnChange]);
+
+  useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
+
+  useEffect(() => {
+    spawnModeRef.current = spawnMode;
+  }, [spawnMode]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) {
@@ -84,11 +134,14 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
 
     const selectedSource = new VectorSource();
     const cacheSource = new VectorSource();
+    const spawnSource = new VectorSource();
     selectedSourceRef.current = selectedSource;
     cacheSourceRef.current = cacheSource;
+    spawnSourceRef.current = spawnSource;
 
     const cacheLayer = new VectorLayer({ source: cacheSource, style: cachedStyle, zIndex: 5 });
     const selectedLayer = new VectorLayer({ source: selectedSource, style: selectedStyle, zIndex: 10 });
+    const spawnLayer = new VectorLayer({ source: spawnSource, style: spawnStyle, zIndex: 15 });
 
     const map = new Map({
       target: containerRef.current,
@@ -96,6 +149,7 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
         new TileLayer({ source: new OSM(), zIndex: 0 }),
         cacheLayer,
         selectedLayer,
+        spawnLayer,
       ],
       view: new View({
         center: fromLonLat(SACRAMENTO_CENTER),
@@ -125,27 +179,39 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
       onBboxChangeRef.current(extentToBbox(geometry));
     });
 
-    draw.setActive(!disabled);
+    const singleClickKey = map.on('singleclick', (event) => {
+      if (disabledRef.current || !spawnModeRef.current) {
+        return;
+      }
+
+      const [lon, lat] = toLonLat(event.coordinate);
+      onSpawnChangeRef.current(normalizeSpawnPoint({ lat, lon }));
+    });
+
+    draw.setActive(!disabled && !spawnMode);
     map.addInteraction(draw);
     drawRef.current = draw;
     mapRef.current = map;
 
     return () => {
+      unByKey(singleClickKey);
       map.removeInteraction(draw);
       selectedSource.clear();
       cacheSource.clear();
+      spawnSource.clear();
       map.setTarget(undefined);
       map.dispose();
       mapRef.current = null;
       selectedSourceRef.current = null;
       cacheSourceRef.current = null;
+      spawnSourceRef.current = null;
       drawRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    drawRef.current?.setActive(!disabled);
-  }, [disabled]);
+    drawRef.current?.setActive(!disabled && !spawnMode);
+  }, [disabled, spawnMode]);
 
   useEffect(() => {
     const cacheSource = cacheSourceRef.current;
@@ -171,27 +237,46 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
     }
   }, [selectedBbox]);
 
+  useEffect(() => {
+    const spawnSource = spawnSourceRef.current;
+    if (!spawnSource) {
+      return;
+    }
+
+    spawnSource.clear();
+    if (spawnPoint) {
+      spawnSource.addFeature(spawnToFeature(spawnPoint));
+    }
+  }, [spawnPoint]);
+
   return (
-    <section className="map-canvas" aria-label="Interactive OpenStreetMap bounding box picker">
+    <section className="map-canvas" aria-label="Interactive OpenStreetMap bounding box and spawn point picker">
       <div
         ref={containerRef}
         className={`ol-map${disabled ? ' ol-map-disabled' : ''}`}
         tabIndex={disabled ? -1 : 0}
         role="application"
-        aria-label="Interactive map bbox drawing surface"
+        aria-label="Interactive map bbox drawing and spawn point selection surface"
         aria-describedby="map-picker-instructions"
         aria-disabled={disabled}
       />
       <div className="map-hud" aria-hidden="true">
-        <span>{disabled ? 'Preparing' : 'Draw mode'}</span>
-        <strong>{disabled ? 'bbox edits locked during request' : 'drag a rectangle to replace the active bbox'}</strong>
+        <span>{disabled ? 'Preparing' : spawnMode ? 'Spawn mode' : 'Draw mode'}</span>
+        <strong>
+          {disabled
+            ? 'bbox and spawn edits locked during request'
+            : spawnMode
+              ? 'click the map to place the spawn point'
+              : 'drag a rectangle to replace the active bbox'}
+        </strong>
       </div>
       <p id="map-picker-instructions" className="sr-only">
-        Pointer users can drag a rectangle on the map. Keyboard users can enter south, west, north, and east values in the manual bbox form.
+        Pointer users can drag a rectangle on the map. Enable set-on-map spawn mode to click a spawn point. Keyboard users can enter south, west, north, east, spawn latitude, and spawn longitude values in the manual forms.
       </p>
       <div className="map-legend" aria-label="Map overlay legend">
         <span><i className="legend-swatch selected" /> selected bbox</span>
         <span><i className="legend-swatch cached" /> cached area</span>
+        <span><i className="legend-swatch spawn" /> spawn point</span>
       </div>
     </section>
   );

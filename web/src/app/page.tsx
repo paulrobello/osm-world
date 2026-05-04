@@ -12,7 +12,7 @@ import {
   type FeatureFilter,
   type PrepareAreaResponse,
 } from '@/lib/api';
-import type { BBox } from '@/components/MapPicker';
+import type { BBox, SpawnPoint } from '@/components/MapPicker';
 
 const MapPicker = dynamic(() => import('@/components/MapPicker'), {
   ssr: false,
@@ -37,6 +37,14 @@ function formatBbox(bbox: BBox | null): string {
   return bbox.map((value) => value.toFixed(5)).join(', ');
 }
 
+function formatSpawnPoint(spawnPoint: SpawnPoint | null): string {
+  if (!spawnPoint) {
+    return 'No spawn point selected';
+  }
+
+  return `${spawnPoint.lat.toFixed(5)}, ${spawnPoint.lon.toFixed(5)}`;
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return '0 B';
@@ -57,6 +65,12 @@ export default function Home() {
     north: '',
     east: '',
   });
+  const [spawnPoint, setSpawnPoint] = useState<SpawnPoint | null>(null);
+  const [manualSpawn, setManualSpawn] = useState({
+    lat: '',
+    lon: '',
+  });
+  const [spawnMode, setSpawnMode] = useState(false);
   const [filter, setFilter] = useState<FeatureFilter>(defaultFilter);
   const [useElevation, setUseElevation] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
@@ -120,6 +134,16 @@ export default function Home() {
     });
   }, [selectedBbox]);
 
+  useEffect(() => {
+    if (!spawnPoint) {
+      return;
+    }
+    setManualSpawn({
+      lat: spawnPoint.lat.toFixed(6),
+      lon: spawnPoint.lon.toFixed(6),
+    });
+  }, [spawnPoint]);
+
   const toggleFeature = (name: keyof FeatureFilter) => {
     if (isPreparing) {
       return;
@@ -146,6 +170,33 @@ export default function Home() {
     setSelectedBbox([south, west, north, east]);
   };
 
+  const applyManualSpawn = () => {
+    const lat = Number(manualSpawn.lat);
+    const lon = Number(manualSpawn.lon);
+
+    if (![lat, lon].every(Number.isFinite)) {
+      setPrepareError('Manual spawn values must be finite numbers.');
+      return;
+    }
+    if (lat < -90 || lat > 90) {
+      setPrepareError('Manual spawn latitude must be in -90..=90.');
+      return;
+    }
+    if (lon < -180 || lon > 180) {
+      setPrepareError('Manual spawn longitude must be in -180..=180.');
+      return;
+    }
+
+    setPrepareError(null);
+    setSpawnPoint({ lat, lon });
+  };
+
+  const clearSpawn = () => {
+    setSpawnPoint(null);
+    setManualSpawn({ lat: '', lon: '' });
+    setPrepareError(null);
+  };
+
   const handlePrepare = async () => {
     if (!selectedBbox) {
       setPrepareError('Draw a bounding box before preparing area data.');
@@ -163,6 +214,7 @@ export default function Home() {
         filter,
         use_elevation: useElevation,
         force_refresh: forceRefresh,
+        ...(spawnPoint ? { spawn_lat: spawnPoint.lat, spawn_lon: spawnPoint.lon } : {}),
       });
       setPreparedArea(prepared);
       const refreshedAreas = await fetchCacheAreas().catch(() => null);
@@ -231,10 +283,12 @@ export default function Home() {
             </button>
           </section>
 
-          <section className="bbox-readout" aria-labelledby="bbox-title">
-            <h2 id="bbox-title">Selected bbox</h2>
+          <section className="bbox-readout" aria-labelledby="selection-title">
+            <h2 id="selection-title">Selected area</h2>
             <code>[south, west, north, east]</code>
             <output>{formatBbox(selectedBbox)}</output>
+            <code>[spawn lat, spawn lon]</code>
+            <output>{formatSpawnPoint(spawnPoint)}</output>
           </section>
 
           <section className="control-group" aria-labelledby="features-title">
@@ -284,6 +338,48 @@ export default function Home() {
               Apply manual bbox
             </button>
           </section>
+          <section className="control-group spawn-controls" aria-labelledby="spawn-title">
+            <div className="section-heading">
+              <h2 id="spawn-title">Spawn point</h2>
+              <span>{spawnPoint ? 'set' : 'optional'}</span>
+            </div>
+            <p className="microcopy">
+              Choose where the prepared scene should start, either by clicking the map or by entering coordinates.
+            </p>
+            <label className="toggle-row">
+              <span>Set on map</span>
+              <input
+                type="checkbox"
+                checked={spawnMode}
+                disabled={isPreparing}
+                onChange={() => setSpawnMode((value) => !value)}
+              />
+            </label>
+            <div className="coordinate-grid">
+              {(['lat', 'lon'] as const).map((name) => (
+                <label className="coordinate-field" key={name}>
+                  <span>{name}</span>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={manualSpawn[name]}
+                    disabled={isPreparing}
+                    onChange={(event) => setManualSpawn((current) => ({ ...current, [name]: event.target.value }))}
+                    placeholder={name === 'lat' ? '38.581600' : '-121.494400'}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="button-row">
+              <button className="ghost-button" type="button" onClick={applyManualSpawn} disabled={isPreparing}>
+                Apply spawn
+              </button>
+              <button className="ghost-button danger-button" type="button" onClick={clearSpawn} disabled={isPreparing || !spawnPoint}>
+                Clear spawn
+              </button>
+            </div>
+          </section>
+
 
           <section className="control-group" aria-labelledby="prepare-title">
             <div className="section-heading">
@@ -328,6 +424,12 @@ export default function Home() {
                   <dt>Cache key</dt>
                   <dd>{preparedArea.cache_key}</dd>
                 </div>
+                {preparedArea.spawn_lat !== null && preparedArea.spawn_lon !== null ? (
+                  <div>
+                    <dt>Spawn point</dt>
+                    <dd>{preparedArea.spawn_lat.toFixed(6)}, {preparedArea.spawn_lon.toFixed(6)}</dd>
+                  </div>
+                ) : null}
               </dl>
               <label className="command-box">
                 <span>Launch command</span>
@@ -342,7 +444,15 @@ export default function Home() {
         </div>
       </section>
 
-      <MapPicker cachedAreas={cacheAreas} selectedBbox={selectedBbox} onBboxChange={setSelectedBbox} disabled={isPreparing} />
+      <MapPicker
+        cachedAreas={cacheAreas}
+        selectedBbox={selectedBbox}
+        onBboxChange={setSelectedBbox}
+        spawnPoint={spawnPoint}
+        onSpawnChange={setSpawnPoint}
+        spawnMode={spawnMode}
+        disabled={isPreparing}
+      />
     </main>
   );
 }

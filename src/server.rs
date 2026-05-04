@@ -31,6 +31,8 @@ pub struct PrepareAreaRequest {
     #[serde(default)]
     pub force_refresh: bool,
     pub overpass_url: Option<String>,
+    pub spawn_lat: Option<f64>,
+    pub spawn_lon: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +42,8 @@ pub struct PrepareAreaResponse {
     pub cache_status: String,
     pub osm_path: String,
     pub srtm_dir: Option<String>,
+    pub spawn_lat: Option<f64>,
+    pub spawn_lon: Option<f64>,
     pub command: String,
     pub command_cwd: String,
     pub command_program: String,
@@ -229,6 +233,7 @@ pub(crate) fn prepare_area(
     project_root: &Path,
 ) -> PrepareResult<PrepareAreaResponse> {
     let bbox = validate_bbox(req.bbox)?;
+    let spawn = validate_spawn(req.spawn_lat, req.spawn_lon, bbox)?;
     validate_filter(&req.filter)?;
     if let Some(url) = req.overpass_url.as_deref() {
         par_osm_rust::overpass::validate_overpass_url(url)
@@ -321,6 +326,12 @@ pub(crate) fn prepare_area(
         "--input".to_string(),
         osm_path.clone(),
     ];
+    if let Some((lat, lon)) = spawn {
+        command_args.push("--spawn-lat".to_string());
+        command_args.push(lat.to_string());
+        command_args.push("--spawn-lon".to_string());
+        command_args.push(lon.to_string());
+    }
     if let Some(srtm_dir) = &srtm_dir {
         command_args.push("--srtm-dir".to_string());
         command_args.push(srtm_dir.clone());
@@ -334,6 +345,8 @@ pub(crate) fn prepare_area(
         cache_status: cache_status.unwrap_or_else(|| "unknown".to_string()),
         osm_path,
         srtm_dir,
+        spawn_lat: spawn.map(|(lat, _)| lat),
+        spawn_lon: spawn.map(|(_, lon)| lon),
         command,
         command_cwd: path_string(project_root),
         command_program,
@@ -398,6 +411,52 @@ fn validate_bbox(bbox: [f64; 4]) -> PrepareResult<(f64, f64, f64, f64)> {
     }
 
     Ok((south, west, north, east))
+}
+
+fn validate_spawn(
+    spawn_lat: Option<f64>,
+    spawn_lon: Option<f64>,
+    bbox: (f64, f64, f64, f64),
+) -> PrepareResult<Option<(f64, f64)>> {
+    let (lat, lon) = match (spawn_lat, spawn_lon) {
+        (None, None) => return Ok(None),
+        (Some(lat), Some(lon)) => (lat, lon),
+        _ => {
+            return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+                "spawn_lat and spawn_lon must be provided together"
+            )));
+        }
+    };
+
+    if !lat.is_finite() {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid spawn_lat: latitude must be finite"
+        )));
+    }
+    if !lon.is_finite() {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid spawn_lon: longitude must be finite"
+        )));
+    }
+    if !(-90.0..=90.0).contains(&lat) {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid spawn_lat: latitude must be in -90..=90"
+        )));
+    }
+    if !(-180.0..=180.0).contains(&lon) {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid spawn_lon: longitude must be in -180..=180"
+        )));
+    }
+
+    let (south, west, north, east) = bbox;
+    if lat < south || lat > north || lon < west || lon > east {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "spawn point must be inside requested bbox"
+        )));
+    }
+
+    Ok(Some((lat, lon)))
 }
 
 fn validate_srtm_tile_limit(bbox: (f64, f64, f64, f64)) -> PrepareResult<()> {
@@ -546,7 +605,53 @@ mod tests {
             use_elevation: false,
             force_refresh: false,
             overpass_url: None,
+            spawn_lat: None,
+            spawn_lon: None,
         }
+    }
+
+    #[test]
+    fn prepare_area_uses_exact_cached_xml_with_spawn_point() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        let cache_key = cache_xml_for_bbox(bbox, &filter);
+        let mut req = cached_prepare_request(bbox, filter);
+        req.spawn_lat = Some(38.0005);
+        req.spawn_lon = Some(-120.9995);
+
+        let response = prepare_area(req, tmp.path()).unwrap();
+
+        assert_eq!(response.cache_key, cache_key);
+        assert_eq!(response.cache_status, "exact_cache_hit");
+        assert_eq!(response.spawn_lat, Some(38.0005));
+        assert_eq!(response.spawn_lon, Some(-120.9995));
+        assert!(response.command_args.iter().any(|arg| arg == "--spawn-lat"));
+        assert!(response.command_args.iter().any(|arg| arg == "38.0005"));
+        assert!(response.command_args.iter().any(|arg| arg == "--spawn-lon"));
+        assert!(response.command_args.iter().any(|arg| arg == "-120.9995"));
+        let input_index = response
+            .command_args
+            .iter()
+            .position(|arg| arg == "--input")
+            .unwrap();
+        assert_eq!(response.command_args[input_index + 2], "--spawn-lat");
+        assert_eq!(response.command_args[input_index + 3], "38.0005");
+        assert_eq!(response.command_args[input_index + 4], "--spawn-lon");
+        assert_eq!(response.command_args[input_index + 5], "-120.9995");
+        assert!(response.command.contains("--spawn-lat 38.0005"));
+        assert!(response.command.contains("--spawn-lon -120.9995"));
     }
 
     #[test]
@@ -626,6 +731,44 @@ mod tests {
         assert_eq!(response.command_args[2], manifest_path);
         assert!(response.command.contains(&shell_quote(&manifest_path)));
         assert!(response.command.contains(" -- --input "));
+    }
+
+    #[test]
+    fn validate_spawn_rejects_invalid_spawn_points() {
+        let bbox = (38.0, -121.0, 38.001, -120.999);
+
+        assert!(validate_spawn(None, None, bbox).unwrap().is_none());
+        assert!(matches!(
+            validate_spawn(Some(38.0005), None, bbox),
+            Err(PrepareAreaError::BadRequest { .. })
+        ));
+        assert!(matches!(
+            validate_spawn(None, Some(-120.9995), bbox),
+            Err(PrepareAreaError::BadRequest { .. })
+        ));
+
+        for (lat, lon) in [
+            (f64::NAN, -120.9995),
+            (f64::INFINITY, -120.9995),
+            (90.1, -120.9995),
+            (-90.1, -120.9995),
+            (38.0005, f64::NAN),
+            (38.0005, f64::INFINITY),
+            (38.0005, 180.1),
+            (38.0005, -180.1),
+            (37.9999, -120.9995),
+            (38.0011, -120.9995),
+            (38.0005, -121.0001),
+            (38.0005, -120.9989),
+        ] {
+            assert!(
+                matches!(
+                    validate_spawn(Some(lat), Some(lon), bbox),
+                    Err(PrepareAreaError::BadRequest { .. })
+                ),
+                "expected spawn ({lat}, {lon}) to be rejected"
+            );
+        }
     }
 
     #[test]

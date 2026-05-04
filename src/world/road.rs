@@ -283,53 +283,73 @@ fn append_box(
         }
     }
 
-    let base = verts.len() as u32;
-    let corners = [
-        [min[0], min[1], min[2]],
-        [max[0], min[1], min[2]],
-        [max[0], max[1], min[2]],
-        [min[0], max[1], min[2]],
-        [min[0], min[1], max[2]],
-        [max[0], min[1], max[2]],
-        [max[0], max[1], max[2]],
-        [min[0], max[1], max[2]],
-    ];
-    let normals = [
+    let mut push_face = |positions: [[f32; 3]; 4], normal: [f32; 3]| {
+        let base = verts.len() as u32;
+        for position in positions {
+            verts.push(Vertex {
+                position,
+                normal,
+                color,
+                feature_type: feature::BUILDING,
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+
+    push_face(
+        [
+            [min[0], min[1], min[2]],
+            [min[0], max[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], min[1], min[2]],
+        ],
         [0.0, 0.0, -1.0],
-        [0.0, 0.0, -1.0],
-        [0.0, 0.0, -1.0],
-        [0.0, 0.0, -1.0],
+    );
+    push_face(
+        [
+            [min[0], min[1], max[2]],
+            [max[0], min[1], max[2]],
+            [max[0], max[1], max[2]],
+            [min[0], max[1], max[2]],
+        ],
         [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-        [0.0, 0.0, 1.0],
-    ];
-    for (position, normal) in corners.into_iter().zip(normals) {
-        verts.push(Vertex {
-            position,
-            normal,
-            color,
-            feature_type: feature::BUILDING,
-        });
-    }
-    for tri in [
-        [0, 2, 1],
-        [0, 3, 2],
-        [4, 5, 6],
-        [4, 6, 7],
-        [0, 1, 5],
-        [0, 5, 4],
-        [3, 7, 6],
-        [3, 6, 2],
-        [1, 2, 6],
-        [1, 6, 5],
-        [0, 4, 7],
-        [0, 7, 3],
-    ] {
-        idxs.push(base + tri[0]);
-        idxs.push(base + tri[1]);
-        idxs.push(base + tri[2]);
-    }
+    );
+    push_face(
+        [
+            [min[0], min[1], min[2]],
+            [min[0], min[1], max[2]],
+            [min[0], max[1], max[2]],
+            [min[0], max[1], min[2]],
+        ],
+        [-1.0, 0.0, 0.0],
+    );
+    push_face(
+        [
+            [max[0], min[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], max[1], max[2]],
+            [max[0], min[1], max[2]],
+        ],
+        [1.0, 0.0, 0.0],
+    );
+    push_face(
+        [
+            [min[0], min[1], min[2]],
+            [max[0], min[1], min[2]],
+            [max[0], min[1], max[2]],
+            [min[0], min[1], max[2]],
+        ],
+        [0.0, -1.0, 0.0],
+    );
+    push_face(
+        [
+            [min[0], max[1], min[2]],
+            [min[0], max[1], max[2]],
+            [max[0], max[1], max[2]],
+            [max[0], max[1], min[2]],
+        ],
+        [0.0, 1.0, 0.0],
+    );
 }
 
 fn bounds2d(points: &[(f32, f32)]) -> (f32, f32, f32, f32) {
@@ -771,6 +791,40 @@ mod tests {
                 .iter()
                 .any(|v| v.position[1] <= terrain_elevations[0] + 0.1)
         );
+    }
+
+    #[test]
+    fn bridge_structure_box_geometry_has_per_face_normals() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let terrain_elevations = [0.0, 0.0];
+        let road_elevations = [5.7, 5.7];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_bridge_structure(
+            &points,
+            &terrain_elevations,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
+
+        for expected_normal in [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+        ] {
+            assert!(
+                vertices.iter().any(|v| v.normal == expected_normal),
+                "missing normal {expected_normal:?}"
+            );
+        }
+
+        assert!(vertices.iter().all(|v| v.feature_type == feature::BUILDING));
     }
 
     #[test]

@@ -19,6 +19,7 @@ const BRIDGE_SUPPORT_WIDTH: f32 = 0.8;
 const TUNNEL_PORTAL_DEPTH: f32 = 1.0;
 const TUNNEL_PORTAL_THICKNESS: f32 = 0.5;
 const TUNNEL_CLEARANCE: f32 = 3.0;
+const TUNNEL_LINING_HEIGHT_FRACTION: f32 = 0.35;
 const BRIDGE_STRUCTURE_COLOR: [f32; 3] = [0.50, 0.52, 0.54];
 const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
 
@@ -539,6 +540,43 @@ fn append_tunnel_structure(
         verts,
         idxs,
     );
+
+    let lining_half_width = (width * 0.5 + 0.25).max(0.5);
+    for i in 0..points.len() - 1 {
+        let Some(frame) = segment_frame(points[i], points[i + 1]) else {
+            continue;
+        };
+        let dx = points[i + 1].0 - points[i].0;
+        let dz = points[i + 1].1 - points[i].1;
+        let segment_length = (dx * dx + dz * dz).sqrt();
+        let half_length = (segment_length * 0.25)
+            .clamp(0.75, 4.0)
+            .min((segment_length * 0.45).max(0.5));
+        let mid = (
+            (points[i].0 + points[i + 1].0) * 0.5,
+            (points[i].1 + points[i + 1].1) * 0.5,
+        );
+        let (dir_x, dir_z) = frame.direction;
+        let start = (mid.0 - dir_x * half_length, mid.1 - dir_z * half_length);
+        let end = (mid.0 + dir_x * half_length, mid.1 + dir_z * half_length);
+        let road_y = road_elevations[i].max(road_elevations[i + 1]) + ROAD_Y_OFFSET;
+        let lining_min_y = road_y + TUNNEL_CLEARANCE * TUNNEL_LINING_HEIGHT_FRACTION;
+        let lining_max_y = road_y + TUNNEL_CLEARANCE - 0.2;
+
+        append_segment_strip_box(
+            SegmentStripBox {
+                a: start,
+                b: end,
+                lateral_offset: 0.0,
+                half_width: lining_half_width,
+                min_y: lining_min_y,
+                max_y: lining_max_y,
+                color: TUNNEL_STRUCTURE_COLOR,
+            },
+            verts,
+            idxs,
+        );
+    }
 }
 
 fn append_tunnel_portal(
@@ -844,6 +882,25 @@ mod tests {
         }
 
         assert!(vertices.iter().all(|v| v.feature_type == feature::BUILDING));
+    }
+
+    #[test]
+    fn tunnel_structure_adds_lining_along_open_tunnel() {
+        let points = [(0.0, 0.0), (40.0, 0.0)];
+        let road_elevations = [-5.0, -5.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_tunnel_structure(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+
+        assert!(!vertices.is_empty());
+        assert!(!indices.is_empty());
+        assert!(vertices.iter().any(|v| {
+            v.feature_type == feature::BUILDING
+                && v.position[0] > 15.0
+                && v.position[0] < 25.0
+                && v.position[1] > road_elevations[0] + ROAD_Y_OFFSET
+        }));
     }
 
     #[test]

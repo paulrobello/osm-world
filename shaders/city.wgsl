@@ -118,8 +118,10 @@ fn get_material(feature: f32) -> Material {
         return Material(0.4, 64.0);           // water
     } else if (feature < 4.5) {
         return Material(0.0, 1.0);            // landuse
-    } else {
+    } else if (feature < 5.5) {
         return Material(0.05, 8.0);           // road marking
+    } else {
+        return Material(0.25, 48.0);          // railway
     }
 }
 

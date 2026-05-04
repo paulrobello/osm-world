@@ -45,6 +45,7 @@ pub struct WorldSource {
     pub elevation: Option<ElevationData>,
     pub buildings: Vec<ResolvedFeature>,
     pub roads: Vec<ResolvedFeature>,
+    pub railways: Vec<ResolvedFeature>,
     pub waters: Vec<ResolvedFeature>,
     pub landuses: Vec<ResolvedFeature>,
 }
@@ -86,6 +87,15 @@ impl WorldSource {
                     .entry(coord)
                     .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
                     .roads
+                    .push(feature_idx);
+            }
+        }
+        for (feature_idx, feature) in self.railways.iter().enumerate() {
+            if let Some(coord) = feature_owner_tile(feature, tile_size) {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                    .railways
                     .push(feature_idx);
             }
         }
@@ -240,6 +250,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
 
     let mut buildings: Vec<ResolvedFeature> = Vec::new();
     let mut roads: Vec<ResolvedFeature> = Vec::new();
+    let mut railways: Vec<ResolvedFeature> = Vec::new();
     let mut waters: Vec<ResolvedFeature> = Vec::new();
     let mut landuses: Vec<ResolvedFeature> = Vec::new();
 
@@ -294,6 +305,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
 
         let is_building = tags.contains_key("building") && is_closed;
         let is_road = tags.contains_key("highway");
+        let is_railway = super::railway::is_renderable_railway(tags);
         let is_water = is_closed
             && (tags.contains_key("waterway")
                 || tags.get("natural").map(|s| s.as_str()) == Some("water")
@@ -317,7 +329,10 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
             landuses.push(resolved.clone());
         }
         if is_road {
-            roads.push(resolved);
+            roads.push(resolved.clone());
+        }
+        if is_railway {
+            railways.push(resolved);
         }
     }
 
@@ -395,6 +410,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
         elevation,
         buildings,
         roads,
+        railways,
         waters,
         landuses,
     })
@@ -463,7 +479,7 @@ fn append_road_feature_mesh(
 }
 
 fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
-    // Generate meshes in order: terrain, landuse, water, roads, buildings
+    // Generate meshes in order: terrain, landuse, water, roads, railways, buildings
 
     // Terrain
     super::terrain::generate_terrain(
@@ -570,6 +586,16 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
         );
     }
 
+    for railway in &source.railways {
+        super::railway::generate_railway_track(
+            &railway.tags,
+            &railway.points,
+            &railway.elevations,
+            verts,
+            idxs,
+        );
+    }
+
     // Buildings
     for b in &source.buildings {
         let color = super::color::building_color(&b.tags);
@@ -584,11 +610,12 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
     }
 
     log::info!(
-        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} water areas, {} landuse areas",
+        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} water areas, {} landuse areas",
         verts.len(),
         idxs.len(),
         source.buildings.len(),
         source.roads.len(),
+        source.railways.len(),
         source.waters.len(),
         source.landuses.len(),
     );
@@ -698,6 +725,19 @@ fn append_tile_features_mesh(
     }
 
     append_tile_roads_mesh(source, &refs.roads, lod, verts, idxs);
+
+    for &feature_idx in &refs.railways {
+        let Some(railway) = source.railways.get(feature_idx) else {
+            continue;
+        };
+        super::railway::generate_railway_track(
+            &railway.tags,
+            &railway.points,
+            &railway.elevations,
+            verts,
+            idxs,
+        );
+    }
 
     for &feature_idx in &refs.buildings {
         let Some(b) = source.buildings.get(feature_idx) else {
@@ -852,6 +892,39 @@ mod tests {
     }
 
     #[test]
+    fn load_world_source_classifies_renderable_railways() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("railway.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.001" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <tag k="railway" v="rail"/>
+  </way>
+  <way id="11">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <tag k="railway" v="platform"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.railways.len(), 1);
+        assert_eq!(
+            source.railways[0].tags.get("railway").map(String::as_str),
+            Some("rail")
+        );
+    }
+
+    #[test]
     fn load_world_source_does_not_treat_open_waterways_as_water_polygons() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("waterways.osm");
@@ -904,6 +977,7 @@ mod tests {
             elevation: None,
             buildings: Vec::new(),
             roads: Vec::new(),
+            railways: Vec::new(),
             waters: Vec::new(),
             landuses: Vec::new(),
         };
@@ -955,6 +1029,7 @@ mod tests {
             elevation: None,
             buildings: Vec::new(),
             roads: Vec::new(),
+            railways: Vec::new(),
             waters: Vec::new(),
             landuses: Vec::new(),
         }
@@ -977,6 +1052,11 @@ mod tests {
             "natural",
             "water",
             vec![(-10.0, -10.0), (10.0, -10.0), (10.0, -20.0)],
+        ));
+        source.railways.push(feature(
+            "railway",
+            "rail",
+            vec![(210.0, -10.0), (220.0, -10.0)],
         ));
         source.landuses.push(feature(
             "landuse",
@@ -1005,6 +1085,13 @@ mod tests {
                 .get(&crate::stream::TileCoord { x: 0, z: -1 })
                 .unwrap()
                 .waters,
+            vec![0]
+        );
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: 2, z: -1 })
+                .unwrap()
+                .railways,
             vec![0]
         );
         assert_eq!(
@@ -1061,6 +1148,7 @@ mod tests {
         assert!(!index.contains_key(&crate::stream::TileCoord { x: 2, z: 0 }));
         assert!(index.values().all(|refs| refs.buildings.is_empty()
             && refs.roads.is_empty()
+            && refs.railways.is_empty()
             && refs.waters.is_empty()
             && refs.landuses.is_empty()));
     }
@@ -1137,6 +1225,34 @@ mod tests {
             vertices
                 .iter()
                 .any(|v| v.feature_type == crate::render::vertex::feature::ROAD_MARKING)
+        );
+    }
+
+    #[test]
+    fn tile_mesh_emits_train_track_geometry_for_railways() {
+        let mut source = empty_source();
+        source.railways.push(feature(
+            "railway",
+            "rail",
+            vec![(0.0, -50.0), (40.0, -50.0)],
+        ));
+        let refs = crate::stream::tile::TileFeatureRefs {
+            railways: vec![0],
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+        );
+
+        let vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::RAILWAY)
         );
     }
 

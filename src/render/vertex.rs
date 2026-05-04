@@ -36,6 +36,7 @@ pub mod feature {
     pub const WATER: f32 = 3.0;
     pub const LANDUSE: f32 = 4.0;
     pub const ROAD_MARKING: f32 = 5.0;
+    pub const RAILWAY: f32 = 6.0;
 }
 
 #[cfg(test)]

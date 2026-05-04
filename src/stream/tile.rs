@@ -2,6 +2,7 @@
 pub struct TileFeatureRefs {
     pub buildings: Vec<usize>,
     pub roads: Vec<usize>,
+    pub railways: Vec<usize>,
     pub waters: Vec<usize>,
     pub landuses: Vec<usize>,
 }
@@ -117,6 +118,7 @@ mod tests {
         let refs = TileFeatureRefs::default();
         assert!(refs.buildings.is_empty());
         assert!(refs.roads.is_empty());
+        assert!(refs.railways.is_empty());
         assert!(refs.waters.is_empty());
         assert!(refs.landuses.is_empty());
     }

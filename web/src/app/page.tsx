@@ -51,6 +51,12 @@ export default function Home() {
   const [health, setHealth] = useState<HealthState | null>(null);
   const [cacheAreas, setCacheAreas] = useState<CacheEntry[]>([]);
   const [selectedBbox, setSelectedBbox] = useState<BBox | null>(null);
+  const [manualBbox, setManualBbox] = useState({
+    south: '',
+    west: '',
+    north: '',
+    east: '',
+  });
   const [filter, setFilter] = useState<FeatureFilter>(defaultFilter);
   const [useElevation, setUseElevation] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
@@ -101,8 +107,43 @@ export default function Home() {
     void loadMeta();
   }, [loadMeta]);
 
+  useEffect(() => {
+    if (!selectedBbox) {
+      return;
+    }
+    const [south, west, north, east] = selectedBbox;
+    setManualBbox({
+      south: south.toFixed(6),
+      west: west.toFixed(6),
+      north: north.toFixed(6),
+      east: east.toFixed(6),
+    });
+  }, [selectedBbox]);
+
   const toggleFeature = (name: keyof FeatureFilter) => {
+    if (isPreparing) {
+      return;
+    }
     setFilter((current) => ({ ...current, [name]: !current[name] }));
+  };
+
+  const applyManualBbox = () => {
+    const south = Number(manualBbox.south);
+    const west = Number(manualBbox.west);
+    const north = Number(manualBbox.north);
+    const east = Number(manualBbox.east);
+
+    if (![south, west, north, east].every(Number.isFinite)) {
+      setPrepareError('Manual bbox values must be finite numbers.');
+      return;
+    }
+    if (south >= north || west >= east) {
+      setPrepareError('Manual bbox must satisfy south < north and west < east.');
+      return;
+    }
+
+    setPrepareError(null);
+    setSelectedBbox([south, west, north, east]);
   };
 
   const handlePrepare = async () => {
@@ -208,11 +249,40 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={filter[name]}
+                    disabled={isPreparing}
                     onChange={() => toggleFeature(name)}
                   />
                 </label>
               ))}
             </div>
+          </section>
+
+          <section className="control-group" aria-labelledby="manual-bbox-title">
+            <div className="section-heading">
+              <h2 id="manual-bbox-title">Manual bbox</h2>
+              <span>keyboard accessible</span>
+            </div>
+            <p className="microcopy">
+              Enter coordinates directly when drawing on the map is not practical.
+            </p>
+            <div className="coordinate-grid">
+              {(['south', 'west', 'north', 'east'] as const).map((name) => (
+                <label className="coordinate-field" key={name}>
+                  <span>{name}</span>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={manualBbox[name]}
+                    disabled={isPreparing}
+                    onChange={(event) => setManualBbox((current) => ({ ...current, [name]: event.target.value }))}
+                    placeholder={name === 'south' || name === 'north' ? '38.58' : '-121.49'}
+                  />
+                </label>
+              ))}
+            </div>
+            <button className="ghost-button" type="button" onClick={applyManualBbox} disabled={isPreparing}>
+              Apply manual bbox
+            </button>
           </section>
 
           <section className="control-group" aria-labelledby="prepare-title">
@@ -223,11 +293,11 @@ export default function Home() {
             <div className="form-grid">
               <label className="toggle-row">
                 <span>Use elevation</span>
-                <input type="checkbox" checked={useElevation} onChange={() => setUseElevation((value) => !value)} />
+                <input type="checkbox" checked={useElevation} disabled={isPreparing} onChange={() => setUseElevation((value) => !value)} />
               </label>
               <label className="toggle-row">
                 <span>Force refresh</span>
-                <input type="checkbox" checked={forceRefresh} onChange={() => setForceRefresh((value) => !value)} />
+                <input type="checkbox" checked={forceRefresh} disabled={isPreparing} onChange={() => setForceRefresh((value) => !value)} />
               </label>
             </div>
             <button className="primary-action" type="button" onClick={handlePrepare} disabled={!selectedBbox || isPreparing}>
@@ -272,7 +342,7 @@ export default function Home() {
         </div>
       </section>
 
-      <MapPicker cachedAreas={cacheAreas} selectedBbox={selectedBbox} onBboxChange={setSelectedBbox} />
+      <MapPicker cachedAreas={cacheAreas} selectedBbox={selectedBbox} onBboxChange={setSelectedBbox} disabled={isPreparing} />
     </main>
   );
 }

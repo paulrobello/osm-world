@@ -21,6 +21,7 @@ interface MapPickerProps {
   cachedAreas: CacheEntry[];
   selectedBbox: BBox | null;
   onBboxChange: (bbox: BBox) => void;
+  disabled?: boolean;
 }
 
 const SACRAMENTO_CENTER: [number, number] = [-121.4944, 38.5816];
@@ -64,7 +65,7 @@ const drawStyle = new Style({
   stroke: new Stroke({ color: '#e8f6dc', width: 2 }),
 });
 
-export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange }: MapPickerProps) {
+export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, disabled = false }: MapPickerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const selectedSourceRef = useRef<VectorSource | null>(null);
@@ -164,11 +165,20 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange }: M
 
   return (
     <section className="map-canvas" aria-label="Interactive OpenStreetMap bounding box picker">
-      <div ref={containerRef} className="ol-map" />
+      <div
+        ref={containerRef}
+        className={`ol-map${disabled ? ' ol-map-disabled' : ''}`}
+        tabIndex={0}
+        role="application"
+        aria-describedby="map-picker-instructions"
+      />
       <div className="map-hud" aria-hidden="true">
-        <span>Draw mode</span>
-        <strong>drag a rectangle to replace the active bbox</strong>
+        <span>{disabled ? 'Preparing' : 'Draw mode'}</span>
+        <strong>{disabled ? 'bbox edits locked during request' : 'drag a rectangle to replace the active bbox'}</strong>
       </div>
+      <p id="map-picker-instructions" className="sr-only">
+        Pointer users can drag a rectangle on the map. Keyboard users can enter south, west, north, and east values in the manual bbox form.
+      </p>
       <div className="map-legend" aria-label="Map overlay legend">
         <span><i className="legend-swatch selected" /> selected bbox</span>
         <span><i className="legend-swatch cached" /> cached area</span>

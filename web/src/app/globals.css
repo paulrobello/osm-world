@@ -102,6 +102,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
+.ol-map:focus-visible,
 .panel:focus-within {
   box-shadow:
     0 0 0 2px var(--paper),
@@ -398,6 +399,20 @@ h1 .accent,
   background: var(--amber-soft);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.ol-map-disabled {
+  pointer-events: none;
+  filter: saturate(70%) brightness(82%);
+}
+
 .ol-control button {
   border: 1px solid var(--line-bright) !important;
   color: var(--ink) !important;
@@ -445,6 +460,38 @@ h1 .accent,
 .bbox-readout output {
   color: var(--green);
   font: 700 0.95rem / 1.45 var(--mono);
+}
+
+.microcopy {
+  margin: -0.2rem 0 0.85rem;
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.coordinate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.coordinate-field {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--ink-muted);
+  font: 700 0.68rem / 1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.coordinate-field input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.72rem 0.7rem;
+  color: var(--green);
+  background: rgba(255, 255, 255, 0.04);
+  font: 0.82rem / 1 var(--mono);
 }
 
 .field,

@@ -1,13 +1,46 @@
 //! Road ribbon strip mesh generator.
 
+use std::collections::HashMap;
+
 use crate::render::vertex::{Vertex, feature};
 
 // Sacramento screenshots are taken from kilometre-scale distances; keep roads
 // separated by multiple metres so depth quantization does not fight landuse.
 pub const ROAD_Y_OFFSET: f32 = 2.0;
 const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.05;
+const ROAD_BRIDGE_LAYER_Y_OFFSET: f32 = 5.0;
 const ROAD_CAP_SEGMENTS: usize = 12;
 pub const ROAD_CAP_RADIUS_SCALE: f32 = 1.05;
+
+/// Additional per-feature Y offset applied before road ribbon generation.
+///
+/// The ribbon generator already adds [`ROAD_Y_OFFSET`] above sampled terrain.
+/// This offset keeps road/path overlays at least about one metre above green
+/// landuse overlays and separates bridges/layered crossings by several metres
+/// so large city-scale depth buffers do not z-fight at intersections.
+pub fn road_layer_y_offset(tags: &HashMap<String, String>) -> f32 {
+    let width = super::color::road_width(tags);
+    let surface_offset = if width >= 5.0 {
+        0.7
+    } else if width >= 3.5 {
+        0.6
+    } else {
+        0.5
+    };
+
+    let osm_layer = tags
+        .get("layer")
+        .and_then(|layer| layer.parse::<f32>().ok())
+        .unwrap_or(0.0);
+    let bridge_offset = matches!(
+        tags.get("bridge").map(String::as_str),
+        Some("yes" | "viaduct")
+    )
+    .then_some(ROAD_BRIDGE_LAYER_Y_OFFSET)
+    .unwrap_or(0.0);
+
+    surface_offset + bridge_offset.max(osm_layer * ROAD_BRIDGE_LAYER_Y_OFFSET)
+}
 
 /// Generate a flat ribbon mesh for a road polyline.
 ///
@@ -246,6 +279,20 @@ mod tests {
         let vx = c.position[0] - a.position[0];
         let vz = c.position[2] - a.position[2];
         uz * vx - ux * vz
+    }
+
+    #[test]
+    fn road_layer_y_offset_lifts_bridges_above_surface_roads() {
+        let surface =
+            std::collections::HashMap::from([("highway".to_string(), "primary".to_string())]);
+        let bridge = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+            ("layer".to_string(), "1".to_string()),
+        ]);
+
+        assert!(road_layer_y_offset(&surface) >= 0.5);
+        assert!(road_layer_y_offset(&bridge) >= road_layer_y_offset(&surface) + 4.0);
     }
 
     #[test]

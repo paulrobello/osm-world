@@ -486,21 +486,11 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
         }
     }
 
-    let road_layer_offset = |width: f32| -> f32 {
-        if width >= 5.0 {
-            0.30
-        } else if width >= 3.5 {
-            0.20
-        } else {
-            0.10
-        }
-    };
-
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
     for r in &source.roads {
         let width = super::color::road_width(&r.tags);
         let color = super::color::road_color(&r.tags);
-        let layer_offset = road_layer_offset(width);
+        let layer_offset = super::road::road_layer_y_offset(&r.tags);
         let road_elevations: Vec<f32> = r.elevations.iter().map(|e| e + layer_offset).collect();
         super::road::generate_road_with_elevations(
             &r.points,
@@ -738,21 +728,11 @@ fn append_tile_roads_mesh(
         }
     }
 
-    let road_layer_offset = |width: f32| -> f32 {
-        if width >= 5.0 {
-            0.30
-        } else if width >= 3.5 {
-            0.20
-        } else {
-            0.10
-        }
-    };
-
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
     for r in selected_roads {
         let width = super::color::road_width(&r.tags);
         let color = super::color::road_color(&r.tags);
-        let layer_offset = road_layer_offset(width);
+        let layer_offset = super::road::road_layer_y_offset(&r.tags);
         let road_elevations: Vec<f32> = r.elevations.iter().map(|e| e + layer_offset).collect();
         super::road::generate_road_with_elevations(
             &r.points,

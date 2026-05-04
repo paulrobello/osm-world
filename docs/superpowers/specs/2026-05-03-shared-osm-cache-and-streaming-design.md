@@ -134,8 +134,8 @@ Windows default:
 Temp fallback:
 
 ```text
-<temp>/par-osm-rust-overpass
-<temp>/par-osm-rust-srtm
+<temp>/par-osm-rust/overpass
+<temp>/par-osm-rust/srtm
 ```
 
 Overpass cache directory priority:

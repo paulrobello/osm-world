@@ -12,6 +12,15 @@ const ROAD_BRIDGE_LAYER_Y_OFFSET: f32 = 5.0;
 const ROAD_TUNNEL_LAYER_Y_OFFSET: f32 = -5.0;
 const ROAD_CAP_SEGMENTS: usize = 12;
 pub const ROAD_CAP_RADIUS_SCALE: f32 = 1.05;
+const BRIDGE_DECK_THICKNESS: f32 = 0.6;
+const BRIDGE_RAIL_HEIGHT: f32 = 0.9;
+const BRIDGE_RAIL_WIDTH: f32 = 0.25;
+const BRIDGE_SUPPORT_WIDTH: f32 = 0.8;
+const TUNNEL_PORTAL_DEPTH: f32 = 1.0;
+const TUNNEL_PORTAL_THICKNESS: f32 = 0.5;
+const TUNNEL_CLEARANCE: f32 = 3.0;
+const BRIDGE_STRUCTURE_COLOR: [f32; 3] = [0.50, 0.52, 0.54];
+const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
 
 /// Additional per-feature Y offset applied before road ribbon generation.
 ///
@@ -235,6 +244,338 @@ pub fn generate_road_with_elevations(
     }
 }
 
+pub fn append_road_structures(
+    tags: &HashMap<String, String>,
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+    road_elevations: &[f32],
+    width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    match road_profile(tags).kind {
+        RoadProfileKind::Bridge => append_bridge_structure(
+            points,
+            terrain_elevations,
+            road_elevations,
+            width,
+            verts,
+            idxs,
+        ),
+        RoadProfileKind::Tunnel => {
+            append_tunnel_structure(points, road_elevations, width, verts, idxs)
+        }
+        RoadProfileKind::Surface => {}
+    }
+}
+
+fn append_box(
+    mut min: [f32; 3],
+    mut max: [f32; 3],
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    for axis in 0..3 {
+        if (max[axis] - min[axis]).abs() < 1e-4 {
+            min[axis] -= 0.05;
+            max[axis] += 0.05;
+        }
+    }
+
+    let base = verts.len() as u32;
+    let corners = [
+        [min[0], min[1], min[2]],
+        [max[0], min[1], min[2]],
+        [max[0], max[1], min[2]],
+        [min[0], max[1], min[2]],
+        [min[0], min[1], max[2]],
+        [max[0], min[1], max[2]],
+        [max[0], max[1], max[2]],
+        [min[0], max[1], max[2]],
+    ];
+    let normals = [
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, -1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+    ];
+    for (position, normal) in corners.into_iter().zip(normals) {
+        verts.push(Vertex {
+            position,
+            normal,
+            color,
+            feature_type: feature::BUILDING,
+        });
+    }
+    for tri in [
+        [0, 2, 1],
+        [0, 3, 2],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [3, 7, 6],
+        [3, 6, 2],
+        [1, 2, 6],
+        [1, 6, 5],
+        [0, 4, 7],
+        [0, 7, 3],
+    ] {
+        idxs.push(base + tri[0]);
+        idxs.push(base + tri[1]);
+        idxs.push(base + tri[2]);
+    }
+}
+
+fn bounds2d(points: &[(f32, f32)]) -> (f32, f32, f32, f32) {
+    let mut min_x = points[0].0;
+    let mut max_x = points[0].0;
+    let mut min_z = points[0].1;
+    let mut max_z = points[0].1;
+    for &(x, z) in &points[1..] {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_z = min_z.min(z);
+        max_z = max_z.max(z);
+    }
+    (min_x, max_x, min_z, max_z)
+}
+
+fn segment_frame(a: (f32, f32), b: (f32, f32)) -> Option<((f32, f32), (f32, f32), f32)> {
+    let dx = b.0 - a.0;
+    let dz = b.1 - a.1;
+    let len = (dx * dx + dz * dz).sqrt();
+    if len < 1e-6 {
+        None
+    } else {
+        Some(((dx / len, dz / len), (-dz / len, dx / len), len))
+    }
+}
+
+fn append_segment_strip_box(
+    a: (f32, f32),
+    b: (f32, f32),
+    lateral_offset: f32,
+    half_width: f32,
+    min_y: f32,
+    max_y: f32,
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let Some(((_, _), (px, pz), _len)) = segment_frame(a, b) else {
+        return;
+    };
+    let corners = [
+        (
+            a.0 + px * (lateral_offset - half_width),
+            a.1 + pz * (lateral_offset - half_width),
+        ),
+        (
+            a.0 + px * (lateral_offset + half_width),
+            a.1 + pz * (lateral_offset + half_width),
+        ),
+        (
+            b.0 + px * (lateral_offset - half_width),
+            b.1 + pz * (lateral_offset - half_width),
+        ),
+        (
+            b.0 + px * (lateral_offset + half_width),
+            b.1 + pz * (lateral_offset + half_width),
+        ),
+    ];
+    let (min_x, max_x, min_z, max_z) = bounds2d(&corners);
+    append_box(
+        [min_x, min_y, min_z],
+        [max_x, max_y, max_z],
+        color,
+        verts,
+        idxs,
+    );
+}
+
+fn append_bridge_structure(
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+    road_elevations: &[f32],
+    width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    if points.len() != terrain_elevations.len()
+        || points.len() != road_elevations.len()
+        || points.len() < 2
+    {
+        return;
+    }
+
+    let half_width = (width * 0.5).max(0.0);
+    let rail_half_width = (BRIDGE_RAIL_WIDTH * 0.5).max(0.05);
+    let rail_offset = (half_width - rail_half_width).max(rail_half_width);
+    for i in 0..points.len() - 1 {
+        let Some((_, _, _)) = segment_frame(points[i], points[i + 1]) else {
+            continue;
+        };
+        let road_y = road_elevations[i].max(road_elevations[i + 1]) + ROAD_Y_OFFSET;
+        let terrain_y = terrain_elevations[i].min(terrain_elevations[i + 1]);
+
+        append_segment_strip_box(
+            points[i],
+            points[i + 1],
+            0.0,
+            half_width + BRIDGE_RAIL_WIDTH * 0.25,
+            road_y - BRIDGE_DECK_THICKNESS,
+            road_y - 0.08,
+            BRIDGE_STRUCTURE_COLOR,
+            verts,
+            idxs,
+        );
+        append_segment_strip_box(
+            points[i],
+            points[i + 1],
+            rail_offset,
+            rail_half_width,
+            road_y + 0.05,
+            road_y + BRIDGE_RAIL_HEIGHT,
+            BRIDGE_STRUCTURE_COLOR,
+            verts,
+            idxs,
+        );
+        append_segment_strip_box(
+            points[i],
+            points[i + 1],
+            -rail_offset,
+            rail_half_width,
+            road_y + 0.05,
+            road_y + BRIDGE_RAIL_HEIGHT,
+            BRIDGE_STRUCTURE_COLOR,
+            verts,
+            idxs,
+        );
+
+        if road_y - terrain_y > 2.0 {
+            let half_support = BRIDGE_SUPPORT_WIDTH * 0.5;
+            let cx = (points[i].0 + points[i + 1].0) * 0.5;
+            let cz = (points[i].1 + points[i + 1].1) * 0.5;
+            append_box(
+                [cx - half_support, terrain_y, cz - half_support],
+                [
+                    cx + half_support,
+                    road_y - BRIDGE_DECK_THICKNESS,
+                    cz + half_support,
+                ],
+                BRIDGE_STRUCTURE_COLOR,
+                verts,
+                idxs,
+            );
+        }
+    }
+}
+
+fn append_tunnel_structure(
+    points: &[(f32, f32)],
+    road_elevations: &[f32],
+    width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    if points.len() != road_elevations.len() || points.len() < 2 {
+        return;
+    }
+
+    let closed = points.len() >= 4 && same_point(points[0], points[points.len() - 1]);
+    if closed {
+        return;
+    }
+
+    append_tunnel_portal(points[0], points[1], road_elevations[0], width, verts, idxs);
+    append_tunnel_portal(
+        points[points.len() - 1],
+        points[points.len() - 2],
+        road_elevations[road_elevations.len() - 1],
+        width,
+        verts,
+        idxs,
+    );
+}
+
+fn append_tunnel_portal(
+    point: (f32, f32),
+    next: (f32, f32),
+    elevation: f32,
+    width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let Some(((dx, dz), (px, pz), _len)) = segment_frame(point, next) else {
+        return;
+    };
+
+    let road_y = elevation + ROAD_Y_OFFSET;
+    let top_y = road_y + TUNNEL_CLEARANCE;
+    let half_width = width * 0.5;
+    let half_post = TUNNEL_PORTAL_THICKNESS * 0.5;
+    let depth = TUNNEL_PORTAL_DEPTH.max(TUNNEL_PORTAL_THICKNESS);
+    let front_dx = dx * depth;
+    let front_dz = dz * depth;
+
+    for sign in [1.0, -1.0] {
+        let offset_x = px * (half_width + half_post) * sign;
+        let offset_z = pz * (half_width + half_post) * sign;
+        let start_x = point.0 + offset_x;
+        let start_z = point.1 + offset_z;
+        let end_x = start_x + front_dx;
+        let end_z = start_z + front_dz;
+        append_box(
+            [
+                start_x.min(end_x) - half_post,
+                road_y,
+                start_z.min(end_z) - half_post,
+            ],
+            [
+                start_x.max(end_x) + half_post,
+                top_y,
+                start_z.max(end_z) + half_post,
+            ],
+            TUNNEL_STRUCTURE_COLOR,
+            verts,
+            idxs,
+        );
+    }
+
+    let beam_corners = [
+        (
+            point.0 + px * (half_width + half_post),
+            point.1 + pz * (half_width + half_post),
+        ),
+        (
+            point.0 - px * (half_width + half_post),
+            point.1 - pz * (half_width + half_post),
+        ),
+        (
+            point.0 + px * (half_width + half_post) + front_dx,
+            point.1 + pz * (half_width + half_post) + front_dz,
+        ),
+        (
+            point.0 - px * (half_width + half_post) + front_dx,
+            point.1 - pz * (half_width + half_post) + front_dz,
+        ),
+    ];
+    let (beam_min_x, beam_max_x, beam_min_z, beam_max_z) = bounds2d(&beam_corners);
+    append_box(
+        [beam_min_x, top_y - TUNNEL_PORTAL_THICKNESS, beam_min_z],
+        [beam_max_x, top_y, beam_max_z],
+        TUNNEL_STRUCTURE_COLOR,
+        verts,
+        idxs,
+    );
+}
+
 pub fn append_road_cap(
     point: (f32, f32),
     elevation: f32,
@@ -398,6 +739,70 @@ mod tests {
 
         assert_eq!(road_profile(&tags).kind, RoadProfileKind::Tunnel);
         assert!(road_layer_y_offset(&tags) < 0.0);
+    }
+
+    #[test]
+    fn bridge_structure_adds_deck_rails_and_support_geometry() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let terrain_elevations = [0.0, 0.0];
+        let road_elevations = [5.7, 5.7];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_bridge_structure(
+            &points,
+            &terrain_elevations,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(!vertices.is_empty());
+        assert!(!indices.is_empty());
+        assert!(vertices.iter().any(|v| v.feature_type == feature::BUILDING));
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.position[1] < road_elevations[0] + ROAD_Y_OFFSET)
+        );
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.position[1] <= terrain_elevations[0] + 0.1)
+        );
+    }
+
+    #[test]
+    fn tunnel_structure_adds_portals_for_open_tunnel() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let road_elevations = [-5.0, -5.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_tunnel_structure(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+
+        assert!(!vertices.is_empty());
+        assert!(!indices.is_empty());
+        assert!(vertices.iter().any(|v| v.feature_type == feature::BUILDING));
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.position[1] > road_elevations[0] + ROAD_Y_OFFSET)
+        );
+    }
+
+    #[test]
+    fn tunnel_structure_skips_portals_for_closed_loops() {
+        let points = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 0.0)];
+        let road_elevations = [-5.0, -5.0, -5.0, -5.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_tunnel_structure(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+
+        assert!(vertices.is_empty());
+        assert!(indices.is_empty());
     }
 
     #[test]

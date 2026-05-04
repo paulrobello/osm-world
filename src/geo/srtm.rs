@@ -28,7 +28,7 @@ const BASE_URL: &str = "https://s3.amazonaws.com/elevation-tiles-prod/skadi";
 /// 2. `SRTM_CACHE_DIR` environment variable
 /// 3. `$HOME/.cache/par-osm-rust/srtm` (Linux / macOS XDG-style)
 /// 4. `%LOCALAPPDATA%\par-osm-rust\srtm` (Windows)
-/// 5. `<system-temp>/par-osm-rust-srtm` (fallback)
+/// 5. `<system-temp>/par-osm-rust/srtm` (fallback)
 pub fn cache_dir() -> PathBuf {
     par_osm_rust::cache::srtm_cache_dir()
 }

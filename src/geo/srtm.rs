@@ -18,13 +18,17 @@ const BASE_URL: &str = "https://s3.amazonaws.com/elevation-tiles-prod/skadi";
 
 // -- Cache directory --------------------------------------------------------
 
-/// Return the persistent SRTM tile cache directory, creating it if needed.
+/// Return the shared persistent SRTM tile cache directory, creating it if needed.
+///
+/// Delegates to `par_osm_rust` so osm-world and osm-to-bedrock share the same
+/// neutral cache location and legacy cache migration behavior.
 ///
 /// Priority:
-/// 1. `SRTM_CACHE_DIR` environment variable (override for servers / CI)
-/// 2. `$HOME/.cache/osm-to-bedrock/srtm` (Linux / macOS XDG-style)
-/// 3. `%LOCALAPPDATA%\osm-to-bedrock\srtm` (Windows)
-/// 4. `<system-temp>/osm-to-bedrock-srtm` (fallback)
+/// 1. `PAR_OSM_SRTM_CACHE_DIR` environment variable
+/// 2. `SRTM_CACHE_DIR` environment variable
+/// 3. `$HOME/.cache/par-osm-rust/srtm` (Linux / macOS XDG-style)
+/// 4. `%LOCALAPPDATA%\par-osm-rust\srtm` (Windows)
+/// 5. `<system-temp>/par-osm-rust-srtm` (fallback)
 pub fn cache_dir() -> PathBuf {
     par_osm_rust::cache::srtm_cache_dir()
 }

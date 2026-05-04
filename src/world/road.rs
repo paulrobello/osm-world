@@ -571,6 +571,15 @@ struct SegmentStripBox {
     color: [f32; 3],
 }
 
+struct SlopedBridgeRailSegment {
+    a: Point2,
+    b: Point2,
+    rail_offset: f32,
+    rail_half_width: f32,
+    start_road_y: f32,
+    end_road_y: f32,
+}
+
 fn segment_frame(a: Point2, b: Point2) -> Option<SegmentFrame> {
     let dx = b.0 - a.0;
     let dz = b.1 - a.1;
@@ -618,6 +627,113 @@ fn append_segment_strip_box(strip: SegmentStripBox, verts: &mut Vec<Vertex>, idx
     );
 }
 
+fn push_prism_face(
+    face: [[f32; 3]; 4],
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let ux = face[1][0] - face[0][0];
+    let uy = face[1][1] - face[0][1];
+    let uz = face[1][2] - face[0][2];
+    let vx = face[2][0] - face[0][0];
+    let vy = face[2][1] - face[0][1];
+    let vz = face[2][2] - face[0][2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    let len = (nx * nx + ny * ny + nz * nz).sqrt();
+    let normal = if len < 1e-6 {
+        [0.0, 1.0, 0.0]
+    } else {
+        [nx / len, ny / len, nz / len]
+    };
+
+    let base = verts.len() as u32;
+    for position in face {
+        verts.push(Vertex {
+            position,
+            normal,
+            color,
+            feature_type: feature::BUILDING,
+        });
+    }
+    idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+fn append_sloped_segment_strip_box(
+    strip: SegmentStripBox,
+    start_min_y: f32,
+    start_max_y: f32,
+    end_min_y: f32,
+    end_max_y: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let Some(frame) = segment_frame(strip.a, strip.b) else {
+        return;
+    };
+    let (px, pz) = frame.perpendicular;
+    let a_left = (
+        strip.a.0 + px * (strip.lateral_offset - strip.half_width),
+        strip.a.1 + pz * (strip.lateral_offset - strip.half_width),
+    );
+    let a_right = (
+        strip.a.0 + px * (strip.lateral_offset + strip.half_width),
+        strip.a.1 + pz * (strip.lateral_offset + strip.half_width),
+    );
+    let b_left = (
+        strip.b.0 + px * (strip.lateral_offset - strip.half_width),
+        strip.b.1 + pz * (strip.lateral_offset - strip.half_width),
+    );
+    let b_right = (
+        strip.b.0 + px * (strip.lateral_offset + strip.half_width),
+        strip.b.1 + pz * (strip.lateral_offset + strip.half_width),
+    );
+
+    let abl = [a_left.0, start_min_y, a_left.1];
+    let atl = [a_left.0, start_max_y, a_left.1];
+    let abr = [a_right.0, start_min_y, a_right.1];
+    let atr = [a_right.0, start_max_y, a_right.1];
+    let bbl = [b_left.0, end_min_y, b_left.1];
+    let btl = [b_left.0, end_max_y, b_left.1];
+    let bbr = [b_right.0, end_min_y, b_right.1];
+    let btr = [b_right.0, end_max_y, b_right.1];
+
+    push_prism_face([abl, bbl, btl, atl], strip.color, verts, idxs);
+    push_prism_face([abr, atr, btr, bbr], strip.color, verts, idxs);
+    push_prism_face([atl, btl, btr, atr], strip.color, verts, idxs);
+    push_prism_face([abl, abr, bbr, bbl], strip.color, verts, idxs);
+    push_prism_face([abl, atl, atr, abr], strip.color, verts, idxs);
+    push_prism_face([bbl, bbr, btr, btl], strip.color, verts, idxs);
+}
+
+fn append_sloped_bridge_rails(
+    rail_segment: SlopedBridgeRailSegment,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    for lateral_offset in [rail_segment.rail_offset, -rail_segment.rail_offset] {
+        append_sloped_segment_strip_box(
+            SegmentStripBox {
+                a: rail_segment.a,
+                b: rail_segment.b,
+                lateral_offset,
+                half_width: rail_segment.rail_half_width,
+                min_y: 0.0,
+                max_y: 0.0,
+                color: BRIDGE_STRUCTURE_COLOR,
+            },
+            rail_segment.start_road_y + 0.05,
+            rail_segment.start_road_y + BRIDGE_RAIL_HEIGHT,
+            rail_segment.end_road_y + 0.05,
+            rail_segment.end_road_y + BRIDGE_RAIL_HEIGHT,
+            verts,
+            idxs,
+        );
+    }
+}
+
 fn append_bridge_structure(
     points: &[(f32, f32)],
     terrain_elevations: &[f32],
@@ -643,6 +759,18 @@ fn append_bridge_structure(
         let start_road_y = road_elevations[i] + ROAD_Y_OFFSET;
         let end_road_y = road_elevations[i + 1] + ROAD_Y_OFFSET;
         if (start_road_y - end_road_y).abs() > 0.1 {
+            append_sloped_bridge_rails(
+                SlopedBridgeRailSegment {
+                    a: points[i],
+                    b: points[i + 1],
+                    rail_offset,
+                    rail_half_width,
+                    start_road_y,
+                    end_road_y,
+                },
+                verts,
+                idxs,
+            );
             continue;
         }
         let road_y = start_road_y.max(end_road_y);
@@ -1043,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn bridge_structure_skips_flat_deck_on_sloped_ramp_segments() {
+    fn bridge_structure_adds_rails_but_skips_flat_deck_on_sloped_ramp_segments() {
         let points = [(0.0, 0.0), (25.0, 0.0)];
         let terrain_elevations = [0.0, 0.0];
         let road_elevations = [0.7, 5.7];
@@ -1059,8 +1187,15 @@ mod tests {
             &mut indices,
         );
 
-        assert!(vertices.is_empty());
-        assert!(indices.is_empty());
+        assert!(!vertices.is_empty());
+        assert!(!indices.is_empty());
+        assert!(vertices.iter().any(|v| v.position[1] < 4.0));
+        assert!(vertices.iter().any(|v| v.position[1] > 7.0));
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.position[1] > terrain_elevations[0])
+        );
     }
 
     #[test]

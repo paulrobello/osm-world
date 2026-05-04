@@ -31,20 +31,9 @@ pub fn building_color(tags: &HashMap<String, String>) -> [f32; 3] {
     }
 }
 
-/// Color for a road based on its highway tag.
-pub fn road_color(tags: &HashMap<String, String>) -> [f32; 3] {
-    match tags.get("highway").map(|s| s.as_str()) {
-        Some("motorway" | "motorway_link") => [0.45, 0.45, 0.50],
-        Some("trunk" | "trunk_link") => [0.50, 0.50, 0.52],
-        Some("primary" | "primary_link") => [0.55, 0.55, 0.55],
-        Some("secondary" | "secondary_link") => [0.58, 0.58, 0.56],
-        Some("tertiary" | "tertiary_link") => [0.62, 0.60, 0.58],
-        Some("residential" | "unclassified" | "living_street") => [0.60, 0.58, 0.55],
-        Some("service" | "track" | "path" | "footway" | "cycleway" | "pedestrian") => {
-            [0.65, 0.63, 0.60]
-        }
-        _ => [0.55, 0.55, 0.55],
-    }
+/// Color for road ribbons.
+pub fn road_color(_tags: &HashMap<String, String>) -> [f32; 3] {
+    [0.02, 0.02, 0.02]
 }
 
 /// Width in metres for a road based on its highway tag or explicit width tag.
@@ -127,4 +116,18 @@ pub fn landuse_color(tags: &HashMap<String, String>) -> [f32; 3] {
 /// Constant terrain color.
 pub fn terrain_color() -> [f32; 3] {
     [0.42, 0.55, 0.30]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn road_color_is_black_for_all_highway_types() {
+        let primary = HashMap::from([("highway".to_string(), "primary".to_string())]);
+        let service = HashMap::from([("highway".to_string(), "service".to_string())]);
+
+        assert_eq!(road_color(&primary), [0.02, 0.02, 0.02]);
+        assert_eq!(road_color(&service), [0.02, 0.02, 0.02]);
+    }
 }

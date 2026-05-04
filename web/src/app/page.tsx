@@ -45,6 +45,11 @@ function formatSpawnPoint(spawnPoint: SpawnPoint | null): string {
   return `${spawnPoint.lat.toFixed(5)}, ${spawnPoint.lon.toFixed(5)}`;
 }
 
+function spawnInsideBbox(spawnPoint: SpawnPoint, bbox: BBox): boolean {
+  const [south, west, north, east] = bbox;
+  return spawnPoint.lat >= south && spawnPoint.lat <= north && spawnPoint.lon >= west && spawnPoint.lon <= east;
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return '0 B';
@@ -90,6 +95,19 @@ export default function Home() {
     () => cacheAreas.reduce((sum, area) => sum + area.size_bytes, 0),
     [cacheAreas],
   );
+
+  const spawnBboxError = useMemo(() => {
+    if (!selectedBbox || !spawnPoint || spawnInsideBbox(spawnPoint, selectedBbox)) {
+      return null;
+    }
+
+    return 'Spawn point must be inside the selected bbox.';
+  }, [selectedBbox, spawnPoint]);
+
+  const clearPreparedOutput = useCallback(() => {
+    setPreparedArea(null);
+    setCopyStatus('idle');
+  }, []);
 
   const loadMeta = useCallback(async () => {
     setLoadingMeta(true);
@@ -148,7 +166,26 @@ export default function Home() {
     if (isPreparing) {
       return;
     }
+    clearPreparedOutput();
     setFilter((current) => ({ ...current, [name]: !current[name] }));
+  };
+
+  const handleBboxChange = (bbox: BBox) => {
+    if (isPreparing) {
+      return;
+    }
+    clearPreparedOutput();
+    setPrepareError(null);
+    setSelectedBbox(bbox);
+  };
+
+  const handleSpawnChange = (nextSpawnPoint: SpawnPoint) => {
+    if (isPreparing) {
+      return;
+    }
+    clearPreparedOutput();
+    setPrepareError(null);
+    setSpawnPoint(nextSpawnPoint);
   };
 
   const applyManualBbox = () => {
@@ -166,8 +203,7 @@ export default function Home() {
       return;
     }
 
-    setPrepareError(null);
-    setSelectedBbox([south, west, north, east]);
+    handleBboxChange([south, west, north, east]);
   };
 
   const applyManualSpawn = () => {
@@ -187,11 +223,11 @@ export default function Home() {
       return;
     }
 
-    setPrepareError(null);
-    setSpawnPoint({ lat, lon });
+    handleSpawnChange({ lat, lon });
   };
 
   const clearSpawn = () => {
+    clearPreparedOutput();
     setSpawnPoint(null);
     setManualSpawn({ lat: '', lon: '' });
     setPrepareError(null);
@@ -200,6 +236,10 @@ export default function Home() {
   const handlePrepare = async () => {
     if (!selectedBbox) {
       setPrepareError('Draw a bounding box before preparing area data.');
+      return;
+    }
+    if (spawnBboxError) {
+      setPrepareError(spawnBboxError);
       return;
     }
 
@@ -378,6 +418,7 @@ export default function Home() {
                 Clear spawn
               </button>
             </div>
+            {spawnBboxError ? <p className="status-line error">{spawnBboxError}</p> : null}
           </section>
 
 
@@ -389,14 +430,30 @@ export default function Home() {
             <div className="form-grid">
               <label className="toggle-row">
                 <span>Use elevation</span>
-                <input type="checkbox" checked={useElevation} disabled={isPreparing} onChange={() => setUseElevation((value) => !value)} />
+                <input
+                  type="checkbox"
+                  checked={useElevation}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setUseElevation((value) => !value);
+                  }}
+                />
               </label>
               <label className="toggle-row">
                 <span>Force refresh</span>
-                <input type="checkbox" checked={forceRefresh} disabled={isPreparing} onChange={() => setForceRefresh((value) => !value)} />
+                <input
+                  type="checkbox"
+                  checked={forceRefresh}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setForceRefresh((value) => !value);
+                  }}
+                />
               </label>
             </div>
-            <button className="primary-action" type="button" onClick={handlePrepare} disabled={!selectedBbox || isPreparing}>
+            <button className="primary-action" type="button" onClick={handlePrepare} disabled={!selectedBbox || Boolean(spawnBboxError) || isPreparing}>
               {isPreparing ? 'Preparing…' : 'Prepare area'}
             </button>
             {prepareError ? <p className="status-line error">{prepareError}</p> : null}
@@ -447,9 +504,9 @@ export default function Home() {
       <MapPicker
         cachedAreas={cacheAreas}
         selectedBbox={selectedBbox}
-        onBboxChange={setSelectedBbox}
+        onBboxChange={handleBboxChange}
         spawnPoint={spawnPoint}
-        onSpawnChange={setSpawnPoint}
+        onSpawnChange={handleSpawnChange}
         spawnMode={spawnMode}
         disabled={isPreparing}
       />

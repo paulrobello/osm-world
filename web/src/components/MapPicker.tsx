@@ -70,6 +70,7 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
   const mapRef = useRef<Map | null>(null);
   const selectedSourceRef = useRef<VectorSource | null>(null);
   const cacheSourceRef = useRef<VectorSource | null>(null);
+  const drawRef = useRef<Draw | null>(null);
   const onBboxChangeRef = useRef(onBboxChange);
 
   useEffect(() => {
@@ -124,7 +125,9 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
       onBboxChangeRef.current(extentToBbox(geometry));
     });
 
+    draw.setActive(!disabled);
     map.addInteraction(draw);
+    drawRef.current = draw;
     mapRef.current = map;
 
     return () => {
@@ -136,8 +139,13 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
       mapRef.current = null;
       selectedSourceRef.current = null;
       cacheSourceRef.current = null;
+      drawRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    drawRef.current?.setActive(!disabled);
+  }, [disabled]);
 
   useEffect(() => {
     const cacheSource = cacheSourceRef.current;
@@ -168,9 +176,11 @@ export default function MapPicker({ cachedAreas, selectedBbox, onBboxChange, dis
       <div
         ref={containerRef}
         className={`ol-map${disabled ? ' ol-map-disabled' : ''}`}
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         role="application"
+        aria-label="Interactive map bbox drawing surface"
         aria-describedby="map-picker-instructions"
+        aria-disabled={disabled}
       />
       <div className="map-hud" aria-hidden="true">
         <span>{disabled ? 'Preparing' : 'Draw mode'}</span>

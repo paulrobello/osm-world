@@ -294,11 +294,12 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
 
         let is_building = tags.contains_key("building") && is_closed;
         let is_road = tags.contains_key("highway");
-        let is_water = tags.contains_key("waterway")
-            || tags.get("natural").map(|s| s.as_str()) == Some("water")
-            || tags.get("natural").map(|s| s.as_str()) == Some("wetland")
-            || tags.get("landuse").map(|s| s.as_str()) == Some("basin")
-            || tags.get("landuse").map(|s| s.as_str()) == Some("reservoir");
+        let is_water = is_closed
+            && (tags.contains_key("waterway")
+                || tags.get("natural").map(|s| s.as_str()) == Some("water")
+                || tags.get("natural").map(|s| s.as_str()) == Some("wetland")
+                || tags.get("landuse").map(|s| s.as_str()) == Some("basin")
+                || tags.get("landuse").map(|s| s.as_str()) == Some("reservoir"));
         let is_landuse = !is_building
             && !is_water
             && is_closed
@@ -851,6 +852,48 @@ mod tests {
         assert_eq!(source.roads.len(), 1);
         assert!(source.min_lat <= 38.0);
         assert!(source.max_lat >= 38.001);
+    }
+
+    #[test]
+    fn load_world_source_does_not_treat_open_waterways_as_water_polygons() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("waterways.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.99"/>
+  <node id="3" lat="38.01" lon="-120.99"/>
+  <node id="4" lat="38.01" lon="-121.0"/>
+  <node id="5" lat="38.02" lon="-121.0"/>
+  <node id="6" lat="38.03" lon="-120.98"/>
+  <node id="7" lat="38.04" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="natural" v="water"/>
+  </way>
+  <way id="11">
+    <nd ref="5"/>
+    <nd ref="6"/>
+    <nd ref="7"/>
+    <tag k="waterway" v="river"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.waters.len(), 1);
+        assert_eq!(
+            source.waters[0].tags.get("natural").map(String::as_str),
+            Some("water")
+        );
     }
 
     #[test]

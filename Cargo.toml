@@ -9,6 +9,9 @@ license = "MIT"
 
 [dependencies]
 par-osm-rust = { path = "../par-osm-rust" }
+axum = "0.8.8"
+tokio = { version = "1.50.0", features = ["full"] }
+tower-http = { version = "0.6.8", features = ["cors"] }
 wgpu = "29.0.1"
 winit = "0.30.13"
 glam = "0.32.1"

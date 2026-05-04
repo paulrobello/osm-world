@@ -24,6 +24,30 @@ fn positive_usize(s: &str) -> Result<usize, String> {
     }
 }
 
+fn latitude(s: &str) -> Result<f64, String> {
+    let value = s
+        .parse::<f64>()
+        .map_err(|err| format!("invalid latitude: {err}"))?;
+
+    if value.is_finite() && (-90.0..=90.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err("must be a finite latitude in the range -90..=90".to_string())
+    }
+}
+
+fn longitude(s: &str) -> Result<f64, String> {
+    let value = s
+        .parse::<f64>()
+        .map_err(|err| format!("invalid longitude: {err}"))?;
+
+    if value.is_finite() && (-180.0..=180.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err("must be a finite longitude in the range -180..=180".to_string())
+    }
+}
+
 fn hour_of_day(s: &str) -> Result<f32, String> {
     let value = s
         .parse::<f32>()
@@ -103,11 +127,11 @@ struct Args {
     cam_pitch: Option<f32>,
 
     /// Spawn latitude for initial camera placement
-    #[arg(long, allow_hyphen_values = true)]
+    #[arg(long, allow_hyphen_values = true, value_parser = latitude)]
     spawn_lat: Option<f64>,
 
     /// Spawn longitude for initial camera placement
-    #[arg(long, allow_hyphen_values = true)]
+    #[arg(long, allow_hyphen_values = true, value_parser = longitude)]
     spawn_lon: Option<f64>,
 
     /// Start with the in-game settings panel open
@@ -253,6 +277,19 @@ mod tests {
             err.to_string()
                 .contains("--spawn-lat and --spawn-lon must be provided together")
         );
+    }
+
+    #[test]
+    fn rejects_invalid_spawn_coordinates() {
+        for (flag, value) in [
+            ("--spawn-lat", "NaN"),
+            ("--spawn-lat", "91"),
+            ("--spawn-lon", "inf"),
+            ("--spawn-lon", "-181"),
+        ] {
+            let result = Args::try_parse_from(["osm-world", flag, value]);
+            assert!(result.is_err(), "expected {flag} {value} to be rejected");
+        }
     }
 
     #[test]

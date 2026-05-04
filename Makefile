@@ -13,6 +13,22 @@ run:
 run-release:
 	cargo run --release
 
+web-install:
+	cd web && bun install
+
+web-dev:
+	cd web && bun run dev
+
+web-build:
+	cd web && bun run build
+
+serve:
+	cargo run -- --serve --host 127.0.0.1 --port 3030
+
+dev:
+	@cargo run -- --serve --host 127.0.0.1 --port 3030 &
+	@cd web && bun run dev
+
 test:
 	cargo test
 

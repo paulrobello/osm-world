@@ -9,6 +9,7 @@ use crate::render::vertex::{Vertex, feature};
 pub const ROAD_Y_OFFSET: f32 = 2.0;
 const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.05;
 const ROAD_BRIDGE_LAYER_Y_OFFSET: f32 = 5.0;
+const ROAD_TUNNEL_LAYER_Y_OFFSET: f32 = -5.0;
 const ROAD_CAP_SEGMENTS: usize = 12;
 pub const ROAD_CAP_RADIUS_SCALE: f32 = 1.05;
 
@@ -18,7 +19,20 @@ pub const ROAD_CAP_RADIUS_SCALE: f32 = 1.05;
 /// This offset keeps road/path overlays at least about one metre above green
 /// landuse overlays and separates bridges/layered crossings by several metres
 /// so large city-scale depth buffers do not z-fight at intersections.
-pub fn road_layer_y_offset(tags: &HashMap<String, String>) -> f32 {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoadProfileKind {
+    Surface,
+    Bridge,
+    Tunnel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoadProfile {
+    pub kind: RoadProfileKind,
+    pub layer_offset: f32,
+}
+
+pub fn road_profile(tags: &HashMap<String, String>) -> RoadProfile {
     let width = super::color::road_width(tags);
     let surface_offset = if width >= 5.0 {
         0.7
@@ -32,14 +46,46 @@ pub fn road_layer_y_offset(tags: &HashMap<String, String>) -> f32 {
         .get("layer")
         .and_then(|layer| layer.parse::<f32>().ok())
         .unwrap_or(0.0);
-    let bridge_offset = matches!(
+    let is_bridge = matches!(
         tags.get("bridge").map(String::as_str),
         Some("yes" | "viaduct")
-    )
-    .then_some(ROAD_BRIDGE_LAYER_Y_OFFSET)
-    .unwrap_or(0.0);
+    );
+    let is_tunnel = tags.get("tunnel").is_some_and(|value| value != "no");
 
-    surface_offset + bridge_offset.max(osm_layer * ROAD_BRIDGE_LAYER_Y_OFFSET)
+    if is_tunnel {
+        let layer_depth = if osm_layer < 0.0 {
+            osm_layer.abs()
+        } else {
+            1.0
+        };
+        return RoadProfile {
+            kind: RoadProfileKind::Tunnel,
+            layer_offset: ROAD_TUNNEL_LAYER_Y_OFFSET * layer_depth,
+        };
+    }
+
+    if is_bridge || osm_layer > 0.0 {
+        return RoadProfile {
+            kind: RoadProfileKind::Bridge,
+            layer_offset: surface_offset + (osm_layer.max(1.0) * ROAD_BRIDGE_LAYER_Y_OFFSET),
+        };
+    }
+
+    if osm_layer < 0.0 {
+        return RoadProfile {
+            kind: RoadProfileKind::Tunnel,
+            layer_offset: ROAD_TUNNEL_LAYER_Y_OFFSET * osm_layer.abs(),
+        };
+    }
+
+    RoadProfile {
+        kind: RoadProfileKind::Surface,
+        layer_offset: surface_offset,
+    }
+}
+
+pub fn road_layer_y_offset(tags: &HashMap<String, String>) -> f32 {
+    road_profile(tags).layer_offset
 }
 
 /// Generate a flat ribbon mesh for a road polyline.
@@ -293,6 +339,51 @@ mod tests {
 
         assert!(road_layer_y_offset(&surface) >= 0.5);
         assert!(road_layer_y_offset(&bridge) >= road_layer_y_offset(&surface) + 4.0);
+    }
+
+    #[test]
+    fn road_profile_classifies_bridge_tunnel_and_surface_roads() {
+        let surface =
+            std::collections::HashMap::from([("highway".to_string(), "primary".to_string())]);
+        let bridge = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+        ]);
+        let tunnel = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("tunnel".to_string(), "yes".to_string()),
+        ]);
+
+        assert_eq!(road_profile(&surface).kind, RoadProfileKind::Surface);
+        assert_eq!(road_profile(&bridge).kind, RoadProfileKind::Bridge);
+        assert_eq!(road_profile(&tunnel).kind, RoadProfileKind::Tunnel);
+    }
+
+    #[test]
+    fn road_layer_y_offset_lowers_tunnels_below_surface_roads() {
+        let surface =
+            std::collections::HashMap::from([("highway".to_string(), "primary".to_string())]);
+        let tunnel = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("tunnel".to_string(), "yes".to_string()),
+            ("layer".to_string(), "-1".to_string()),
+        ]);
+
+        assert!(road_layer_y_offset(&surface) > 0.0);
+        assert!(road_layer_y_offset(&tunnel) <= road_layer_y_offset(&surface) - 4.0);
+    }
+
+    #[test]
+    fn explicit_tunnel_wins_over_bridge_tags() {
+        let tags = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+            ("tunnel".to_string(), "yes".to_string()),
+            ("layer".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(road_profile(&tags).kind, RoadProfileKind::Tunnel);
+        assert!(road_layer_y_offset(&tags) < 0.0);
     }
 
     #[test]

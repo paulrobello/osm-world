@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::geo::{CoordConverter, ElevationData};
-use crate::osm::parse::parse_pbf;
+use crate::osm::parse::parse_osm_file;
 use crate::render::vertex::Vertex;
 
 /// Combined mesh for the entire world.
@@ -213,8 +213,8 @@ fn ensure_ccw(poly: &mut [(f32, f32)], elevations: &mut [f32]) {
 }
 
 pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldSource> {
-    // 1. Parse PBF
-    let osm_data = parse_pbf(pbf_path)?;
+    // 1. Parse OSM input (PBF or XML)
+    let osm_data = parse_osm_file(pbf_path)?;
 
     // 2. Get bounding box
     let (min_lat, min_lon, max_lat, max_lon) = osm_data
@@ -824,6 +824,34 @@ pub fn load_world(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<Wo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_world_source_accepts_osm_xml_input() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("area.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.999"/>
+  <node id="3" lat="38.001" lon="-120.999"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <tag k="highway" v="residential"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.roads.len(), 1);
+        assert!(source.min_lat <= 38.0);
+        assert!(source.max_lat >= 38.001);
+    }
 
     #[test]
     fn world_source_bbox_center_matches_converter() {

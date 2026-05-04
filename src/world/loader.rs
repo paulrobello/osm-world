@@ -423,6 +423,37 @@ pub fn generate_world_mesh(source: &WorldSource) -> WorldMesh {
     }
 }
 
+fn append_road_feature_mesh(
+    road: &ResolvedFeature,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) -> (Vec<f32>, f32, [f32; 3]) {
+    let width = super::color::road_width(&road.tags);
+    let color = super::color::road_color(&road.tags);
+    let layer_offset = super::road::road_layer_y_offset(&road.tags);
+    let road_elevations: Vec<f32> = road.elevations.iter().map(|e| e + layer_offset).collect();
+
+    super::road::generate_road_with_elevations(
+        &road.points,
+        &road_elevations,
+        width,
+        color,
+        verts,
+        idxs,
+    );
+    super::road::append_road_structures(
+        &road.tags,
+        &road.points,
+        &road.elevations,
+        &road_elevations,
+        width,
+        verts,
+        idxs,
+    );
+
+    (road_elevations, width, color)
+}
+
 fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
     // Generate meshes in order: terrain, landuse, water, roads, buildings
 
@@ -488,18 +519,7 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
 
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
     for r in &source.roads {
-        let width = super::color::road_width(&r.tags);
-        let color = super::color::road_color(&r.tags);
-        let layer_offset = super::road::road_layer_y_offset(&r.tags);
-        let road_elevations: Vec<f32> = r.elevations.iter().map(|e| e + layer_offset).collect();
-        super::road::generate_road_with_elevations(
-            &r.points,
-            &road_elevations,
-            width,
-            color,
-            verts,
-            idxs,
-        );
+        let (road_elevations, width, color) = append_road_feature_mesh(r, verts, idxs);
 
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
         for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
@@ -730,18 +750,7 @@ fn append_tile_roads_mesh(
 
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
     for r in selected_roads {
-        let width = super::color::road_width(&r.tags);
-        let color = super::color::road_color(&r.tags);
-        let layer_offset = super::road::road_layer_y_offset(&r.tags);
-        let road_elevations: Vec<f32> = r.elevations.iter().map(|e| e + layer_offset).collect();
-        super::road::generate_road_with_elevations(
-            &r.points,
-            &road_elevations,
-            width,
-            color,
-            verts,
-            idxs,
-        );
+        let (road_elevations, width, color) = append_road_feature_mesh(r, verts, idxs);
 
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
         for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
@@ -1094,6 +1103,69 @@ mod tests {
                 && v.position[1] > super::super::road::ROAD_Y_OFFSET
         });
         assert!(!has_shared_endpoint_cap_center);
+    }
+
+    #[test]
+    fn tile_road_mesh_emits_bridge_structure_geometry() {
+        let mut source = empty_source();
+        let mut bridge = feature("highway", "primary", vec![(0.0, -50.0), (30.0, -50.0)]);
+        bridge.tags.insert("bridge".to_string(), "yes".to_string());
+        bridge.elevations = vec![0.0, 0.0];
+        source.roads.push(bridge);
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_tile_roads_mesh(
+            &source,
+            &[0],
+            crate::stream::TileLod::Near,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(!indices.is_empty());
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+        );
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::BUILDING)
+        );
+    }
+
+    #[test]
+    fn tile_road_mesh_emits_tunnel_portal_geometry() {
+        let mut source = empty_source();
+        let mut tunnel = feature("highway", "primary", vec![(0.0, -50.0), (30.0, -50.0)]);
+        tunnel.tags.insert("tunnel".to_string(), "yes".to_string());
+        tunnel.elevations = vec![0.0, 0.0];
+        source.roads.push(tunnel);
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_tile_roads_mesh(
+            &source,
+            &[0],
+            crate::stream::TileLod::Near,
+            &mut vertices,
+            &mut indices,
+        );
+
+        let road_min_y = vertices
+            .iter()
+            .filter(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+            .map(|v| v.position[1])
+            .fold(f32::INFINITY, f32::min);
+
+        assert!(road_min_y < super::super::road::ROAD_Y_OFFSET);
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::BUILDING)
+        );
     }
 
     #[test]

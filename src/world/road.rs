@@ -23,6 +23,12 @@ const TUNNEL_PORTAL_DEPTH: f32 = 1.0;
 const TUNNEL_PORTAL_THICKNESS: f32 = 0.5;
 const TUNNEL_CLEARANCE: f32 = 3.0;
 const TUNNEL_LINING_HEIGHT_FRACTION: f32 = 0.35;
+const CENTERLINE_MIN_ROAD_WIDTH: f32 = 4.0;
+const CENTERLINE_WIDTH: f32 = 0.22;
+const CENTERLINE_DASH_LENGTH: f32 = 4.0;
+const CENTERLINE_GAP_LENGTH: f32 = 6.0;
+const CENTERLINE_Y_OFFSET: f32 = 0.18;
+const CENTERLINE_COLOR: [f32; 3] = [1.0, 0.82, 0.05];
 const BRIDGE_STRUCTURE_COLOR: [f32; 3] = [0.50, 0.52, 0.54];
 const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
 
@@ -399,12 +405,14 @@ pub fn generate_road_with_elevations(
             position: [x + px, y, z + pz],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::ROAD,
         });
         verts.push(Vertex {
             position: [x - px, y, z - pz],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::ROAD,
         });
     }
@@ -431,6 +439,92 @@ pub fn generate_road_with_elevations(
         idxs.push(right0);
         idxs.push(left1);
         idxs.push(right1);
+    }
+}
+
+pub fn append_road_centerline_dashes(
+    points: &[(f32, f32)],
+    road_elevations: &[f32],
+    road_width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    if road_width < CENTERLINE_MIN_ROAD_WIDTH
+        || points.len() != road_elevations.len()
+        || points.len() < 2
+    {
+        return;
+    }
+
+    for i in 0..points.len() - 1 {
+        append_centerline_dashes_for_segment(
+            points[i],
+            points[i + 1],
+            road_elevations[i],
+            road_elevations[i + 1],
+            verts,
+            idxs,
+        );
+    }
+}
+
+fn append_centerline_dashes_for_segment(
+    a: (f32, f32),
+    b: (f32, f32),
+    start_elevation: f32,
+    end_elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let Some(frame) = segment_frame(a, b) else {
+        return;
+    };
+    let dx = b.0 - a.0;
+    let dz = b.1 - a.1;
+    let segment_length = (dx * dx + dz * dz).sqrt();
+    if segment_length <= 1e-6 {
+        return;
+    }
+
+    let (px, pz) = frame.perpendicular;
+    let half_width = CENTERLINE_WIDTH * 0.5;
+    let pattern_length = CENTERLINE_DASH_LENGTH + CENTERLINE_GAP_LENGTH;
+    let mut dash_start = 0.0;
+    while dash_start < segment_length {
+        let dash_end = (dash_start + CENTERLINE_DASH_LENGTH).min(segment_length);
+        if dash_end > dash_start {
+            let start_t = dash_start / segment_length;
+            let end_t = dash_end / segment_length;
+            let sx = a.0 + dx * start_t;
+            let sz = a.1 + dz * start_t;
+            let ex = a.0 + dx * end_t;
+            let ez = a.1 + dz * end_t;
+            let sy = start_elevation
+                + (end_elevation - start_elevation) * start_t
+                + ROAD_Y_OFFSET
+                + CENTERLINE_Y_OFFSET;
+            let ey = start_elevation
+                + (end_elevation - start_elevation) * end_t
+                + ROAD_Y_OFFSET
+                + CENTERLINE_Y_OFFSET;
+            let base = verts.len() as u32;
+            for position in [
+                [sx + px * half_width, sy, sz + pz * half_width],
+                [ex + px * half_width, ey, ez + pz * half_width],
+                [sx - px * half_width, sy, sz - pz * half_width],
+                [ex - px * half_width, ey, ez - pz * half_width],
+            ] {
+                verts.push(Vertex {
+                    position,
+                    normal: [0.0, 1.0, 0.0],
+                    color: CENTERLINE_COLOR,
+                    uv: [0.0, 0.0],
+                    feature_type: feature::ROAD_MARKING,
+                });
+            }
+            idxs.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+        }
+        dash_start += pattern_length;
     }
 }
 
@@ -480,6 +574,7 @@ fn append_box(
                 position,
                 normal,
                 color,
+                uv: [0.0, 0.0],
                 feature_type: feature::BUILDING,
             });
         }
@@ -657,6 +752,7 @@ fn push_prism_face(
             position,
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
     }
@@ -1029,6 +1125,7 @@ fn append_cap(
         position: [x, y, z],
         normal,
         color,
+        uv: [0.0, 0.0],
         feature_type: feature::ROAD,
     });
 
@@ -1038,6 +1135,7 @@ fn append_cap(
             position: [x + angle.cos() * radius, y, z + angle.sin() * radius],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::ROAD,
         });
     }
@@ -1138,6 +1236,63 @@ mod tests {
 
         assert_eq!(road_profile(&tags).kind, RoadProfileKind::Tunnel);
         assert!(road_layer_y_offset(&tags) < 0.0);
+    }
+
+    #[test]
+    fn centerline_dashes_emit_yellow_markings_above_wide_roads() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let road_elevations = [3.0, 3.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_road_centerline_dashes(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+
+        assert!(!vertices.is_empty());
+        assert!(!indices.is_empty());
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.feature_type == feature::ROAD_MARKING)
+        );
+        assert!(vertices.iter().all(|v| v.color == CENTERLINE_COLOR));
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.position[1] > road_elevations[0] + ROAD_Y_OFFSET)
+        );
+    }
+
+    #[test]
+    fn centerline_dashes_skip_narrow_roads() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let road_elevations = [3.0, 3.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_road_centerline_dashes(&points, &road_elevations, 2.0, &mut vertices, &mut indices);
+
+        assert!(vertices.is_empty());
+        assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn centerline_dashes_follow_sloped_road_elevations() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let road_elevations = [0.0, 4.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_road_centerline_dashes(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+
+        let min_y = vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::INFINITY, f32::min);
+        let max_y = vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(max_y > min_y + 0.5);
     }
 
     #[test]

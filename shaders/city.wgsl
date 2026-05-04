@@ -49,6 +49,7 @@ struct VertexInput {
     @location(1) normal: vec3<f32>,
     @location(2) color: vec3<f32>,
     @location(3) feature_type: f32,
+    @location(4) uv: vec2<f32>,
 }
 
 struct VertexOutput {
@@ -57,6 +58,7 @@ struct VertexOutput {
     @location(1) world_normal: vec3<f32>,
     @location(2) color: vec3<f32>,
     @location(3) feature_type: f32,
+    @location(4) uv: vec2<f32>,
 }
 
 // --- Sky color helpers (duplicated from sky.wgsl for fog) ---
@@ -114,8 +116,10 @@ fn get_material(feature: f32) -> Material {
         return Material(0.08, 16.0);          // road
     } else if (feature < 3.5) {
         return Material(0.4, 64.0);           // water
-    } else {
+    } else if (feature < 4.5) {
         return Material(0.0, 1.0);            // landuse
+    } else {
+        return Material(0.05, 8.0);           // road marking
     }
 }
 
@@ -209,6 +213,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.world_normal = in.normal;
     out.color = in.color;
     out.feature_type = in.feature_type;
+    out.uv = in.uv;
     return out;
 }
 

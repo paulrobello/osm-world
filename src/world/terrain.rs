@@ -169,6 +169,7 @@ fn append_terrain_grid(
                 position: [x, h, z],
                 normal,
                 color,
+                uv: [0.0, 0.0],
                 feature_type: feature::TERRAIN,
             });
         }

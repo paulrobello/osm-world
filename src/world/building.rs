@@ -74,24 +74,28 @@ pub fn generate_building(
             position: [x0, base_y, z0],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
         verts.push(Vertex {
             position: [x1, base_y, z1],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
         verts.push(Vertex {
             position: [x0, top_y, z0],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
         verts.push(Vertex {
             position: [x1, top_y, z1],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
 
@@ -113,6 +117,7 @@ pub fn generate_building(
             position: [x, top_y, z],
             normal: roof_normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
     }

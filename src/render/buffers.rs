@@ -122,24 +122,28 @@ fn append_ground_plane(verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>, size: f32) 
             position: [-h, 0.0, -h],
             normal: n,
             color: c,
+            uv: [0.0, 0.0],
             feature_type: feature::TERRAIN,
         },
         Vertex {
             position: [h, 0.0, -h],
             normal: n,
             color: c,
+            uv: [0.0, 0.0],
             feature_type: feature::TERRAIN,
         },
         Vertex {
             position: [h, 0.0, h],
             normal: n,
             color: c,
+            uv: [0.0, 0.0],
             feature_type: feature::TERRAIN,
         },
         Vertex {
             position: [-h, 0.0, h],
             normal: n,
             color: c,
+            uv: [0.0, 0.0],
             feature_type: feature::TERRAIN,
         },
     ]);
@@ -164,6 +168,7 @@ fn append_box(
         position: [px, py, pz],
         normal: [nx, ny, nz],
         color,
+        uv: [0.0, 0.0],
         feature_type,
     };
 
@@ -225,6 +230,7 @@ mod tests {
             position: [0.0; 3],
             normal: [0.0, 1.0, 0.0],
             color: [1.0; 3],
+            uv: [0.0, 0.0],
             feature_type,
         }
     }

@@ -440,6 +440,13 @@ fn append_road_feature_mesh(
         verts,
         idxs,
     );
+    super::road::append_road_centerline_dashes(
+        &render_path.points,
+        &render_path.road_elevations,
+        width,
+        verts,
+        idxs,
+    );
     super::road::append_road_structures(
         &road.tags,
         &render_path.points,
@@ -1104,6 +1111,33 @@ mod tests {
                 && v.position[1] > super::super::road::ROAD_Y_OFFSET
         });
         assert!(!has_shared_endpoint_cap_center);
+    }
+
+    #[test]
+    fn tile_road_mesh_emits_centerline_markings_for_wide_roads() {
+        let mut source = empty_source();
+        source.roads.push(feature(
+            "highway",
+            "primary",
+            vec![(0.0, -50.0), (40.0, -50.0)],
+        ));
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_tile_roads_mesh(
+            &source,
+            &[0],
+            crate::stream::TileLod::Near,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(!indices.is_empty());
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD_MARKING)
+        );
     }
 
     #[test]

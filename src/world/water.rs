@@ -45,6 +45,7 @@ pub fn generate_water_with_elevations_and_offset(
             position: [x, elevations[i] + y_offset, z],
             normal,
             color,
+            uv: [0.0, 0.0],
             feature_type: feature::WATER,
         });
     }

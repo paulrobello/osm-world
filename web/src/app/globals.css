@@ -163,8 +163,13 @@ a:focus-visible,
   flex-direction: column;
   gap: 1rem;
   overflow-y: auto;
-  padding-right: 0.25rem;
+  padding-right: 0.45rem;
+  padding-bottom: 1.4rem;
   scrollbar-color: rgba(255, 178, 62, 0.55) rgba(255, 255, 255, 0.06);
+}
+
+.panel-scroll > * {
+  flex-shrink: 0;
 }
 
 .hero-block {
@@ -244,7 +249,7 @@ h1 .accent,
   overflow: hidden;
   border: 1px solid rgba(255, 178, 62, 0.28);
   border-radius: 20px;
-  padding: 1rem;
+  padding: 1rem 1rem 1.15rem;
   background: rgba(4, 11, 9, 0.72);
 }
 

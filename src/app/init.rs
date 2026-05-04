@@ -97,6 +97,7 @@ pub fn init_wgpu(
     let egui = crate::ui::EguiState::new(&device, &surface_config, &window);
 
     let mut camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
+    let spawn_lat_lon = camera_spawn_lat_lon(cam_override)?;
     let camera_bg = SceneBindGroup::new(&device);
     let shadow_bg = ShadowBindGroup::new(&device);
     let pipeline = CityPipeline::new(
@@ -127,6 +128,9 @@ pub fn init_wgpu(
             camera.position = glam::Vec3::new(5645.5, 122.8, -10505.8);
             camera.yaw = (-124.80_f32).to_radians();
             camera.pitch = (-16.30_f32).to_radians();
+            if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
+                apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
+            }
             (
                 SceneBuffers::from_mesh(&device, world.vertices, world.indices),
                 Some(coord_converter),
@@ -178,6 +182,31 @@ pub fn init_wgpu(
     ))
 }
 
+fn camera_spawn_lat_lon(
+    cam_override: Option<&crate::camera::CameraOverride>,
+) -> anyhow::Result<Option<(f64, f64)>> {
+    let Some(ov) = cam_override else {
+        return Ok(None);
+    };
+
+    match (ov.spawn_lat, ov.spawn_lon) {
+        (Some(lat), Some(lon)) => Ok(Some((lat, lon))),
+        (None, None) => Ok(None),
+        _ => anyhow::bail!("--spawn-lat and --spawn-lon must be provided together"),
+    }
+}
+
+fn apply_spawn_camera_location(
+    camera: &mut Flycam,
+    conv: &crate::geo::CoordConverter,
+    lat: f64,
+    lon: f64,
+) {
+    let (x, z) = conv.to_world_xz(lat, lon);
+    camera.position.x = x;
+    camera.position.z = z;
+}
+
 pub fn create_depth_buffer(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
     let texture = device.create_texture(&TextureDescriptor {
         label: Some("depth texture"),
@@ -195,4 +224,48 @@ pub fn create_depth_buffer(device: &Device, width: u32, height: u32) -> (Texture
     });
     let view = texture.create_view(&TextureViewDescriptor::default());
     (texture, view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_lat_lon_requires_complete_pair() {
+        let lat_only = crate::camera::CameraOverride {
+            x: None,
+            y: None,
+            z: None,
+            yaw: None,
+            pitch: None,
+            spawn_lat: Some(38.65671),
+            spawn_lon: None,
+        };
+        let lon_only = crate::camera::CameraOverride {
+            x: None,
+            y: None,
+            z: None,
+            yaw: None,
+            pitch: None,
+            spawn_lat: None,
+            spawn_lon: Some(-121.72179),
+        };
+
+        assert!(camera_spawn_lat_lon(Some(&lat_only)).is_err());
+        assert!(camera_spawn_lat_lon(Some(&lon_only)).is_err());
+    }
+
+    #[test]
+    fn apply_spawn_camera_location_sets_xz_and_preserves_y() {
+        let conv = crate::geo::CoordConverter::new(38.63863, -121.7526);
+        let mut camera = Flycam::new(1.0);
+        camera.position.y = 122.8;
+        let (expected_x, expected_z) = conv.to_world_xz(38.65671, -121.72179);
+
+        apply_spawn_camera_location(&mut camera, &conv, 38.65671, -121.72179);
+
+        assert_eq!(camera.position.x, expected_x);
+        assert_eq!(camera.position.y, 122.8);
+        assert_eq!(camera.position.z, expected_z);
+    }
 }

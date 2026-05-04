@@ -103,6 +103,8 @@ pub struct CameraOverride {
     pub z: Option<f32>,
     pub yaw: Option<f32>,
     pub pitch: Option<f32>,
+    pub spawn_lat: Option<f64>,
+    pub spawn_lon: Option<f64>,
 }
 
 /// Scene uniform buffer layout (GPU). 288 bytes: camera + atmosphere.

@@ -102,6 +102,14 @@ struct Args {
     #[arg(long)]
     cam_pitch: Option<f32>,
 
+    /// Spawn latitude for initial camera placement
+    #[arg(long, allow_hyphen_values = true)]
+    spawn_lat: Option<f64>,
+
+    /// Spawn longitude for initial camera placement
+    #[arg(long, allow_hyphen_values = true)]
+    spawn_lon: Option<f64>,
+
     /// Start with the in-game settings panel open
     #[arg(long)]
     show_settings: bool,
@@ -160,6 +168,8 @@ fn main() -> anyhow::Result<()> {
         || args.cam_z.is_some()
         || args.cam_yaw.is_some()
         || args.cam_pitch.is_some()
+        || args.spawn_lat.is_some()
+        || args.spawn_lon.is_some()
     {
         Some(osm_world::camera::CameraOverride {
             x: args.cam_x,
@@ -167,6 +177,8 @@ fn main() -> anyhow::Result<()> {
             z: args.cam_z,
             yaw: args.cam_yaw,
             pitch: args.cam_pitch,
+            spawn_lat: args.spawn_lat,
+            spawn_lon: args.spawn_lon,
         })
     } else {
         None
@@ -206,6 +218,29 @@ mod tests {
     fn parses_show_settings_flag() {
         let args = Args::try_parse_from(["osm-world", "--show-settings"]).unwrap();
         assert!(args.show_settings);
+    }
+
+    #[test]
+    fn parses_spawn_lat_lon_flags() {
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--spawn-lat",
+            "38.65671",
+            "--spawn-lon",
+            "-121.72179",
+        ])
+        .unwrap();
+
+        assert_eq!(args.spawn_lat, Some(38.65671));
+        assert_eq!(args.spawn_lon, Some(-121.72179));
+    }
+
+    #[test]
+    fn parses_one_sided_spawn_lat_flag() {
+        let args = Args::try_parse_from(["osm-world", "--spawn-lat", "38.65671"]).unwrap();
+
+        assert_eq!(args.spawn_lat, Some(38.65671));
+        assert_eq!(args.spawn_lon, None);
     }
 
     #[test]

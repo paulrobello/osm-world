@@ -64,6 +64,8 @@ pub fn road_profile(tags: &HashMap<String, String>) -> RoadProfile {
         };
     }
 
+    // Explicit bridge tags win over layer-only lowering; explicit tunnel tags
+    // are handled above and still take precedence when present.
     if is_bridge || osm_layer > 0.0 {
         return RoadProfile {
             kind: RoadProfileKind::Bridge,
@@ -371,6 +373,18 @@ mod tests {
 
         assert!(road_layer_y_offset(&surface) > 0.0);
         assert!(road_layer_y_offset(&tunnel) <= road_layer_y_offset(&surface) - 4.0);
+    }
+
+    #[test]
+    fn bridge_tag_wins_over_negative_layer_without_tunnel() {
+        let tags = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+            ("layer".to_string(), "-1".to_string()),
+        ]);
+
+        assert_eq!(road_profile(&tags).kind, RoadProfileKind::Bridge);
+        assert!(road_layer_y_offset(&tags) > 0.0);
     }
 
     #[test]

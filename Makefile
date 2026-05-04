@@ -26,8 +26,13 @@ serve:
 	cargo run -- --serve --host 127.0.0.1 --port 3030
 
 dev:
-	@cargo run -- --serve --host 127.0.0.1 --port 3030 &
-	@cd web && bun run dev
+	@set -e; \
+	cargo run -- --serve --host 127.0.0.1 --port 3030 & \
+	API_PID=$$!; \
+	trap 'kill $$API_PID 2>/dev/null || true' INT TERM EXIT; \
+	sleep 1; \
+	if ! kill -0 $$API_PID 2>/dev/null; then echo "osm-world API failed to start"; exit 1; fi; \
+	cd web && bun run dev
 
 test:
 	cargo test

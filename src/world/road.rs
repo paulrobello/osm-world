@@ -366,54 +366,65 @@ fn bounds2d(points: &[(f32, f32)]) -> (f32, f32, f32, f32) {
     (min_x, max_x, min_z, max_z)
 }
 
-fn segment_frame(a: (f32, f32), b: (f32, f32)) -> Option<((f32, f32), (f32, f32), f32)> {
+type Point2 = (f32, f32);
+
+struct SegmentFrame {
+    direction: Point2,
+    perpendicular: Point2,
+}
+
+struct SegmentStripBox {
+    a: Point2,
+    b: Point2,
+    lateral_offset: f32,
+    half_width: f32,
+    min_y: f32,
+    max_y: f32,
+    color: [f32; 3],
+}
+
+fn segment_frame(a: Point2, b: Point2) -> Option<SegmentFrame> {
     let dx = b.0 - a.0;
     let dz = b.1 - a.1;
     let len = (dx * dx + dz * dz).sqrt();
     if len < 1e-6 {
         None
     } else {
-        Some(((dx / len, dz / len), (-dz / len, dx / len), len))
+        Some(SegmentFrame {
+            direction: (dx / len, dz / len),
+            perpendicular: (-dz / len, dx / len),
+        })
     }
 }
 
-fn append_segment_strip_box(
-    a: (f32, f32),
-    b: (f32, f32),
-    lateral_offset: f32,
-    half_width: f32,
-    min_y: f32,
-    max_y: f32,
-    color: [f32; 3],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
-    let Some(((_, _), (px, pz), _len)) = segment_frame(a, b) else {
+fn append_segment_strip_box(strip: SegmentStripBox, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+    let Some(frame) = segment_frame(strip.a, strip.b) else {
         return;
     };
+    let (px, pz) = frame.perpendicular;
     let corners = [
         (
-            a.0 + px * (lateral_offset - half_width),
-            a.1 + pz * (lateral_offset - half_width),
+            strip.a.0 + px * (strip.lateral_offset - strip.half_width),
+            strip.a.1 + pz * (strip.lateral_offset - strip.half_width),
         ),
         (
-            a.0 + px * (lateral_offset + half_width),
-            a.1 + pz * (lateral_offset + half_width),
+            strip.a.0 + px * (strip.lateral_offset + strip.half_width),
+            strip.a.1 + pz * (strip.lateral_offset + strip.half_width),
         ),
         (
-            b.0 + px * (lateral_offset - half_width),
-            b.1 + pz * (lateral_offset - half_width),
+            strip.b.0 + px * (strip.lateral_offset - strip.half_width),
+            strip.b.1 + pz * (strip.lateral_offset - strip.half_width),
         ),
         (
-            b.0 + px * (lateral_offset + half_width),
-            b.1 + pz * (lateral_offset + half_width),
+            strip.b.0 + px * (strip.lateral_offset + strip.half_width),
+            strip.b.1 + pz * (strip.lateral_offset + strip.half_width),
         ),
     ];
     let (min_x, max_x, min_z, max_z) = bounds2d(&corners);
     append_box(
-        [min_x, min_y, min_z],
-        [max_x, max_y, max_z],
-        color,
+        [min_x, strip.min_y, min_z],
+        [max_x, strip.max_y, max_z],
+        strip.color,
         verts,
         idxs,
     );
@@ -438,42 +449,48 @@ fn append_bridge_structure(
     let rail_half_width = (BRIDGE_RAIL_WIDTH * 0.5).max(0.05);
     let rail_offset = (half_width - rail_half_width).max(rail_half_width);
     for i in 0..points.len() - 1 {
-        let Some((_, _, _)) = segment_frame(points[i], points[i + 1]) else {
+        if segment_frame(points[i], points[i + 1]).is_none() {
             continue;
-        };
+        }
         let road_y = road_elevations[i].max(road_elevations[i + 1]) + ROAD_Y_OFFSET;
         let terrain_y = terrain_elevations[i].min(terrain_elevations[i + 1]);
 
         append_segment_strip_box(
-            points[i],
-            points[i + 1],
-            0.0,
-            half_width + BRIDGE_RAIL_WIDTH * 0.25,
-            road_y - BRIDGE_DECK_THICKNESS,
-            road_y - 0.08,
-            BRIDGE_STRUCTURE_COLOR,
+            SegmentStripBox {
+                a: points[i],
+                b: points[i + 1],
+                lateral_offset: 0.0,
+                half_width: half_width + BRIDGE_RAIL_WIDTH * 0.25,
+                min_y: road_y - BRIDGE_DECK_THICKNESS,
+                max_y: road_y - 0.08,
+                color: BRIDGE_STRUCTURE_COLOR,
+            },
             verts,
             idxs,
         );
         append_segment_strip_box(
-            points[i],
-            points[i + 1],
-            rail_offset,
-            rail_half_width,
-            road_y + 0.05,
-            road_y + BRIDGE_RAIL_HEIGHT,
-            BRIDGE_STRUCTURE_COLOR,
+            SegmentStripBox {
+                a: points[i],
+                b: points[i + 1],
+                lateral_offset: rail_offset,
+                half_width: rail_half_width,
+                min_y: road_y + 0.05,
+                max_y: road_y + BRIDGE_RAIL_HEIGHT,
+                color: BRIDGE_STRUCTURE_COLOR,
+            },
             verts,
             idxs,
         );
         append_segment_strip_box(
-            points[i],
-            points[i + 1],
-            -rail_offset,
-            rail_half_width,
-            road_y + 0.05,
-            road_y + BRIDGE_RAIL_HEIGHT,
-            BRIDGE_STRUCTURE_COLOR,
+            SegmentStripBox {
+                a: points[i],
+                b: points[i + 1],
+                lateral_offset: -rail_offset,
+                half_width: rail_half_width,
+                min_y: road_y + 0.05,
+                max_y: road_y + BRIDGE_RAIL_HEIGHT,
+                color: BRIDGE_STRUCTURE_COLOR,
+            },
             verts,
             idxs,
         );
@@ -532,9 +549,11 @@ fn append_tunnel_portal(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
-    let Some(((dx, dz), (px, pz), _len)) = segment_frame(point, next) else {
+    let Some(frame) = segment_frame(point, next) else {
         return;
     };
+    let (dx, dz) = frame.direction;
+    let (px, pz) = frame.perpendicular;
 
     let road_y = elevation + ROAD_Y_OFFSET;
     let top_y = road_y + TUNNEL_CLEARANCE;

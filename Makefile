@@ -27,23 +27,29 @@ serve:
 
 dev:
 	@bash -c 'set -euo pipefail; \
+	TMP_DIR=$$(mktemp -d); API_STATUS="$$TMP_DIR/api.status"; WEB_STATUS="$$TMP_DIR/web.status"; \
 	API_PID=""; WEB_PID=""; \
 	cleanup() { \
 		if [ -n "$$WEB_PID" ]; then kill "$$WEB_PID" 2>/dev/null || true; wait "$$WEB_PID" 2>/dev/null || true; fi; \
 		if [ -n "$$API_PID" ]; then kill "$$API_PID" 2>/dev/null || true; wait "$$API_PID" 2>/dev/null || true; fi; \
+		rm -rf "$$TMP_DIR"; \
 	}; \
 	trap cleanup EXIT INT TERM; \
-	cargo run -- --serve --host 127.0.0.1 --port 3030 & \
+	(cargo run -- --serve --host 127.0.0.1 --port 3030; echo $$? > "$$API_STATUS") & \
 	API_PID=$$!; \
 	for _ in $$(seq 1 60); do \
 		if curl -fsS http://127.0.0.1:3030/health >/dev/null 2>&1; then READY=1; break; fi; \
-		if ! kill -0 "$$API_PID" 2>/dev/null; then echo "osm-world API failed to start"; exit 1; fi; \
+		if [ -f "$$API_STATUS" ]; then echo "osm-world API failed to start"; exit $$(cat "$$API_STATUS"); fi; \
 		sleep 0.5; \
 	done; \
 	if [ "$${READY:-0}" != "1" ]; then echo "osm-world API did not become ready"; exit 1; fi; \
-	(cd web && bun run dev) & \
+	(cd web && bun run dev; echo $$? > "$$WEB_STATUS") & \
 	WEB_PID=$$!; \
-	wait "$$WEB_PID"'
+	while true; do \
+		if [ -f "$$API_STATUS" ]; then echo "osm-world API exited"; exit $$(cat "$$API_STATUS"); fi; \
+		if [ -f "$$WEB_STATUS" ]; then exit $$(cat "$$WEB_STATUS"); fi; \
+		sleep 1; \
+	done'
 
 test:
 	cargo test

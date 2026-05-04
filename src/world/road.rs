@@ -16,6 +16,7 @@ const BRIDGE_DECK_THICKNESS: f32 = 0.6;
 const BRIDGE_RAIL_HEIGHT: f32 = 0.9;
 const BRIDGE_RAIL_WIDTH: f32 = 0.25;
 const BRIDGE_SUPPORT_WIDTH: f32 = 0.8;
+pub const BRIDGE_APPROACH_RAMP_LENGTH: f32 = 25.0;
 const TUNNEL_PORTAL_DEPTH: f32 = 1.0;
 const TUNNEL_PORTAL_THICKNESS: f32 = 0.5;
 const TUNNEL_CLEARANCE: f32 = 3.0;
@@ -43,14 +44,7 @@ pub struct RoadProfile {
 }
 
 pub fn road_profile(tags: &HashMap<String, String>) -> RoadProfile {
-    let width = super::color::road_width(tags);
-    let surface_offset = if width >= 5.0 {
-        0.7
-    } else if width >= 3.5 {
-        0.6
-    } else {
-        0.5
-    };
+    let surface_offset = surface_road_y_offset(tags);
 
     let osm_layer = tags
         .get("layer")
@@ -98,6 +92,199 @@ pub fn road_profile(tags: &HashMap<String, String>) -> RoadProfile {
 
 pub fn road_layer_y_offset(tags: &HashMap<String, String>) -> f32 {
     road_profile(tags).layer_offset
+}
+
+#[derive(Clone, Debug)]
+pub struct RoadRenderPath {
+    pub points: Vec<(f32, f32)>,
+    pub terrain_elevations: Vec<f32>,
+    pub road_elevations: Vec<f32>,
+}
+
+pub fn road_render_elevations(
+    tags: &HashMap<String, String>,
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+) -> Vec<f32> {
+    if points.len() != terrain_elevations.len() {
+        return Vec::new();
+    }
+
+    let profile = road_profile(tags);
+    let ramp_factors = if profile.kind == RoadProfileKind::Bridge {
+        bridge_ramp_factors(points, BRIDGE_APPROACH_RAMP_LENGTH)
+    } else {
+        vec![1.0; points.len()]
+    };
+    render_elevations_for_factors(tags, terrain_elevations, &ramp_factors)
+}
+
+pub fn road_render_path(
+    tags: &HashMap<String, String>,
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+) -> RoadRenderPath {
+    if points.len() != terrain_elevations.len() {
+        return RoadRenderPath {
+            points: Vec::new(),
+            terrain_elevations: Vec::new(),
+            road_elevations: Vec::new(),
+        };
+    }
+
+    if road_profile(tags).kind != RoadProfileKind::Bridge || points.len() < 2 {
+        return RoadRenderPath {
+            points: points.to_vec(),
+            terrain_elevations: terrain_elevations.to_vec(),
+            road_elevations: road_render_elevations(tags, points, terrain_elevations),
+        };
+    }
+
+    let distances = cumulative_distances(points);
+    let total_length = *distances.last().unwrap_or(&0.0);
+    if total_length <= 1e-6 {
+        return RoadRenderPath {
+            points: points.to_vec(),
+            terrain_elevations: terrain_elevations.to_vec(),
+            road_elevations: road_render_elevations(tags, points, terrain_elevations),
+        };
+    }
+
+    let effective_ramp = BRIDGE_APPROACH_RAMP_LENGTH.min(total_length * 0.5);
+    let mut sample_distances = distances.clone();
+    push_sample_distance(&mut sample_distances, effective_ramp, total_length);
+    push_sample_distance(
+        &mut sample_distances,
+        total_length - effective_ramp,
+        total_length,
+    );
+    sample_distances.sort_by(f32::total_cmp);
+    sample_distances.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+
+    let mut render_points = Vec::with_capacity(sample_distances.len());
+    let mut render_terrain_elevations = Vec::with_capacity(sample_distances.len());
+    let mut ramp_factors = Vec::with_capacity(sample_distances.len());
+    for distance in sample_distances {
+        let (point, terrain_elevation) =
+            interpolate_path_sample(points, terrain_elevations, &distances, distance);
+        render_points.push(point);
+        render_terrain_elevations.push(terrain_elevation);
+        ramp_factors.push(bridge_ramp_factor(distance, total_length, effective_ramp));
+    }
+
+    let road_elevations =
+        render_elevations_for_factors(tags, &render_terrain_elevations, &ramp_factors);
+    RoadRenderPath {
+        points: render_points,
+        terrain_elevations: render_terrain_elevations,
+        road_elevations,
+    }
+}
+
+fn render_elevations_for_factors(
+    tags: &HashMap<String, String>,
+    terrain_elevations: &[f32],
+    ramp_factors: &[f32],
+) -> Vec<f32> {
+    let profile = road_profile(tags);
+    if profile.kind != RoadProfileKind::Bridge {
+        return terrain_elevations
+            .iter()
+            .map(|elevation| elevation + profile.layer_offset)
+            .collect();
+    }
+
+    let surface_offset = surface_road_y_offset(tags);
+    let bridge_lift = profile.layer_offset - surface_offset;
+    terrain_elevations
+        .iter()
+        .zip(ramp_factors)
+        .map(|(&elevation, &ramp_factor)| elevation + surface_offset + bridge_lift * ramp_factor)
+        .collect()
+}
+
+fn surface_road_y_offset(tags: &HashMap<String, String>) -> f32 {
+    let width = super::color::road_width(tags);
+    if width >= 5.0 {
+        0.7
+    } else if width >= 3.5 {
+        0.6
+    } else {
+        0.5
+    }
+}
+
+fn bridge_ramp_factors(points: &[(f32, f32)], ramp_length: f32) -> Vec<f32> {
+    if points.len() < 2 || ramp_length <= 0.0 {
+        return vec![1.0; points.len()];
+    }
+
+    let distances = cumulative_distances(points);
+    let total_length = *distances.last().unwrap_or(&0.0);
+    if total_length <= 1e-6 {
+        return vec![1.0; points.len()];
+    }
+    let effective_ramp = ramp_length.min(total_length * 0.5);
+    distances
+        .into_iter()
+        .map(|distance| bridge_ramp_factor(distance, total_length, effective_ramp))
+        .collect()
+}
+
+fn bridge_ramp_factor(distance: f32, total_length: f32, effective_ramp: f32) -> f32 {
+    if effective_ramp <= 1e-6 {
+        return 1.0;
+    }
+    let from_start = (distance / effective_ramp).clamp(0.0, 1.0);
+    let from_end = ((total_length - distance) / effective_ramp).clamp(0.0, 1.0);
+    from_start.min(from_end)
+}
+
+fn cumulative_distances(points: &[(f32, f32)]) -> Vec<f32> {
+    let mut distances = Vec::with_capacity(points.len());
+    if points.is_empty() {
+        return distances;
+    }
+    distances.push(0.0f32);
+    for i in 1..points.len() {
+        let dx = points[i].0 - points[i - 1].0;
+        let dz = points[i].1 - points[i - 1].1;
+        let segment_length = (dx * dx + dz * dz).sqrt();
+        distances.push(distances[i - 1] + segment_length);
+    }
+    distances
+}
+
+fn push_sample_distance(sample_distances: &mut Vec<f32>, distance: f32, total_length: f32) {
+    if distance > 1e-4 && distance < total_length - 1e-4 {
+        sample_distances.push(distance);
+    }
+}
+
+fn interpolate_path_sample(
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+    distances: &[f32],
+    sample_distance: f32,
+) -> ((f32, f32), f32) {
+    if sample_distance <= 0.0 {
+        return (points[0], terrain_elevations[0]);
+    }
+    for i in 1..distances.len() {
+        if sample_distance <= distances[i] {
+            let segment_length = distances[i] - distances[i - 1];
+            if segment_length <= 1e-6 {
+                return (points[i], terrain_elevations[i]);
+            }
+            let t = ((sample_distance - distances[i - 1]) / segment_length).clamp(0.0, 1.0);
+            let x = points[i - 1].0 + (points[i].0 - points[i - 1].0) * t;
+            let z = points[i - 1].1 + (points[i].1 - points[i - 1].1) * t;
+            let elevation =
+                terrain_elevations[i - 1] + (terrain_elevations[i] - terrain_elevations[i - 1]) * t;
+            return ((x, z), elevation);
+        }
+    }
+    (*points.last().unwrap(), *terrain_elevations.last().unwrap())
 }
 
 /// Generate a flat ribbon mesh for a road polyline.
@@ -453,7 +640,12 @@ fn append_bridge_structure(
         if segment_frame(points[i], points[i + 1]).is_none() {
             continue;
         }
-        let road_y = road_elevations[i].max(road_elevations[i + 1]) + ROAD_Y_OFFSET;
+        let start_road_y = road_elevations[i] + ROAD_Y_OFFSET;
+        let end_road_y = road_elevations[i + 1] + ROAD_Y_OFFSET;
+        if (start_road_y - end_road_y).abs() > 0.1 {
+            continue;
+        }
+        let road_y = start_road_y.max(end_road_y);
         let terrain_y = terrain_elevations[i].min(terrain_elevations[i + 1]);
 
         append_segment_strip_box(
@@ -851,6 +1043,27 @@ mod tests {
     }
 
     #[test]
+    fn bridge_structure_skips_flat_deck_on_sloped_ramp_segments() {
+        let points = [(0.0, 0.0), (25.0, 0.0)];
+        let terrain_elevations = [0.0, 0.0];
+        let road_elevations = [0.7, 5.7];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_bridge_structure(
+            &points,
+            &terrain_elevations,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(vertices.is_empty());
+        assert!(indices.is_empty());
+    }
+
+    #[test]
     fn bridge_structure_box_geometry_has_per_face_normals() {
         let points = [(0.0, 0.0), (20.0, 0.0)];
         let terrain_elevations = [0.0, 0.0];
@@ -933,6 +1146,85 @@ mod tests {
 
         assert!(vertices.is_empty());
         assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn bridge_render_path_inserts_ramp_breakpoints_for_two_point_bridge() {
+        let tags = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+        ]);
+        let points = [(0.0, 0.0), (100.0, 0.0)];
+        let terrain_elevations = [10.0, 10.0];
+
+        let path = road_render_path(&tags, &points, &terrain_elevations);
+        let surface_y = terrain_elevations[0] + surface_road_y_offset(&tags);
+        let bridge_y = terrain_elevations[0] + road_layer_y_offset(&tags);
+
+        assert_eq!(
+            path.points,
+            vec![(0.0, 0.0), (25.0, 0.0), (75.0, 0.0), (100.0, 0.0)]
+        );
+        assert_eq!(path.road_elevations[0], surface_y);
+        assert_eq!(path.road_elevations[1], bridge_y);
+        assert_eq!(path.road_elevations[2], bridge_y);
+        assert_eq!(path.road_elevations[3], surface_y);
+    }
+
+    #[test]
+    fn bridge_render_elevations_ramp_from_surface_to_bridge_and_back() {
+        let tags = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+        ]);
+        let points = [(0.0, 0.0), (12.5, 0.0), (25.0, 0.0), (50.0, 0.0)];
+        let terrain_elevations = [10.0, 10.0, 10.0, 10.0];
+
+        let elevations = road_render_elevations(&tags, &points, &terrain_elevations);
+        let surface_y = terrain_elevations[0] + surface_road_y_offset(&tags);
+        let bridge_y = terrain_elevations[0] + road_layer_y_offset(&tags);
+
+        assert_eq!(elevations[0], surface_y);
+        assert!(elevations[1] > surface_y);
+        assert!(elevations[1] < bridge_y);
+        assert_eq!(elevations[2], bridge_y);
+        assert_eq!(elevations[3], surface_y);
+    }
+
+    #[test]
+    fn bridge_render_elevations_clamp_ramps_for_short_bridges() {
+        let tags = std::collections::HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+        ]);
+        let points = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)];
+        let terrain_elevations = [0.0, 0.0, 0.0];
+
+        let elevations = road_render_elevations(&tags, &points, &terrain_elevations);
+        let surface_y = surface_road_y_offset(&tags);
+        let bridge_y = road_layer_y_offset(&tags);
+
+        assert_eq!(elevations[0], surface_y);
+        assert_eq!(elevations[1], bridge_y);
+        assert_eq!(elevations[2], surface_y);
+    }
+
+    #[test]
+    fn surface_render_elevations_keep_constant_surface_offset() {
+        let tags =
+            std::collections::HashMap::from([("highway".to_string(), "primary".to_string())]);
+        let points = [(0.0, 0.0), (50.0, 0.0)];
+        let terrain_elevations = [1.0, 2.0];
+
+        let elevations = road_render_elevations(&tags, &points, &terrain_elevations);
+
+        assert_eq!(
+            elevations,
+            vec![
+                1.0 + road_layer_y_offset(&tags),
+                2.0 + road_layer_y_offset(&tags)
+            ]
+        );
     }
 
     #[test]

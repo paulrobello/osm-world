@@ -430,12 +430,11 @@ fn append_road_feature_mesh(
 ) -> (Vec<f32>, f32, [f32; 3]) {
     let width = super::color::road_width(&road.tags);
     let color = super::color::road_color(&road.tags);
-    let layer_offset = super::road::road_layer_y_offset(&road.tags);
-    let road_elevations: Vec<f32> = road.elevations.iter().map(|e| e + layer_offset).collect();
+    let render_path = super::road::road_render_path(&road.tags, &road.points, &road.elevations);
 
     super::road::generate_road_with_elevations(
-        &road.points,
-        &road_elevations,
+        &render_path.points,
+        &render_path.road_elevations,
         width,
         color,
         verts,
@@ -443,15 +442,17 @@ fn append_road_feature_mesh(
     );
     super::road::append_road_structures(
         &road.tags,
-        &road.points,
-        &road.elevations,
-        &road_elevations,
+        &render_path.points,
+        &render_path.terrain_elevations,
+        &render_path.road_elevations,
         width,
         verts,
         idxs,
     );
 
-    (road_elevations, width, color)
+    let cap_elevations =
+        super::road::road_render_elevations(&road.tags, &road.points, &road.elevations);
+    (cap_elevations, width, color)
 }
 
 fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
@@ -1108,7 +1109,7 @@ mod tests {
     #[test]
     fn tile_road_mesh_emits_bridge_structure_geometry() {
         let mut source = empty_source();
-        let mut bridge = feature("highway", "primary", vec![(0.0, -50.0), (30.0, -50.0)]);
+        let mut bridge = feature("highway", "primary", vec![(0.0, -50.0), (100.0, -50.0)]);
         bridge.tags.insert("bridge".to_string(), "yes".to_string());
         bridge.elevations = vec![0.0, 0.0];
         source.roads.push(bridge);

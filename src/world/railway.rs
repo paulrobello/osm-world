@@ -5,13 +5,16 @@ use std::collections::HashMap;
 use crate::render::vertex::{Vertex, feature};
 
 const TRACK_GAUGE: f32 = 1.435;
-const RAIL_HEAD_WIDTH: f32 = 0.16;
+const BALLAST_WIDTH: f32 = 3.6;
+const RAIL_HEAD_WIDTH: f32 = 0.32;
 const TIE_LENGTH: f32 = 2.8;
 const TIE_WIDTH: f32 = 0.45;
 const TIE_SPACING: f32 = 3.0;
-const TIE_Y_OFFSET: f32 = 0.06;
-const RAIL_Y_OFFSET: f32 = 0.14;
-const RAIL_COLOR: [f32; 3] = [0.58, 0.58, 0.55];
+const BALLAST_Y_OFFSET: f32 = 0.02;
+const TIE_Y_OFFSET: f32 = 0.08;
+const RAIL_Y_OFFSET: f32 = 0.26;
+const BALLAST_COLOR: [f32; 3] = [0.34, 0.34, 0.32];
+const RAIL_COLOR: [f32; 3] = [0.78, 0.78, 0.72];
 const TIE_COLOR: [f32; 3] = [0.24, 0.16, 0.10];
 
 pub fn is_renderable_railway(tags: &HashMap<String, String>) -> bool {
@@ -47,6 +50,21 @@ pub fn generate_railway_track(
         let perp = (-dir.1, dir.0);
         let start_y = elevations[i] + base_y_offset;
         let end_y = elevations[i + 1] + base_y_offset;
+
+        append_segment_quad(
+            SegmentQuad {
+                a,
+                b,
+                perp,
+                start_y: start_y + BALLAST_Y_OFFSET,
+                end_y: end_y + BALLAST_Y_OFFSET,
+                lateral_offset: 0.0,
+                half_width: BALLAST_WIDTH * 0.5,
+                color: BALLAST_COLOR,
+            },
+            verts,
+            idxs,
+        );
 
         for rail_offset in [-TRACK_GAUGE * 0.5, TRACK_GAUGE * 0.5] {
             append_segment_quad(
@@ -203,8 +221,34 @@ mod tests {
         assert!(!vertices.is_empty());
         assert!(!indices.is_empty());
         assert!(vertices.iter().all(|v| v.feature_type == feature::RAILWAY));
+        assert!(vertices.iter().any(|v| v.color == BALLAST_COLOR));
         assert!(vertices.iter().any(|v| v.color == RAIL_COLOR));
         assert!(vertices.iter().any(|v| v.color == TIE_COLOR));
+    }
+
+    #[test]
+    fn railway_track_layers_ballast_ties_and_rails_by_height() {
+        let tags = HashMap::from([("railway".to_string(), "rail".to_string())]);
+        let points = [(0.0, 0.0), (6.0, 0.0)];
+        let elevations = [0.0, 0.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        generate_railway_track(&tags, &points, &elevations, &mut vertices, &mut indices);
+
+        let min_y_for_color = |color: [f32; 3]| {
+            vertices
+                .iter()
+                .filter(|v| v.color == color)
+                .map(|v| v.position[1])
+                .fold(f32::INFINITY, f32::min)
+        };
+        let ballast_y = min_y_for_color(BALLAST_COLOR);
+        let tie_y = min_y_for_color(TIE_COLOR);
+        let rail_y = min_y_for_color(RAIL_COLOR);
+
+        assert!(tie_y > ballast_y);
+        assert!(rail_y > tie_y);
     }
 
     #[test]

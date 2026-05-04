@@ -147,10 +147,18 @@ struct Args {
     max_uploaded_mb: f32,
 }
 
+fn validate_spawn_pair(args: &Args) -> anyhow::Result<()> {
+    if args.spawn_lat.is_some() != args.spawn_lon.is_some() {
+        anyhow::bail!("--spawn-lat and --spawn-lon must be provided together");
+    }
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
     log::info!("osm-world starting");
+    validate_spawn_pair(&args)?;
 
     if args.serve {
         let rt = tokio::runtime::Runtime::new()?;
@@ -236,11 +244,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_one_sided_spawn_lat_flag() {
+    fn rejects_one_sided_spawn_lat_flag() {
         let args = Args::try_parse_from(["osm-world", "--spawn-lat", "38.65671"]).unwrap();
 
-        assert_eq!(args.spawn_lat, Some(38.65671));
-        assert_eq!(args.spawn_lon, None);
+        let err = validate_spawn_pair(&args).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--spawn-lat and --spawn-lon must be provided together")
+        );
     }
 
     #[test]

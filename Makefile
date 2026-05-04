@@ -35,7 +35,7 @@ dev:
 		rm -rf "$$TMP_DIR"; \
 	}; \
 	trap cleanup EXIT INT TERM; \
-	(cargo run -- --serve --host 127.0.0.1 --port 3030; echo $$? > "$$API_STATUS") & \
+	(set +e; cargo run -- --serve --host 127.0.0.1 --port 3030; STATUS=$$?; echo "$$STATUS" > "$$API_STATUS"; exit "$$STATUS") & \
 	API_PID=$$!; \
 	for _ in $$(seq 1 60); do \
 		if curl -fsS http://127.0.0.1:3030/health >/dev/null 2>&1; then READY=1; break; fi; \
@@ -43,7 +43,7 @@ dev:
 		sleep 0.5; \
 	done; \
 	if [ "$${READY:-0}" != "1" ]; then echo "osm-world API did not become ready"; exit 1; fi; \
-	(cd web && bun run dev; echo $$? > "$$WEB_STATUS") & \
+	(cd web && set +e; bun run dev; STATUS=$$?; echo "$$STATUS" > "$$WEB_STATUS"; exit "$$STATUS") & \
 	WEB_PID=$$!; \
 	while true; do \
 		if [ -f "$$API_STATUS" ]; then echo "osm-world API exited"; exit $$(cat "$$API_STATUS"); fi; \

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{State, rejection::JsonRejection},
@@ -11,6 +11,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tokio::task;
 use tower_http::cors::CorsLayer;
+
+const MAX_BBOX_SPAN_DEGREES: f64 = 0.5;
+const MAX_BBOX_AREA_DEGREES: f64 = 0.10;
+const MAX_SRTM_TILE_COUNT: usize = 16;
 
 #[derive(Clone)]
 struct AppState {
@@ -37,6 +41,9 @@ pub struct PrepareAreaResponse {
     pub osm_path: String,
     pub srtm_dir: Option<String>,
     pub command: String,
+    pub command_cwd: String,
+    pub command_program: String,
+    pub command_args: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,27 +61,56 @@ struct ErrorResponse {
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
-    message: String,
+    client_message: &'static str,
 }
 
 impl ApiError {
-    fn internal(message: impl Into<String>) -> Self {
+    fn invalid_request(detail: impl std::fmt::Display) -> Self {
+        log::warn!("invalid API request: {detail}");
         Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: message.into(),
+            status: StatusCode::BAD_REQUEST,
+            client_message: "invalid request",
         }
     }
 
-    fn from_anyhow(err: anyhow::Error) -> Self {
-        let message = format!("{err:#}");
-        let status = if is_bad_request_error(&message) {
-            StatusCode::BAD_REQUEST
-        } else if is_upstream_error(&message) {
-            StatusCode::BAD_GATEWAY
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        };
-        Self { status, message }
+    fn internal(detail: impl std::fmt::Display) -> Self {
+        log::error!("internal API error: {detail}");
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            client_message: "failed to prepare area",
+        }
+    }
+
+    fn from_prepare_error(err: PrepareAreaError) -> Self {
+        match err {
+            PrepareAreaError::BadRequest { source } => {
+                log::warn!("invalid prepare area request: {source:#}");
+                Self {
+                    status: StatusCode::BAD_REQUEST,
+                    client_message: "invalid request",
+                }
+            }
+            PrepareAreaError::Upstream {
+                client_message,
+                source,
+            } => {
+                log::warn!("{client_message}: {source:#}");
+                Self {
+                    status: StatusCode::BAD_GATEWAY,
+                    client_message,
+                }
+            }
+            PrepareAreaError::Internal {
+                client_message,
+                source,
+            } => {
+                log::error!("{client_message}: {source:#}");
+                Self {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    client_message,
+                }
+            }
+        }
     }
 }
 
@@ -83,12 +119,49 @@ impl IntoResponse for ApiError {
         (
             self.status,
             Json(ErrorResponse {
-                error: self.message,
+                error: self.client_message.to_string(),
             }),
         )
             .into_response()
     }
 }
+
+#[derive(Debug)]
+pub(crate) enum PrepareAreaError {
+    BadRequest {
+        source: anyhow::Error,
+    },
+    Upstream {
+        client_message: &'static str,
+        source: anyhow::Error,
+    },
+    Internal {
+        client_message: &'static str,
+        source: anyhow::Error,
+    },
+}
+
+impl PrepareAreaError {
+    fn bad_request(source: anyhow::Error) -> Self {
+        Self::BadRequest { source }
+    }
+
+    fn upstream(client_message: &'static str, source: anyhow::Error) -> Self {
+        Self::Upstream {
+            client_message,
+            source,
+        }
+    }
+
+    fn internal(client_message: &'static str, source: anyhow::Error) -> Self {
+        Self::Internal {
+            client_message,
+            source,
+        }
+    }
+}
+
+type PrepareResult<T> = Result<T, PrepareAreaError>;
 
 pub fn build_router(project_root: PathBuf) -> Router {
     Router::new()
@@ -133,16 +206,13 @@ async fn prepare_area_handler(
     State(state): State<AppState>,
     payload: Result<Json<PrepareAreaRequest>, JsonRejection>,
 ) -> Result<Json<PrepareAreaResponse>, ApiError> {
-    let Json(req) = payload.map_err(|err| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message: err.to_string(),
-    })?;
+    let Json(req) = payload.map_err(ApiError::invalid_request)?;
     let project_root = state.project_root;
     task::spawn_blocking(move || prepare_area(req, &project_root))
         .await
         .map_err(|err| ApiError::internal(format!("prepare task failed: {err}")))?
         .map(Json)
-        .map_err(ApiError::from_anyhow)
+        .map_err(ApiError::from_prepare_error)
 }
 
 async fn not_found() -> impl IntoResponse {
@@ -156,11 +226,13 @@ async fn not_found() -> impl IntoResponse {
 
 pub(crate) fn prepare_area(
     req: PrepareAreaRequest,
-    _project_root: &Path,
-) -> anyhow::Result<PrepareAreaResponse> {
+    project_root: &Path,
+) -> PrepareResult<PrepareAreaResponse> {
     let bbox = validate_bbox(req.bbox)?;
+    validate_filter(&req.filter)?;
     if let Some(url) = req.overpass_url.as_deref() {
-        par_osm_rust::overpass::validate_overpass_url(url)?;
+        par_osm_rust::overpass::validate_overpass_url(url)
+            .map_err(|err| PrepareAreaError::bad_request(err.context("validating Overpass URL")))?;
     }
 
     let cache_key = par_osm_rust::osm_cache::cache_key(bbox, &req.filter);
@@ -186,9 +258,18 @@ pub(crate) fn prepare_area(
                 None => par_osm_rust::overpass::default_overpass_url(),
             };
             let xml = par_osm_rust::overpass::fetch_osm_xml(bbox, &req.filter, overpass_url)
-                .context("fetching OSM XML from Overpass")?;
-            par_osm_rust::osm_cache::write(&cache_key, bbox, &req.filter, &xml)
-                .context("writing exact Overpass cache entry")?;
+                .map_err(|err| {
+                    PrepareAreaError::upstream(
+                        "failed to fetch OSM data",
+                        err.context("fetching OSM XML from Overpass"),
+                    )
+                })?;
+            par_osm_rust::osm_cache::write(&cache_key, bbox, &req.filter, &xml).map_err(|err| {
+                PrepareAreaError::internal(
+                    "failed to prepare area",
+                    err.context("writing exact Overpass cache entry"),
+                )
+            })?;
             cache_status = Some(if req.force_refresh {
                 "force_refreshed".to_string()
             } else {
@@ -199,17 +280,21 @@ pub(crate) fn prepare_area(
     };
 
     let prepared_dir = par_osm_rust::cache::shared_cache_root().join("prepared");
-    std::fs::create_dir_all(&prepared_dir)
-        .with_context(|| format!("creating prepared cache dir {}", prepared_dir.display()))?;
-    let osm_path = prepared_dir.join(format!("{cache_key}.osm"));
-    write_atomic(&osm_path, &xml).with_context(|| {
-        format!(
-            "writing prepared OSM XML to {}",
-            osm_path.as_path().display()
+    std::fs::create_dir_all(&prepared_dir).map_err(|err| {
+        PrepareAreaError::internal(
+            "failed to prepare area",
+            anyhow::Error::new(err).context(format!(
+                "creating prepared cache dir {}",
+                prepared_dir.display()
+            )),
         )
     })?;
+    let osm_path = prepared_dir.join(format!("{cache_key}.osm"));
+    write_atomic(&osm_path, &xml)
+        .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
 
     let srtm_dir = if req.use_elevation {
+        validate_srtm_tile_limit(bbox)?;
         let srtm_dir = par_osm_rust::cache::srtm_cache_dir();
         par_osm_rust::srtm::download_tiles_for_bbox(
             bbox.0,
@@ -221,49 +306,118 @@ pub(crate) fn prepare_area(
                 log::info!("preparing SRTM tile {}/{}: {}", index + 1, total, tile);
             },
         )
-        .context("downloading SRTM tiles")?;
+        .map_err(|err| classify_srtm_error(err.context("downloading SRTM tiles")))?;
         Some(path_string(srtm_dir))
     } else {
         None
     };
 
-    let mut command = format!(
-        "cargo run -- --input {}",
-        shell_quote(&path_string(&osm_path))
-    );
+    let osm_path = path_string(osm_path);
+    let mut command_args = vec![
+        "run".to_string(),
+        "--manifest-path".to_string(),
+        path_string(project_root.join("Cargo.toml")),
+        "--".to_string(),
+        "--input".to_string(),
+        osm_path.clone(),
+    ];
     if let Some(srtm_dir) = &srtm_dir {
-        command.push_str(" --srtm-dir ");
-        command.push_str(&shell_quote(srtm_dir));
+        command_args.push("--srtm-dir".to_string());
+        command_args.push(srtm_dir.clone());
     }
+    let command_program = "cargo".to_string();
+    let command = shell_command(&command_program, &command_args);
 
     Ok(PrepareAreaResponse {
         bbox: req.bbox,
         cache_key,
         cache_status: cache_status.unwrap_or_else(|| "unknown".to_string()),
-        osm_path: path_string(osm_path),
+        osm_path,
         srtm_dir,
         command,
+        command_cwd: path_string(project_root),
+        command_program,
+        command_args,
     })
 }
 
-fn validate_bbox(bbox: [f64; 4]) -> anyhow::Result<(f64, f64, f64, f64)> {
+fn validate_filter(filter: &par_osm_rust::filter::FeatureFilter) -> PrepareResult<()> {
+    if !(filter.roads || filter.buildings || filter.water || filter.landuse || filter.railways) {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "all feature types are disabled"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_bbox(bbox: [f64; 4]) -> PrepareResult<(f64, f64, f64, f64)> {
     let [south, west, north, east] = bbox;
     if !south.is_finite() || !west.is_finite() || !north.is_finite() || !east.is_finite() {
-        bail!("invalid bbox: all coordinates must be finite");
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: all coordinates must be finite"
+        )));
     }
     if south < -90.0 || north > 90.0 {
-        bail!("invalid bbox: latitude must be in -90..=90");
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: latitude must be in -90..=90"
+        )));
     }
     if west < -180.0 || east > 180.0 {
-        bail!("invalid bbox: longitude must be in -180..=180");
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: longitude must be in -180..=180"
+        )));
     }
     if south >= north {
-        bail!("invalid bbox: south ({south}) must be less than north ({north})");
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: south ({south}) must be less than north ({north})"
+        )));
     }
     if west >= east {
-        bail!("invalid bbox: west ({west}) must be less than east ({east})");
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: west ({west}) must be less than east ({east})"
+        )));
     }
+
+    let lat_span = north - south;
+    let lon_span = east - west;
+    if lat_span > MAX_BBOX_SPAN_DEGREES {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: latitude span ({lat_span}) exceeds maximum ({MAX_BBOX_SPAN_DEGREES})"
+        )));
+    }
+    if lon_span > MAX_BBOX_SPAN_DEGREES {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: longitude span ({lon_span}) exceeds maximum ({MAX_BBOX_SPAN_DEGREES})"
+        )));
+    }
+    let area = lat_span * lon_span;
+    if area > MAX_BBOX_AREA_DEGREES {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid bbox: area ({area}) exceeds maximum ({MAX_BBOX_AREA_DEGREES})"
+        )));
+    }
+
     Ok((south, west, north, east))
+}
+
+fn validate_srtm_tile_limit(bbox: (f64, f64, f64, f64)) -> PrepareResult<()> {
+    let tiles = par_osm_rust::srtm::tiles_for_bbox(bbox.0, bbox.1, bbox.2, bbox.3);
+    if tiles.len() > MAX_SRTM_TILE_COUNT {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "requested bbox requires {} SRTM tiles; maximum is {MAX_SRTM_TILE_COUNT}",
+            tiles.len()
+        )));
+    }
+    Ok(())
+}
+
+fn classify_srtm_error(err: anyhow::Error) -> PrepareAreaError {
+    let message = format!("{err:#}");
+    if message.contains("Failed to write tmp file") || message.contains("Failed to rename") {
+        PrepareAreaError::internal("failed to prepare area", err)
+    } else {
+        PrepareAreaError::upstream("failed to fetch elevation data", err)
+    }
 }
 
 fn write_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
@@ -292,26 +446,35 @@ fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().display().to_string()
 }
 
+fn shell_command(program: &str, args: &[String]) -> String {
+    std::iter::once(shell_arg(program))
+        .chain(args.iter().map(|arg| shell_arg(arg)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_arg(value: &str) -> String {
+    if value.bytes().all(|b| {
+        b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'@' | b'%' | b'_' | b'+' | b'=' | b':' | b',' | b'.' | b'/' | b'-'
+            )
+    }) {
+        value.to_string()
+    } else {
+        shell_quote(value)
+    }
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-fn is_bad_request_error(message: &str) -> bool {
-    message.contains("invalid bbox")
-        || message.contains("all feature types are disabled")
-        || message.contains("Invalid Overpass URL")
-        || message.contains("Overpass URL")
-        || message.contains("Overpass host")
-}
-
-fn is_upstream_error(message: &str) -> bool {
-    message.contains("Overpass") || message.contains("HTTP") || message.contains("Request failed")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{ffi::OsString, sync::Mutex};
+    use std::{ffi::OsString, path::Path, sync::Mutex};
 
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -343,6 +506,49 @@ mod tests {
         }
     }
 
+    fn set_test_cache_env(tmp: &tempfile::TempDir) {
+        let home = tmp.path().join("home");
+        let overpass_dir = tmp.path().join("overpass");
+        let srtm_dir = tmp.path().join("srtm");
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("PAR_OSM_OVERPASS_CACHE_DIR", &overpass_dir);
+            std::env::remove_var("OVERPASS_CACHE_DIR");
+            std::env::set_var("PAR_OSM_SRTM_CACHE_DIR", &srtm_dir);
+            std::env::remove_var("SRTM_CACHE_DIR");
+        }
+    }
+
+    fn cache_xml_for_bbox(bbox: [f64; 4], filter: &par_osm_rust::filter::FeatureFilter) -> String {
+        let cache_key =
+            par_osm_rust::osm_cache::cache_key((bbox[0], bbox[1], bbox[2], bbox[3]), filter);
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+</osm>"#;
+        par_osm_rust::osm_cache::write(
+            &cache_key,
+            (bbox[0], bbox[1], bbox[2], bbox[3]),
+            filter,
+            xml,
+        )
+        .unwrap();
+        cache_key
+    }
+
+    fn cached_prepare_request(
+        bbox: [f64; 4],
+        filter: par_osm_rust::filter::FeatureFilter,
+    ) -> PrepareAreaRequest {
+        PrepareAreaRequest {
+            bbox,
+            filter,
+            use_elevation: false,
+            force_refresh: false,
+            overpass_url: None,
+        }
+    }
+
     #[test]
     fn prepare_area_uses_exact_cached_xml_without_elevation() {
         let _guard = ENV_MUTEX.lock().unwrap();
@@ -355,50 +561,84 @@ mod tests {
         ]);
 
         let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("home");
-        let overpass_dir = tmp.path().join("overpass");
-        let srtm_dir = tmp.path().join("srtm");
-        unsafe {
-            std::env::set_var("HOME", &home);
-            std::env::set_var("PAR_OSM_OVERPASS_CACHE_DIR", &overpass_dir);
-            std::env::remove_var("OVERPASS_CACHE_DIR");
-            std::env::set_var("PAR_OSM_SRTM_CACHE_DIR", &srtm_dir);
-            std::env::remove_var("SRTM_CACHE_DIR");
-        }
+        set_test_cache_env(&tmp);
 
         let bbox = [38.0, -121.0, 38.001, -120.999];
         let filter = par_osm_rust::filter::FeatureFilter::default();
-        let cache_key =
-            par_osm_rust::osm_cache::cache_key((bbox[0], bbox[1], bbox[2], bbox[3]), &filter);
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<osm version="0.6">
-  <node id="1" lat="38.0" lon="-121.0"/>
-</osm>"#;
-        par_osm_rust::osm_cache::write(
-            &cache_key,
-            (bbox[0], bbox[1], bbox[2], bbox[3]),
-            &filter,
-            xml,
-        )
-        .unwrap();
+        let cache_key = cache_xml_for_bbox(bbox, &filter);
 
-        let req = PrepareAreaRequest {
-            bbox,
-            filter,
-            use_elevation: false,
-            force_refresh: false,
-            overpass_url: None,
-        };
-        let response = prepare_area(req, tmp.path()).unwrap();
+        let response = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
 
         assert_eq!(response.cache_key, cache_key);
         assert_eq!(response.cache_status, "exact_cache_hit");
         assert!(response.osm_path.ends_with(".osm"));
-        assert!(std::path::Path::new(&response.osm_path).exists());
-        assert_eq!(std::fs::read_to_string(&response.osm_path).unwrap(), xml);
+        assert!(Path::new(&response.osm_path).exists());
+        assert_eq!(
+            std::fs::read_to_string(&response.osm_path).unwrap(),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+</osm>"#
+        );
         assert!(response.srtm_dir.is_none());
+        assert!(response.command.contains("--manifest-path"));
         assert!(response.command.contains("--input"));
         assert!(response.command.contains(&response.osm_path));
         assert!(!response.command.contains("--srtm-dir"));
+        assert_eq!(response.command_cwd, path_string(tmp.path()));
+        assert_eq!(response.command_program, "cargo");
+        assert!(response.command_args.iter().any(|arg| arg == "--input"));
+        assert!(
+            response
+                .command_args
+                .iter()
+                .any(|arg| arg == &response.osm_path)
+        );
+        assert!(!response.command_args.iter().any(|arg| arg == "--srtm-dir"));
+    }
+
+    #[test]
+    fn command_quotes_project_root_with_spaces_and_quotes_and_preserves_structured_args() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let project_root = tmp.path().join("project root with 'quote'");
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+
+        let response = prepare_area(cached_prepare_request(bbox, filter), &project_root).unwrap();
+        let manifest_path = path_string(project_root.join("Cargo.toml"));
+
+        assert_eq!(response.command_cwd, path_string(&project_root));
+        assert_eq!(response.command_program, "cargo");
+        assert_eq!(response.command_args[0], "run");
+        assert_eq!(response.command_args[1], "--manifest-path");
+        assert_eq!(response.command_args[2], manifest_path);
+        assert!(response.command.contains(&shell_quote(&manifest_path)));
+        assert!(response.command.contains(" -- --input "));
+    }
+
+    #[test]
+    fn validate_bbox_rejects_huge_bbox() {
+        let err = validate_bbox([38.0, -121.0, 38.51, -120.99]).unwrap_err();
+
+        assert!(matches!(err, PrepareAreaError::BadRequest { .. }));
+    }
+
+    #[test]
+    fn validate_srtm_tile_limit_rejects_too_many_tiles_before_download() {
+        let err = validate_srtm_tile_limit((-4.1, -4.1, 0.1, 0.1)).unwrap_err();
+
+        assert!(matches!(err, PrepareAreaError::BadRequest { .. }));
     }
 }

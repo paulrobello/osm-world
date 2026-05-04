@@ -8,6 +8,7 @@ authors = ["Paul Robello <probello@gmail.com>"]
 license = "MIT"
 
 [dependencies]
+par-osm-rust = { path = "../par-osm-rust" }
 wgpu = "29.0.1"
 winit = "0.30.13"
 glam = "0.32.1"

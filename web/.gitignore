@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# local environment
+.env*.local
+
+# system
+.DS_Store

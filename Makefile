@@ -26,13 +26,24 @@ serve:
 	cargo run -- --serve --host 127.0.0.1 --port 3030
 
 dev:
-	@set -e; \
+	@bash -c 'set -euo pipefail; \
+	API_PID=""; WEB_PID=""; \
+	cleanup() { \
+		if [ -n "$$WEB_PID" ]; then kill "$$WEB_PID" 2>/dev/null || true; wait "$$WEB_PID" 2>/dev/null || true; fi; \
+		if [ -n "$$API_PID" ]; then kill "$$API_PID" 2>/dev/null || true; wait "$$API_PID" 2>/dev/null || true; fi; \
+	}; \
+	trap cleanup EXIT INT TERM; \
 	cargo run -- --serve --host 127.0.0.1 --port 3030 & \
 	API_PID=$$!; \
-	trap 'kill $$API_PID 2>/dev/null || true' INT TERM EXIT; \
-	sleep 1; \
-	if ! kill -0 $$API_PID 2>/dev/null; then echo "osm-world API failed to start"; exit 1; fi; \
-	cd web && bun run dev
+	for _ in $$(seq 1 60); do \
+		if curl -fsS http://127.0.0.1:3030/health >/dev/null 2>&1; then READY=1; break; fi; \
+		if ! kill -0 "$$API_PID" 2>/dev/null; then echo "osm-world API failed to start"; exit 1; fi; \
+		sleep 0.5; \
+	done; \
+	if [ "$${READY:-0}" != "1" ]; then echo "osm-world API did not become ready"; exit 1; fi; \
+	(cd web && bun run dev) & \
+	WEB_PID=$$!; \
+	wait "$$WEB_PID"'
 
 test:
 	cargo test

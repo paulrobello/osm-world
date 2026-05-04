@@ -13,6 +13,8 @@ const ROAD_TUNNEL_LAYER_Y_OFFSET: f32 = -5.0;
 const ROAD_CAP_SEGMENTS: usize = 12;
 pub const ROAD_CAP_RADIUS_SCALE: f32 = 1.05;
 const BRIDGE_DECK_THICKNESS: f32 = 0.6;
+const BRIDGE_DECK_TOP_CLEARANCE: f32 = 0.85;
+const BRIDGE_RAIL_BASE_CLEARANCE: f32 = 0.25;
 const BRIDGE_RAIL_HEIGHT: f32 = 0.9;
 const BRIDGE_RAIL_WIDTH: f32 = 0.25;
 const BRIDGE_SUPPORT_WIDTH: f32 = 0.8;
@@ -724,10 +726,10 @@ fn append_sloped_bridge_rails(
                 max_y: 0.0,
                 color: BRIDGE_STRUCTURE_COLOR,
             },
-            rail_segment.start_road_y + 0.05,
-            rail_segment.start_road_y + BRIDGE_RAIL_HEIGHT,
-            rail_segment.end_road_y + 0.05,
-            rail_segment.end_road_y + BRIDGE_RAIL_HEIGHT,
+            rail_segment.start_road_y + BRIDGE_RAIL_BASE_CLEARANCE,
+            rail_segment.start_road_y + BRIDGE_RAIL_BASE_CLEARANCE + BRIDGE_RAIL_HEIGHT,
+            rail_segment.end_road_y + BRIDGE_RAIL_BASE_CLEARANCE,
+            rail_segment.end_road_y + BRIDGE_RAIL_BASE_CLEARANCE + BRIDGE_RAIL_HEIGHT,
             verts,
             idxs,
         );
@@ -782,8 +784,8 @@ fn append_bridge_structure(
                 b: points[i + 1],
                 lateral_offset: 0.0,
                 half_width: half_width + BRIDGE_RAIL_WIDTH * 0.25,
-                min_y: road_y - BRIDGE_DECK_THICKNESS,
-                max_y: road_y - 0.08,
+                min_y: road_y - BRIDGE_DECK_TOP_CLEARANCE - BRIDGE_DECK_THICKNESS,
+                max_y: road_y - BRIDGE_DECK_TOP_CLEARANCE,
                 color: BRIDGE_STRUCTURE_COLOR,
             },
             verts,
@@ -795,8 +797,8 @@ fn append_bridge_structure(
                 b: points[i + 1],
                 lateral_offset: rail_offset,
                 half_width: rail_half_width,
-                min_y: road_y + 0.05,
-                max_y: road_y + BRIDGE_RAIL_HEIGHT,
+                min_y: road_y + BRIDGE_RAIL_BASE_CLEARANCE,
+                max_y: road_y + BRIDGE_RAIL_BASE_CLEARANCE + BRIDGE_RAIL_HEIGHT,
                 color: BRIDGE_STRUCTURE_COLOR,
             },
             verts,
@@ -808,8 +810,8 @@ fn append_bridge_structure(
                 b: points[i + 1],
                 lateral_offset: -rail_offset,
                 half_width: rail_half_width,
-                min_y: road_y + 0.05,
-                max_y: road_y + BRIDGE_RAIL_HEIGHT,
+                min_y: road_y + BRIDGE_RAIL_BASE_CLEARANCE,
+                max_y: road_y + BRIDGE_RAIL_BASE_CLEARANCE + BRIDGE_RAIL_HEIGHT,
                 color: BRIDGE_STRUCTURE_COLOR,
             },
             verts,
@@ -824,7 +826,7 @@ fn append_bridge_structure(
                 [cx - half_support, terrain_y, cz - half_support],
                 [
                     cx + half_support,
-                    road_y - BRIDGE_DECK_THICKNESS,
+                    road_y - BRIDGE_DECK_TOP_CLEARANCE - BRIDGE_DECK_THICKNESS,
                     cz + half_support,
                 ],
                 BRIDGE_STRUCTURE_COLOR,
@@ -1195,6 +1197,33 @@ mod tests {
             vertices
                 .iter()
                 .all(|v| v.position[1] > terrain_elevations[0])
+        );
+    }
+
+    #[test]
+    fn bridge_structure_keeps_deck_well_below_road_surface() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let terrain_elevations = [0.0, 0.0];
+        let road_elevations = [5.7, 5.7];
+        let road_y = road_elevations[0] + ROAD_Y_OFFSET;
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_bridge_structure(
+            &points,
+            &terrain_elevations,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(vertices.iter().any(|v| v.position[1] < road_y));
+        assert!(
+            vertices
+                .iter()
+                .filter(|v| v.position[1] < road_y)
+                .all(|v| v.position[1] <= road_y - 0.75)
         );
     }
 

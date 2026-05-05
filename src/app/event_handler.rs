@@ -50,6 +50,7 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
+                self.persist_minimap_preferences_if_changed();
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
@@ -164,6 +165,7 @@ impl ApplicationHandler for App {
                             performance: &mut self.performance,
                         },
                     );
+                    self.persist_minimap_preferences_if_changed();
                 }
 
                 if screenshot_path.is_some() {
@@ -213,6 +215,21 @@ impl App {
             Some(path.clone())
         } else {
             None
+        }
+    }
+
+    fn persist_minimap_preferences_if_changed(&mut self) {
+        let minimap = crate::app::prefs::MinimapPrefs::from_minimap_state(&self.minimap);
+        if minimap == self.persisted_minimap {
+            return;
+        }
+
+        let prefs = crate::app::prefs::UserPrefs {
+            minimap: minimap.clone(),
+        };
+        match crate::app::prefs::save_user_prefs(&prefs) {
+            Ok(()) => self.persisted_minimap = minimap,
+            Err(err) => log::warn!("Failed to save minimap preferences: {err}"),
         }
     }
 

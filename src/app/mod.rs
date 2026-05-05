@@ -1,5 +1,6 @@
 pub mod event_handler;
 pub mod init;
+pub mod prefs;
 pub mod render_loop;
 pub mod update;
 
@@ -90,6 +91,7 @@ pub struct App {
     pub performance: PerformanceState,
     pub show_settings: bool,
     pub minimap: crate::ui::minimap::MinimapState,
+    pub persisted_minimap: crate::app::prefs::MinimapPrefs,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
 }
@@ -106,6 +108,10 @@ impl App {
             day_cycle.time_of_day = time_of_day;
         }
 
+        let prefs = crate::app::prefs::load_user_prefs();
+        let mut minimap = crate::ui::minimap::MinimapState::default();
+        prefs.minimap.apply_to_minimap_state(&mut minimap);
+
         Self {
             state: None,
             egui: None,
@@ -118,7 +124,8 @@ impl App {
             atmosphere,
             day_cycle,
             performance: PerformanceState::default(),
-            minimap: crate::ui::minimap::MinimapState::default(),
+            minimap,
+            persisted_minimap: prefs.minimap,
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
             street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
         }

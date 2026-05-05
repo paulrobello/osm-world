@@ -13,6 +13,7 @@ pub struct RenderUiState<'a> {
     pub show_settings: &'a mut bool,
     pub minimap: &'a mut crate::ui::minimap::MinimapState,
     pub poi_labels: &'a mut crate::ui::poi_labels::PoiLabelSettings,
+    pub street_sign_labels: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
     pub performance: &'a mut crate::app::PerformanceState,
 }
 
@@ -270,6 +271,13 @@ pub fn render(
             ui_state.poi_labels,
             viewport_size,
         );
+        crate::ui::poi_labels::draw_street_signs(
+            ctx,
+            &state.camera,
+            &state.street_sign_labels,
+            ui_state.street_sign_labels,
+            viewport_size,
+        );
         if *ui_state.show_settings {
             crate::ui::settings::draw(
                 ctx,
@@ -277,7 +285,10 @@ pub fn render(
                 ui_state.day_cycle,
                 ui_state.performance,
                 ui_state.minimap,
-                ui_state.poi_labels,
+                crate::ui::settings::LabelSettingsMut {
+                    poi: ui_state.poi_labels,
+                    street_signs: ui_state.street_sign_labels,
+                },
                 ui_state.show_settings,
             );
         }

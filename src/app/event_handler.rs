@@ -160,6 +160,7 @@ impl ApplicationHandler for App {
                             show_settings: &mut self.show_settings,
                             minimap: &mut self.minimap,
                             poi_labels: &mut self.poi_labels,
+                            street_sign_labels: &mut self.street_sign_labels,
                             performance: &mut self.performance,
                         },
                     );

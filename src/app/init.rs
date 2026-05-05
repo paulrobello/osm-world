@@ -23,6 +23,7 @@ pub struct AppState {
     pub camera: Flycam,
     pub coord_converter: Option<crate::geo::CoordConverter>,
     pub poi_labels: Vec<crate::ui::poi_labels::PoiLabel>,
+    pub street_sign_labels: Vec<crate::ui::poi_labels::PoiLabel>,
     pub camera_bg: SceneBindGroup,
     pub pipeline: CityPipeline,
     pub sky_pipeline: SkyPipeline,
@@ -120,13 +121,15 @@ pub fn init_wgpu(
     let occlusion = OcclusionQueries::new(&device, 256);
     let minimap_target = MinimapTarget::new(&device, surface_format);
 
-    let (scene, coord_converter, poi_labels) = match input_path {
+    let (scene, coord_converter, poi_labels, street_sign_labels) = match input_path {
         Some(path) => {
             let srtm = srtm_dir.map(std::path::Path::new);
             let source = crate::world::loader::load_world_source(std::path::Path::new(path), srtm)?;
             let coord_converter = source.conv;
             let poi_labels =
                 crate::ui::poi_labels::labels_from_point_features(&source.point_features);
+            let street_sign_labels =
+                crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
             let world = crate::world::loader::generate_world_mesh(&source);
             camera.position = glam::Vec3::new(5645.5, 122.8, -10505.8);
             camera.yaw = (-124.80_f32).to_radians();
@@ -138,9 +141,10 @@ pub fn init_wgpu(
                 SceneBuffers::from_mesh(&device, world.vertices, world.indices),
                 Some(coord_converter),
                 poi_labels,
+                street_sign_labels,
             )
         }
-        None => (SceneBuffers::new(&device), None, Vec::new()),
+        None => (SceneBuffers::new(&device), None, Vec::new(), Vec::new()),
     };
 
     if let Some(ov) = cam_override {
@@ -173,6 +177,7 @@ pub fn init_wgpu(
             camera,
             coord_converter,
             poi_labels,
+            street_sign_labels,
             camera_bg,
             pipeline,
             sky_pipeline,

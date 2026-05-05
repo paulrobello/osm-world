@@ -91,6 +91,7 @@ pub struct App {
     pub show_settings: bool,
     pub minimap: crate::ui::minimap::MinimapState,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
+    pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
 }
 
 impl App {
@@ -119,6 +120,7 @@ impl App {
             performance: PerformanceState::default(),
             minimap: crate::ui::minimap::MinimapState::default(),
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
+            street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
         }
     }
 }

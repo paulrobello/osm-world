@@ -1,12 +1,17 @@
 use egui::{CollapsingHeader, RichText, ScrollArea, Slider};
 
+pub struct LabelSettingsMut<'a> {
+    pub poi: &'a mut crate::ui::poi_labels::PoiLabelSettings,
+    pub street_signs: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
+}
+
 pub fn draw(
     ctx: &egui::Context,
     atm: &mut crate::atmosphere::AtmosphereSettings,
     day: &mut crate::atmosphere::DayCycleState,
     performance: &mut crate::app::PerformanceState,
     minimap: &mut crate::ui::minimap::MinimapState,
-    poi_labels: &mut crate::ui::poi_labels::PoiLabelSettings,
+    label_settings: LabelSettingsMut<'_>,
     show: &mut bool,
 ) {
     egui::Window::new("Settings")
@@ -17,7 +22,8 @@ pub fn draw(
                 day_cycle_section(ui, day, atm);
                 performance_section(ui, performance);
                 minimap_section(ui, minimap);
-                poi_labels_section(ui, poi_labels);
+                poi_labels_section(ui, label_settings.poi);
+                street_sign_labels_section(ui, label_settings.street_signs);
                 clouds_section(ui, atm);
                 fog_section(ui, atm);
                 sky_colors_section(ui, atm);
@@ -83,6 +89,22 @@ fn poi_labels_section(ui: &mut egui::Ui, poi_labels: &mut crate::ui::poi_labels:
             ui.checkbox(&mut poi_labels.visible, "Visible");
             ui.add(
                 Slider::new(&mut poi_labels.max_distance, 50.0..=2000.0)
+                    .step_by(25.0)
+                    .text("Max distance (m)"),
+            );
+        });
+}
+
+fn street_sign_labels_section(
+    ui: &mut egui::Ui,
+    street_sign_labels: &mut crate::ui::poi_labels::StreetSignLabelSettings,
+) {
+    CollapsingHeader::new(RichText::new("Street Sign Labels").strong())
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.checkbox(&mut street_sign_labels.visible, "Visible");
+            ui.add(
+                Slider::new(&mut street_sign_labels.max_distance, 50.0..=2000.0)
                     .step_by(25.0)
                     .text("Max distance (m)"),
             );

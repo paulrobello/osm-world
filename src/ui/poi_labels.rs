@@ -19,10 +19,30 @@ impl Default for PoiLabelSettings {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct StreetSignLabelSettings {
+    pub visible: bool,
+    pub max_distance: f32,
+}
+
+impl Default for StreetSignLabelSettings {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            max_distance: 500.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PoiLabel {
     pub text: String,
     pub position: glam::Vec3,
+}
+
+struct LabelDrawStyle {
+    id_prefix: &'static str,
+    fill: egui::Color32,
 }
 
 pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Vec<PoiLabel> {
@@ -54,6 +74,19 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
         .collect()
 }
 
+pub fn labels_from_street_signs(
+    street_signs: &[crate::world::street_sign::ResolvedStreetSign],
+) -> Vec<PoiLabel> {
+    street_signs
+        .iter()
+        .filter(|sign| !sign.name.trim().is_empty())
+        .map(|sign| PoiLabel {
+            text: sign.name.trim().to_string(),
+            position: glam::vec3(sign.point.0, sign.elevation + 3.2, sign.point.1),
+        })
+        .collect()
+}
+
 pub fn draw(
     ctx: &egui::Context,
     camera: &Flycam,
@@ -61,7 +94,51 @@ pub fn draw(
     settings: &PoiLabelSettings,
     viewport_size: egui::Vec2,
 ) {
-    if !settings.visible || labels.is_empty() {
+    draw_projected_labels(
+        ctx,
+        camera,
+        labels,
+        settings.visible,
+        settings.max_distance,
+        viewport_size,
+        LabelDrawStyle {
+            id_prefix: "poi_label",
+            fill: egui::Color32::from_black_alpha(185),
+        },
+    );
+}
+
+pub fn draw_street_signs(
+    ctx: &egui::Context,
+    camera: &Flycam,
+    labels: &[PoiLabel],
+    settings: &StreetSignLabelSettings,
+    viewport_size: egui::Vec2,
+) {
+    draw_projected_labels(
+        ctx,
+        camera,
+        labels,
+        settings.visible,
+        settings.max_distance,
+        viewport_size,
+        LabelDrawStyle {
+            id_prefix: "street_sign_label",
+            fill: egui::Color32::from_rgba_unmultiplied(8, 74, 38, 220),
+        },
+    );
+}
+
+fn draw_projected_labels(
+    ctx: &egui::Context,
+    camera: &Flycam,
+    labels: &[PoiLabel],
+    visible_enabled: bool,
+    max_distance: f32,
+    viewport_size: egui::Vec2,
+    style: LabelDrawStyle,
+) {
+    if !visible_enabled || labels.is_empty() {
         return;
     }
 
@@ -70,7 +147,7 @@ pub fn draw(
         .enumerate()
         .filter_map(|(index, label)| {
             let distance = label.position.distance(camera.position);
-            if distance > settings.max_distance {
+            if distance > max_distance {
                 return None;
             }
             let screen_pos = project_world_to_screen(camera, label.position, viewport_size)?;
@@ -80,13 +157,13 @@ pub fn draw(
     visible.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     for (_distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
-        egui::Area::new(egui::Id::new(("poi_label", index)))
+        egui::Area::new(egui::Id::new((style.id_prefix, index)))
             .order(egui::Order::Foreground)
             .interactable(false)
             .fixed_pos(screen_pos + egui::vec2(8.0, -30.0))
             .show(ctx, |ui| {
                 egui::Frame::NONE
-                    .fill(egui::Color32::from_black_alpha(185))
+                    .fill(style.fill)
                     .corner_radius(3.0)
                     .inner_margin(egui::Margin::symmetric(5, 2))
                     .show(ui, |ui| {
@@ -166,6 +243,34 @@ mod tests {
 
         assert!(settings.visible);
         assert_eq!(settings.max_distance, 300.0);
+    }
+
+    #[test]
+    fn labels_include_street_sign_names_independent_from_pois() {
+        let signs = vec![crate::world::street_sign::ResolvedStreetSign {
+            name: "Main Street".to_string(),
+            point: (1.0, 2.0),
+            elevation: 3.0,
+            tangent: (1.0, 0.0),
+            rep_lat: 0.0,
+            rep_lon: 0.0,
+        }];
+
+        let labels = labels_from_street_signs(&signs);
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, "Main Street");
+        assert_eq!(labels[0].position, glam::vec3(1.0, 6.2, 2.0));
+    }
+
+    #[test]
+    fn street_sign_label_settings_are_independent_from_poi_settings() {
+        let poi = PoiLabelSettings::default();
+        let street = StreetSignLabelSettings::default();
+
+        assert!(poi.visible);
+        assert!(street.visible);
+        assert_ne!(poi.max_distance, street.max_distance);
     }
 
     #[test]

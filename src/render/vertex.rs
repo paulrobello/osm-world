@@ -38,6 +38,7 @@ pub mod feature {
     pub const ROAD_MARKING: f32 = 5.0;
     pub const RAILWAY: f32 = 6.0;
     pub const POINT_FEATURE: f32 = 7.0;
+    pub const STREET_SIGN: f32 = 8.0;
 }
 
 #[cfg(test)]

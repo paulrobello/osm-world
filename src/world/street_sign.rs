@@ -1,0 +1,447 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::render::vertex::{Vertex, feature};
+
+use super::loader::ResolvedFeature;
+
+pub const MAX_SIGNS_PER_ROAD: usize = 6;
+const MAX_STREET_SIGNS: usize = 600;
+const PERIODIC_SIGN_SPACING_METERS: f32 = 260.0;
+const MIN_PERIODIC_ROAD_LENGTH_METERS: f32 = 360.0;
+const INTERSECTION_KEY_SCALE: f32 = 10.0;
+const SIGN_POST_COLOR: [f32; 3] = [0.62, 0.64, 0.60];
+const SIGN_BOARD_COLOR: [f32; 3] = [0.05, 0.42, 0.22];
+const SIGN_TRIM_COLOR: [f32; 3] = [0.92, 0.95, 0.88];
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedStreetSign {
+    pub name: String,
+    pub point: (f32, f32),
+    pub elevation: f32,
+    pub tangent: (f32, f32),
+    pub rep_lat: f64,
+    pub rep_lon: f64,
+}
+
+pub fn street_name_for_road(tags: &HashMap<String, String>) -> Option<String> {
+    let name = tags.get("name").map(String::as_str)?.trim();
+    if name.is_empty() || !is_drivable_highway(tags.get("highway").map(String::as_str)?) {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+fn is_drivable_highway(highway: &str) -> bool {
+    !matches!(
+        highway,
+        "footway"
+            | "path"
+            | "cycleway"
+            | "bridleway"
+            | "steps"
+            | "pedestrian"
+            | "corridor"
+            | "service"
+            | "track"
+    )
+}
+
+pub fn street_signs_for_roads(roads: &[ResolvedFeature]) -> Vec<ResolvedStreetSign> {
+    let eligible: Vec<(usize, String, &ResolvedFeature)> = roads
+        .iter()
+        .enumerate()
+        .filter_map(|(index, road)| {
+            street_name_for_road(&road.tags).map(|name| (index, name, road))
+        })
+        .collect();
+
+    let mut signs = Vec::new();
+    let mut seen = HashSet::new();
+    add_intersection_signs(&eligible, &mut signs, &mut seen);
+    add_periodic_signs(&eligible, &mut signs, &mut seen);
+    signs.truncate(MAX_STREET_SIGNS);
+    signs
+}
+
+type PointKey = (i32, i32);
+
+fn point_key(point: (f32, f32)) -> PointKey {
+    (
+        (point.0 * INTERSECTION_KEY_SCALE).round() as i32,
+        (point.1 * INTERSECTION_KEY_SCALE).round() as i32,
+    )
+}
+
+fn add_intersection_signs(
+    roads: &[(usize, String, &ResolvedFeature)],
+    signs: &mut Vec<ResolvedStreetSign>,
+    seen: &mut HashSet<(usize, PointKey)>,
+) {
+    let mut point_roads: HashMap<PointKey, Vec<(usize, usize)>> = HashMap::new();
+    for (road_index, _name, road) in roads {
+        for point_index in 0..road.points.len() {
+            point_roads
+                .entry(point_key(road.points[point_index]))
+                .or_default()
+                .push((*road_index, point_index));
+        }
+    }
+
+    for (_key, refs) in point_roads.into_iter().filter(|(_, refs)| refs.len() > 1) {
+        let road_count = refs
+            .iter()
+            .map(|(road_index, _)| *road_index)
+            .collect::<HashSet<_>>()
+            .len();
+        if road_count < 2 {
+            continue;
+        }
+        for (road_index, point_index) in refs {
+            let Some((_idx, name, road)) = roads.iter().find(|(idx, _, _)| *idx == road_index)
+            else {
+                continue;
+            };
+            push_sign_for_point(signs, seen, road_index, name, road, point_index);
+        }
+    }
+}
+
+fn add_periodic_signs(
+    roads: &[(usize, String, &ResolvedFeature)],
+    signs: &mut Vec<ResolvedStreetSign>,
+    seen: &mut HashSet<(usize, PointKey)>,
+) {
+    for (road_index, name, road) in roads {
+        if road.points.len() < 2 || road_length(road) < MIN_PERIODIC_ROAD_LENGTH_METERS {
+            continue;
+        }
+        let mut next_distance = PERIODIC_SIGN_SPACING_METERS;
+        let mut placed_for_road = signs_seen_for_road(seen, *road_index);
+        for segment_index in 0..road.points.len() - 1 {
+            let p0 = road.points[segment_index];
+            let p1 = road.points[segment_index + 1];
+            let segment_len = distance(p0, p1);
+            if segment_len <= 1e-6 {
+                continue;
+            }
+            while next_distance <= segment_len && placed_for_road < MAX_SIGNS_PER_ROAD {
+                let t = next_distance / segment_len;
+                if push_interpolated_sign(signs, seen, *road_index, name, road, segment_index, t) {
+                    placed_for_road += 1;
+                }
+                next_distance += PERIODIC_SIGN_SPACING_METERS;
+            }
+            next_distance -= segment_len;
+        }
+    }
+}
+
+fn signs_seen_for_road(seen: &HashSet<(usize, PointKey)>, road_index: usize) -> usize {
+    seen.iter()
+        .filter(|(seen_road_index, _)| *seen_road_index == road_index)
+        .count()
+}
+
+fn road_length(road: &ResolvedFeature) -> f32 {
+    road.points
+        .windows(2)
+        .map(|pair| distance(pair[0], pair[1]))
+        .sum()
+}
+
+fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
+    let dx = b.0 - a.0;
+    let dz = b.1 - a.1;
+    (dx * dx + dz * dz).sqrt()
+}
+
+fn push_sign_for_point(
+    signs: &mut Vec<ResolvedStreetSign>,
+    seen: &mut HashSet<(usize, PointKey)>,
+    road_index: usize,
+    name: &str,
+    road: &ResolvedFeature,
+    point_index: usize,
+) {
+    if signs_seen_for_road(seen, road_index) >= MAX_SIGNS_PER_ROAD {
+        return;
+    }
+    let point = road.points[point_index];
+    if !seen.insert((road_index, point_key(point))) {
+        return;
+    }
+    let tangent = tangent_at_point(road, point_index);
+    let elevation = road.elevations.get(point_index).copied().unwrap_or(0.0);
+    signs.push(ResolvedStreetSign {
+        name: name.to_string(),
+        point,
+        elevation,
+        tangent,
+        rep_lat: road.rep_lat,
+        rep_lon: road.rep_lon,
+    });
+}
+
+fn push_interpolated_sign(
+    signs: &mut Vec<ResolvedStreetSign>,
+    seen: &mut HashSet<(usize, PointKey)>,
+    road_index: usize,
+    name: &str,
+    road: &ResolvedFeature,
+    segment_index: usize,
+    t: f32,
+) -> bool {
+    let p0 = road.points[segment_index];
+    let p1 = road.points[segment_index + 1];
+    let point = (p0.0 + (p1.0 - p0.0) * t, p0.1 + (p1.1 - p0.1) * t);
+    if !seen.insert((road_index, point_key(point))) {
+        return false;
+    }
+    let e0 = road.elevations.get(segment_index).copied().unwrap_or(0.0);
+    let e1 = road
+        .elevations
+        .get(segment_index + 1)
+        .copied()
+        .unwrap_or(e0);
+    signs.push(ResolvedStreetSign {
+        name: name.to_string(),
+        point,
+        elevation: e0 + (e1 - e0) * t,
+        tangent: normalize_2d((p1.0 - p0.0, p1.1 - p0.1)),
+        rep_lat: road.rep_lat,
+        rep_lon: road.rep_lon,
+    });
+    true
+}
+
+fn tangent_at_point(road: &ResolvedFeature, point_index: usize) -> (f32, f32) {
+    if point_index + 1 < road.points.len() {
+        let p = road.points[point_index];
+        let next = road.points[point_index + 1];
+        return normalize_2d((next.0 - p.0, next.1 - p.1));
+    }
+    if point_index > 0 {
+        let prev = road.points[point_index - 1];
+        let p = road.points[point_index];
+        return normalize_2d((p.0 - prev.0, p.1 - prev.1));
+    }
+    (1.0, 0.0)
+}
+
+fn normalize_2d(v: (f32, f32)) -> (f32, f32) {
+    let len = (v.0 * v.0 + v.1 * v.1).sqrt();
+    if len <= 1e-6 {
+        (1.0, 0.0)
+    } else {
+        (v.0 / len, v.1 / len)
+    }
+}
+
+pub fn append_street_sign(sign: &ResolvedStreetSign, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+    append_oriented_box(
+        sign.point,
+        sign.elevation,
+        (0.08, 0.08),
+        2.4,
+        (1.0, 0.0),
+        SIGN_POST_COLOR,
+        verts,
+        idxs,
+    );
+    append_oriented_box(
+        sign.point,
+        sign.elevation + 2.25,
+        (1.45, 0.08),
+        0.62,
+        sign.tangent,
+        SIGN_TRIM_COLOR,
+        verts,
+        idxs,
+    );
+    append_oriented_box(
+        sign.point,
+        sign.elevation + 2.32,
+        (1.32, 0.09),
+        0.48,
+        sign.tangent,
+        SIGN_BOARD_COLOR,
+        verts,
+        idxs,
+    );
+}
+
+fn append_oriented_box(
+    point: (f32, f32),
+    base_y: f32,
+    half_extents: (f32, f32),
+    height: f32,
+    tangent: (f32, f32),
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let t = normalize_2d(tangent);
+    let n = (-t.1, t.0);
+    let center = glam::vec3(point.0, base_y, point.1);
+    let hx = half_extents.0;
+    let hz = half_extents.1;
+    let corners = [
+        center + glam::vec3(-t.0 * hx - n.0 * hz, 0.0, -t.1 * hx - n.1 * hz),
+        center + glam::vec3(t.0 * hx - n.0 * hz, 0.0, t.1 * hx - n.1 * hz),
+        center + glam::vec3(t.0 * hx + n.0 * hz, 0.0, t.1 * hx + n.1 * hz),
+        center + glam::vec3(-t.0 * hx + n.0 * hz, 0.0, -t.1 * hx + n.1 * hz),
+    ];
+    let top = corners.map(|p| p + glam::vec3(0.0, height, 0.0));
+    append_quad([corners[0], corners[1], top[1], top[0]], color, verts, idxs);
+    append_quad([corners[1], corners[2], top[2], top[1]], color, verts, idxs);
+    append_quad([corners[2], corners[3], top[3], top[2]], color, verts, idxs);
+    append_quad([corners[3], corners[0], top[0], top[3]], color, verts, idxs);
+    append_quad([top[0], top[1], top[2], top[3]], color, verts, idxs);
+    append_quad(
+        [corners[3], corners[2], corners[1], corners[0]],
+        color,
+        verts,
+        idxs,
+    );
+}
+
+fn append_quad(
+    positions: [glam::Vec3; 4],
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let normal = (positions[1] - positions[0])
+        .cross(positions[2] - positions[0])
+        .normalize_or_zero()
+        .to_array();
+    let base = verts.len() as u32;
+    for position in positions {
+        verts.push(Vertex {
+            position: position.to_array(),
+            normal,
+            color,
+            feature_type: feature::STREET_SIGN,
+            uv: [0.0, 0.0],
+        });
+    }
+    idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    fn road(name: &str, highway: &str, points: Vec<(f32, f32)>) -> ResolvedFeature {
+        let mut tags = tags(&[("name", name), ("highway", highway)]);
+        if name.is_empty() {
+            tags.remove("name");
+        }
+        ResolvedFeature {
+            tags,
+            elevations: vec![0.0; points.len()],
+            points,
+            rep_lat: 38.0,
+            rep_lon: -121.0,
+        }
+    }
+
+    #[test]
+    fn named_drivable_roads_are_eligible() {
+        assert_eq!(
+            street_name_for_road(&tags(&[
+                ("name", "Main Street"),
+                ("highway", "residential")
+            ]))
+            .as_deref(),
+            Some("Main Street")
+        );
+        assert_eq!(
+            street_name_for_road(&tags(&[("name", " Broadway "), ("highway", "primary")]))
+                .as_deref(),
+            Some("Broadway")
+        );
+    }
+
+    #[test]
+    fn unnamed_and_non_drivable_roads_are_skipped() {
+        assert!(street_name_for_road(&tags(&[("highway", "residential")])).is_none());
+        assert!(
+            street_name_for_road(&tags(&[("name", "Oak Trail"), ("highway", "footway")])).is_none()
+        );
+        assert!(
+            street_name_for_road(&tags(&[("name", "Service Road"), ("highway", "service")]))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn long_named_roads_produce_capped_periodic_signs() {
+        let roads = vec![road(
+            "Main Street",
+            "residential",
+            vec![(0.0, 0.0), (600.0, 0.0), (1200.0, 0.0)],
+        )];
+        let signs = street_signs_for_roads(&roads);
+        let main_count = signs
+            .iter()
+            .filter(|sign| sign.name == "Main Street")
+            .count();
+        assert!(main_count > 1, "expected periodic signs, got {main_count}");
+        assert!(
+            main_count <= MAX_SIGNS_PER_ROAD,
+            "expected per-road cap, got {main_count}"
+        );
+    }
+
+    #[test]
+    fn shared_points_produce_intersection_signs() {
+        let roads = vec![
+            road("Main Street", "residential", vec![(0.0, 0.0), (100.0, 0.0)]),
+            road(
+                "Broadway",
+                "primary",
+                vec![(100.0, -100.0), (100.0, 0.0), (100.0, 100.0)],
+            ),
+        ];
+        let signs = street_signs_for_roads(&roads);
+        assert!(
+            signs
+                .iter()
+                .any(|sign| sign.name == "Main Street" && (sign.point.0 - 100.0).abs() < 0.01)
+        );
+        assert!(
+            signs
+                .iter()
+                .any(|sign| sign.name == "Broadway" && (sign.point.0 - 100.0).abs() < 0.01)
+        );
+    }
+
+    #[test]
+    fn street_sign_mesh_emits_street_sign_feature_vertices() {
+        let sign = ResolvedStreetSign {
+            name: "Main Street".to_string(),
+            point: (10.0, -20.0),
+            elevation: 2.0,
+            tangent: (1.0, 0.0),
+            rep_lat: 38.0,
+            rep_lon: -121.0,
+        };
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_street_sign(&sign, &mut vertices, &mut indices);
+        assert!(!indices.is_empty());
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == feature::STREET_SIGN)
+        );
+    }
+}

@@ -104,13 +104,9 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
                         egui::Stroke::new(1.0, egui::Color32::BLACK),
                     ));
 
-                    if handle_minimap_click(
-                        state,
-                        response.clicked(),
-                        ui.input(|i| i.modifiers.ctrl),
-                    ) {
-                        response.request_focus();
-                    }
+                    // Do not request focus here: if egui owns keyboard focus after
+                    // Ctrl+click, WASD camera movement is temporarily swallowed.
+                    handle_minimap_click(state, response.clicked(), ui.input(|i| i.modifiers.ctrl));
 
                     // Scroll to zoom
                     if response.hover_pos().is_some_and(|p| rect.contains(p)) {

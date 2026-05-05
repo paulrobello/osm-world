@@ -36,6 +36,15 @@ pub struct ResolvedFeature {
     pub rep_lon: f64,
 }
 
+#[derive(Clone, Debug)]
+pub struct ResolvedPointFeature {
+    pub tags: HashMap<String, String>,
+    pub point: (f32, f32),
+    pub elevation: f32,
+    pub rep_lat: f64,
+    pub rep_lon: f64,
+}
+
 pub struct WorldSource {
     pub min_lat: f64,
     pub min_lon: f64,
@@ -48,6 +57,7 @@ pub struct WorldSource {
     pub railways: Vec<ResolvedFeature>,
     pub waters: Vec<ResolvedFeature>,
     pub landuses: Vec<ResolvedFeature>,
+    pub point_features: Vec<ResolvedPointFeature>,
 }
 
 impl WorldSource {
@@ -116,6 +126,15 @@ impl WorldSource {
                     .landuses
                     .push(feature_idx);
             }
+        }
+        for (feature_idx, feature) in self.point_features.iter().enumerate() {
+            let coord =
+                crate::stream::TileCoord::from_world(feature.point.0, feature.point.1, tile_size);
+            index
+                .entry(coord)
+                .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                .point_features
+                .push(feature_idx);
         }
 
         index
@@ -253,6 +272,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
     let mut railways: Vec<ResolvedFeature> = Vec::new();
     let mut waters: Vec<ResolvedFeature> = Vec::new();
     let mut landuses: Vec<ResolvedFeature> = Vec::new();
+    let mut point_features: Vec<ResolvedPointFeature> = Vec::new();
 
     // 5. Resolve ways to world coordinates and classify
     for way in &osm_data.ways {
@@ -390,6 +410,19 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
         }
     }
 
+    for node in osm_data.nodes.values() {
+        if super::point_feature::point_feature_style(&node.tags).is_some() {
+            let point = conv.to_world_xz(node.lat, node.lon);
+            point_features.push(ResolvedPointFeature {
+                tags: node.tags.clone(),
+                point,
+                elevation: elev(node.lat, node.lon),
+                rep_lat: node.lat,
+                rep_lon: node.lon,
+            });
+        }
+    }
+
     // Ensure CCW winding for all polygon-based features (OSM data can be either winding)
     for b in &mut buildings {
         ensure_ccw(&mut b.points, &mut b.elevations);
@@ -413,6 +446,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
         railways,
         waters,
         landuses,
+        point_features,
     })
 }
 
@@ -967,6 +1001,56 @@ mod tests {
     }
 
     #[test]
+    fn load_world_source_classifies_tagged_point_nodes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("points.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0">
+    <tag k="natural" v="tree"/>
+  </node>
+  <node id="2" lat="38.001" lon="-121.0"/>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.point_features.len(), 1);
+        let point_feature = &source.point_features[0];
+        assert_eq!(
+            point_feature.tags.get("natural").map(String::as_str),
+            Some("tree")
+        );
+        assert_eq!(point_feature.rep_lat, 38.0);
+        assert_eq!(point_feature.rep_lon, -121.0);
+    }
+
+    #[test]
+    fn point_feature_index_maps_points_to_owner_tiles() {
+        let mut source = empty_source();
+        source.point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
+            point: (125.0, -75.0),
+            elevation: 3.0,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+
+        let index = source.feature_index_for_tile_size(100.0);
+
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: 1, z: -1 })
+                .unwrap()
+                .point_features,
+            vec![0]
+        );
+    }
+
+    #[test]
     fn world_source_bbox_center_matches_converter() {
         let source = WorldSource {
             min_lat: 1.0,
@@ -980,6 +1064,7 @@ mod tests {
             railways: Vec::new(),
             waters: Vec::new(),
             landuses: Vec::new(),
+            point_features: Vec::new(),
         };
 
         let (cx, cz) = source.conv.bbox_centre(
@@ -1032,6 +1117,7 @@ mod tests {
             railways: Vec::new(),
             waters: Vec::new(),
             landuses: Vec::new(),
+            point_features: Vec::new(),
         }
     }
 
@@ -1150,7 +1236,8 @@ mod tests {
             && refs.roads.is_empty()
             && refs.railways.is_empty()
             && refs.waters.is_empty()
-            && refs.landuses.is_empty()));
+            && refs.landuses.is_empty()
+            && refs.point_features.is_empty()));
     }
 
     #[test]

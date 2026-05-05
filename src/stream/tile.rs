@@ -5,6 +5,7 @@ pub struct TileFeatureRefs {
     pub railways: Vec<usize>,
     pub waters: Vec<usize>,
     pub landuses: Vec<usize>,
+    pub point_features: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -121,5 +122,6 @@ mod tests {
         assert!(refs.railways.is_empty());
         assert!(refs.waters.is_empty());
         assert!(refs.landuses.is_empty());
+        assert!(refs.point_features.is_empty());
     }
 }

@@ -7,6 +7,7 @@ use super::loader::ResolvedFeature;
 pub const MAX_SIGNS_PER_ROAD: usize = 6;
 const PERIODIC_SIGN_SPACING_METERS: f32 = 260.0;
 const MIN_PERIODIC_ROAD_LENGTH_METERS: f32 = 360.0;
+const MIN_SAME_NAME_SIGN_SPACING_METERS: f32 = 45.0;
 const INTERSECTION_KEY_SCALE: f32 = 10.0;
 const SIGN_POST_COLOR: [f32; 3] = [0.62, 0.64, 0.60];
 const SIGN_BOARD_COLOR: [f32; 3] = [0.05, 0.42, 0.22];
@@ -184,6 +185,9 @@ fn push_sign_for_point(
     let tangent = tangent_at_point(road, point_index);
     let terrain_elevation = road.elevations.get(point_index).copied().unwrap_or(0.0);
     let (point, elevation) = sign_pose(road, centerline_point, terrain_elevation, tangent);
+    if has_nearby_sign_with_same_name(signs, name, point) {
+        return;
+    }
     signs.push(ResolvedStreetSign {
         name: name.to_string(),
         point,
@@ -218,6 +222,9 @@ fn push_interpolated_sign(
     let terrain_elevation = e0 + (e1 - e0) * t;
     let tangent = normalize_2d((p1.0 - p0.0, p1.1 - p0.1));
     let (point, elevation) = sign_pose(road, centerline_point, terrain_elevation, tangent);
+    if has_nearby_sign_with_same_name(signs, name, point) {
+        return false;
+    }
     signs.push(ResolvedStreetSign {
         name: name.to_string(),
         point,
@@ -227,6 +234,16 @@ fn push_interpolated_sign(
         rep_lon: road.rep_lon,
     });
     true
+}
+
+fn has_nearby_sign_with_same_name(
+    signs: &[ResolvedStreetSign],
+    name: &str,
+    point: (f32, f32),
+) -> bool {
+    signs.iter().any(|sign| {
+        sign.name == name && distance(sign.point, point) < MIN_SAME_NAME_SIGN_SPACING_METERS
+    })
 }
 
 fn sign_pose(
@@ -537,23 +554,11 @@ mod tests {
             "Main Street",
             "First Avenue",
             "Elm Street",
-            "First Avenue",
             "Cedar Road",
             "Ash Avenue",
             "Oak Street",
             "Pine Street",
-            "Elm Street",
-            "Ash Avenue",
-            "Oak Street",
-            "Cedar Road",
-            "Main Street",
             "Maple Avenue",
-            "Ash Avenue",
-            "Pine Street",
-            "Maple Avenue",
-            "Maple Avenue",
-            "Cedar Road",
-            "Elm Street",
         ];
 
         for _ in 0..8 {
@@ -561,6 +566,34 @@ mod tests {
             let actual_names: Vec<_> = signs.iter().map(|sign| sign.name.as_str()).collect();
             assert_eq!(actual_names, expected_names);
         }
+    }
+
+    #[test]
+    fn nearby_duplicate_street_names_are_thinned_at_intersections() {
+        let roads = vec![
+            road("Main Street", "residential", vec![(0.0, 0.0), (20.0, 0.0)]),
+            road("Main Street", "residential", vec![(0.0, 0.0), (0.0, 20.0)]),
+            road("6th Street", "residential", vec![(-10.0, 0.0), (0.0, 0.0)]),
+        ];
+
+        let signs = street_signs_for_roads(&roads);
+        let main_count = signs
+            .iter()
+            .filter(|sign| sign.name == "Main Street")
+            .count();
+        let sixth_count = signs
+            .iter()
+            .filter(|sign| sign.name == "6th Street")
+            .count();
+
+        assert_eq!(
+            main_count, 1,
+            "nearby duplicate Main Street signs: {signs:?}"
+        );
+        assert_eq!(
+            sixth_count, 1,
+            "different street name should remain visible"
+        );
     }
 
     #[test]

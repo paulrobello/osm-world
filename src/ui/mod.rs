@@ -1,5 +1,6 @@
 pub mod hud;
 pub mod minimap;
+pub mod poi_labels;
 pub mod settings;
 
 pub struct EguiState {

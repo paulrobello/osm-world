@@ -75,6 +75,28 @@ pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatur
     None
 }
 
+pub fn point_feature_label(tags: &HashMap<String, String>) -> Option<String> {
+    if let Some(name) = tags
+        .get("name")
+        .map(String::as_str)
+        .filter(|name| !name.trim().is_empty())
+    {
+        return Some(name.trim().to_string());
+    }
+    let style = point_feature_style(tags)?;
+    match style.kind {
+        PointFeatureKind::Landmark => Some("Landmark".to_string()),
+        PointFeatureKind::Poi => Some(match style.poi_category? {
+            PoiCategory::Food => "Food".to_string(),
+            PoiCategory::Service => "Service".to_string(),
+            PoiCategory::Shop => "Shop".to_string(),
+            PoiCategory::Tourism => "Tourism".to_string(),
+            PoiCategory::Leisure => "Park".to_string(),
+        }),
+        PointFeatureKind::Tree | PointFeatureKind::Nature => None,
+    }
+}
+
 fn poi_category(tags: &HashMap<String, String>) -> Option<PoiCategory> {
     if matches!(
         tags.get("amenity").map(String::as_str),
@@ -142,15 +164,74 @@ fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs:
         verts,
         idxs,
     );
-    append_pyramid(
-        point,
-        elevation + 1.5,
-        elevation + 5.2,
-        1.9,
-        TREE_CANOPY_COLOR,
-        verts,
-        idxs,
-    );
+    append_low_poly_canopy(point, elevation + 1.45, verts, idxs);
+}
+
+fn append_low_poly_canopy(
+    point: (f32, f32),
+    base_y: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let lower = canopy_ring(point, base_y, 2.0, 0.0);
+    let middle = canopy_ring(point, base_y + 1.7, 1.55, std::f32::consts::FRAC_PI_8);
+    let upper = canopy_ring(point, base_y + 2.8, 0.85, 0.0);
+    let apex = [point.0, base_y + 3.9, point.1];
+
+    append_ring_band(point, &lower, &middle, TREE_CANOPY_COLOR, verts, idxs);
+    append_ring_band(point, &middle, &upper, [0.13, 0.42, 0.15], verts, idxs);
+    for i in 0..upper.len() {
+        let next = (i + 1) % upper.len();
+        append_tri(upper[next], upper[i], apex, [0.18, 0.55, 0.20], verts, idxs);
+    }
+}
+
+fn canopy_ring(point: (f32, f32), y: f32, radius: f32, phase: f32) -> [[f32; 3]; 8] {
+    std::array::from_fn(|i| {
+        let angle = phase + i as f32 * std::f32::consts::TAU / 8.0;
+        [
+            point.0 + angle.cos() * radius,
+            y,
+            point.1 + angle.sin() * radius,
+        ]
+    })
+}
+
+fn append_ring_band(
+    point: (f32, f32),
+    lower: &[[f32; 3]; 8],
+    upper: &[[f32; 3]; 8],
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    for i in 0..lower.len() {
+        let next = (i + 1) % lower.len();
+        let p0 = lower[i];
+        let p1 = lower[next];
+        let p2 = upper[next];
+        let p3 = upper[i];
+        let face_center = (glam::Vec3::from_array(p0)
+            + glam::Vec3::from_array(p1)
+            + glam::Vec3::from_array(p2)
+            + glam::Vec3::from_array(p3))
+            / 4.0;
+        let desired =
+            glam::vec3(face_center.x - point.0, 0.0, face_center.z - point.1).normalize_or_zero();
+        let mut normal = glam::Vec3::from_array(triangle_normal(p0, p1, p2));
+        if normal.dot(desired) < 0.0 {
+            normal = -normal;
+        }
+        append_quad(
+            QuadFace {
+                positions: [p0, p1, p2, p3],
+                normal: normal.to_array(),
+            },
+            color,
+            verts,
+            idxs,
+        );
+    }
 }
 
 fn append_landmark(

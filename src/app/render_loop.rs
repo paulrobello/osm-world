@@ -245,6 +245,10 @@ pub fn render(
         ));
     }
 
+    let viewport_size = egui::vec2(
+        state.surface_config.width as f32 / screen_descriptor.pixels_per_point,
+        state.surface_config.height as f32 / screen_descriptor.pixels_per_point,
+    );
     let raw_input = egui_state.winit_state.take_egui_input(&state.window);
     #[allow(deprecated)]
     let egui_output = egui_state.context.run(raw_input, |ctx| {
@@ -258,6 +262,7 @@ pub fn render(
             ui_state.day_cycle,
             ui_state.performance,
         );
+        crate::ui::poi_labels::draw(ctx, &state.camera, &state.poi_labels, viewport_size);
         if *ui_state.show_settings {
             crate::ui::settings::draw(
                 ctx,

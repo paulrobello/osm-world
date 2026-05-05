@@ -44,6 +44,15 @@ impl Default for MinimapState {
     }
 }
 
+fn handle_minimap_click(state: &mut MinimapState, clicked: bool, ctrl_down: bool) -> bool {
+    if clicked && ctrl_down {
+        state.rotate_with_camera = !state.rotate_with_camera;
+        true
+    } else {
+        false
+    }
+}
+
 pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
     if !state.visible {
         return;
@@ -95,6 +104,14 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
                         egui::Stroke::new(1.0, egui::Color32::BLACK),
                     ));
 
+                    if handle_minimap_click(
+                        state,
+                        response.clicked(),
+                        ui.input(|i| i.modifiers.ctrl),
+                    ) {
+                        response.request_focus();
+                    }
+
                     // Scroll to zoom
                     if response.hover_pos().is_some_and(|p| rect.contains(p)) {
                         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
@@ -109,6 +126,25 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctrl_click_toggles_minimap_rotation() {
+        let mut state = MinimapState::default();
+
+        assert!(handle_minimap_click(&mut state, true, true));
+        assert!(state.rotate_with_camera);
+
+        assert!(handle_minimap_click(&mut state, true, true));
+        assert!(!state.rotate_with_camera);
+    }
+
+    #[test]
+    fn plain_click_does_not_toggle_minimap_rotation() {
+        let mut state = MinimapState::default();
+
+        assert!(!handle_minimap_click(&mut state, true, false));
+        assert!(!state.rotate_with_camera);
+    }
 
     #[test]
     fn arrow_points_north_when_camera_faces_north_on_fixed_map() {

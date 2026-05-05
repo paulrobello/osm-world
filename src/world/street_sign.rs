@@ -10,7 +10,6 @@ const MIN_PERIODIC_ROAD_LENGTH_METERS: f32 = 360.0;
 const INTERSECTION_KEY_SCALE: f32 = 10.0;
 const SIGN_POST_COLOR: [f32; 3] = [0.62, 0.64, 0.60];
 const SIGN_BOARD_COLOR: [f32; 3] = [0.05, 0.42, 0.22];
-const SIGN_TRIM_COLOR: [f32; 3] = [0.92, 0.95, 0.88];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedStreetSign {
@@ -258,18 +257,6 @@ pub fn append_street_sign(sign: &ResolvedStreetSign, verts: &mut Vec<Vertex>, id
             height: 2.4,
             tangent: (1.0, 0.0),
             color: SIGN_POST_COLOR,
-        },
-        verts,
-        idxs,
-    );
-    append_oriented_box(
-        OrientedBoxSpec {
-            point: sign.point,
-            base_y: sign.elevation + 2.25,
-            half_extents: (1.45, 0.08),
-            height: 0.62,
-            tangent: sign.tangent,
-            color: SIGN_TRIM_COLOR,
         },
         verts,
         idxs,
@@ -594,7 +581,6 @@ mod tests {
         let component_centers = [
             glam::vec3(sign.point.0, sign.elevation + 1.2, sign.point.1),
             glam::vec3(sign.point.0, sign.elevation + 2.56, sign.point.1),
-            glam::vec3(sign.point.0, sign.elevation + 2.56, sign.point.1),
         ];
 
         for (component_index, center) in component_centers.into_iter().enumerate() {
@@ -615,6 +601,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn street_sign_mesh_stays_lightweight_for_large_areas() {
+        let sign = ResolvedStreetSign {
+            name: "Main Street".to_string(),
+            point: (10.0, -20.0),
+            elevation: 2.0,
+            tangent: (1.0, 0.0),
+            rep_lat: 38.0,
+            rep_lon: -121.0,
+        };
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_street_sign(&sign, &mut vertices, &mut indices);
+
+        assert!(
+            vertices.len() <= 48,
+            "street sign mesh should stay cheap enough for full-world rendering, got {} vertices",
+            vertices.len()
+        );
     }
 
     #[test]

@@ -6,23 +6,41 @@ const TREE_TRUNK_COLOR: [f32; 3] = [0.45, 0.24, 0.10];
 const TREE_CANOPY_COLOR: [f32; 3] = [0.16, 0.48, 0.18];
 const LANDMARK_COLOR: [f32; 3] = [0.72, 0.64, 0.45];
 const NATURE_MARKER_COLOR: [f32; 3] = [0.24, 0.42, 0.58];
+const POI_FOOD_COLOR: [f32; 3] = [0.86, 0.28, 0.18];
+const POI_SERVICE_COLOR: [f32; 3] = [0.20, 0.42, 0.86];
+const POI_SHOP_COLOR: [f32; 3] = [0.82, 0.36, 0.78];
+const POI_TOURISM_COLOR: [f32; 3] = [0.92, 0.66, 0.18];
+const POI_LEISURE_COLOR: [f32; 3] = [0.24, 0.68, 0.28];
+const POI_POST_COLOR: [f32; 3] = [0.18, 0.18, 0.18];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PointFeatureKind {
     Tree,
     Landmark,
     Nature,
+    Poi,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PoiCategory {
+    Food,
+    Service,
+    Shop,
+    Tourism,
+    Leisure,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PointFeatureStyle {
     pub kind: PointFeatureKind,
+    pub poi_category: Option<PoiCategory>,
 }
 
 pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatureStyle> {
     if tags.get("natural").map(String::as_str) == Some("tree") {
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Tree,
+            poi_category: None,
         });
     }
     if matches!(
@@ -31,6 +49,7 @@ pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatur
     ) {
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Nature,
+            poi_category: None,
         });
     }
     if matches!(
@@ -44,7 +63,45 @@ pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatur
     {
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Landmark,
+            poi_category: None,
         });
+    }
+    if let Some(category) = poi_category(tags) {
+        return Some(PointFeatureStyle {
+            kind: PointFeatureKind::Poi,
+            poi_category: Some(category),
+        });
+    }
+    None
+}
+
+fn poi_category(tags: &HashMap<String, String>) -> Option<PoiCategory> {
+    if matches!(
+        tags.get("amenity").map(String::as_str),
+        Some("restaurant" | "cafe" | "bar" | "pub" | "fast_food")
+    ) {
+        return Some(PoiCategory::Food);
+    }
+    if matches!(
+        tags.get("amenity").map(String::as_str),
+        Some("school" | "hospital" | "clinic" | "pharmacy" | "bank" | "fuel" | "parking")
+    ) {
+        return Some(PoiCategory::Service);
+    }
+    if tags.contains_key("shop") {
+        return Some(PoiCategory::Shop);
+    }
+    if matches!(
+        tags.get("tourism").map(String::as_str),
+        Some("hotel" | "museum" | "guest_house")
+    ) {
+        return Some(PoiCategory::Tourism);
+    }
+    if matches!(
+        tags.get("leisure").map(String::as_str),
+        Some("park" | "playground" | "sports_centre" | "pitch")
+    ) {
+        return Some(PoiCategory::Leisure);
     }
     None
 }
@@ -63,6 +120,13 @@ pub fn generate_point_feature(
         PointFeatureKind::Tree => append_tree(point, elevation, verts, idxs),
         PointFeatureKind::Landmark => append_landmark(point, elevation, verts, idxs),
         PointFeatureKind::Nature => append_nature_marker(point, elevation, verts, idxs),
+        PointFeatureKind::Poi => append_poi_marker(
+            point,
+            elevation,
+            style.poi_category.expect("POI styles carry a category"),
+            verts,
+            idxs,
+        ),
     }
 }
 
@@ -132,6 +196,45 @@ fn append_nature_marker(
         verts,
         idxs,
     );
+}
+
+fn append_poi_marker(
+    point: (f32, f32),
+    elevation: f32,
+    category: PoiCategory,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.11, 0.11),
+            height: 1.25,
+            color: POI_POST_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_pyramid(
+        point,
+        elevation + 1.25,
+        elevation + 2.15,
+        0.48,
+        poi_color(category),
+        verts,
+        idxs,
+    );
+}
+
+fn poi_color(category: PoiCategory) -> [f32; 3] {
+    match category {
+        PoiCategory::Food => POI_FOOD_COLOR,
+        PoiCategory::Service => POI_SERVICE_COLOR,
+        PoiCategory::Shop => POI_SHOP_COLOR,
+        PoiCategory::Tourism => POI_TOURISM_COLOR,
+        PoiCategory::Leisure => POI_LEISURE_COLOR,
+    }
 }
 
 struct BoxSpec {
@@ -324,6 +427,34 @@ mod tests {
     }
 
     #[test]
+    fn classifies_amenity_restaurant_as_food_poi() {
+        let style = point_feature_style(&tags(&[("amenity", "restaurant")])).unwrap();
+        assert_eq!(style.kind, PointFeatureKind::Poi);
+        assert_eq!(style.poi_category, Some(PoiCategory::Food));
+    }
+
+    #[test]
+    fn classifies_shop_as_shop_poi() {
+        let style = point_feature_style(&tags(&[("shop", "convenience")])).unwrap();
+        assert_eq!(style.kind, PointFeatureKind::Poi);
+        assert_eq!(style.poi_category, Some(PoiCategory::Shop));
+    }
+
+    #[test]
+    fn classifies_tourism_hotel_as_tourism_poi() {
+        let style = point_feature_style(&tags(&[("tourism", "hotel")])).unwrap();
+        assert_eq!(style.kind, PointFeatureKind::Poi);
+        assert_eq!(style.poi_category, Some(PoiCategory::Tourism));
+    }
+
+    #[test]
+    fn classifies_leisure_playground_as_leisure_poi() {
+        let style = point_feature_style(&tags(&[("leisure", "playground")])).unwrap();
+        assert_eq!(style.kind, PointFeatureKind::Poi);
+        assert_eq!(style.poi_category, Some(PoiCategory::Leisure));
+    }
+
+    #[test]
     fn ignores_unrendered_tags() {
         assert!(point_feature_style(&tags(&[("amenity", "bench")])).is_none());
     }
@@ -446,6 +577,37 @@ mod tests {
             verts
                 .iter()
                 .all(|v| v.feature_type == crate::render::vertex::feature::POINT_FEATURE)
+        );
+    }
+
+    #[test]
+    fn poi_marker_emits_post_and_category_cap() {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+
+        generate_point_feature(
+            &tags(&[("amenity", "restaurant")]),
+            (2.0, -4.0),
+            1.0,
+            &mut verts,
+            &mut idxs,
+        );
+
+        assert!(!idxs.is_empty());
+        assert!(
+            verts
+                .iter()
+                .all(|v| v.feature_type == crate::render::vertex::feature::POINT_FEATURE)
+        );
+        assert!(
+            verts
+                .iter()
+                .any(|v| approx_color(v.color, [0.18, 0.18, 0.18]))
+        );
+        assert!(
+            verts
+                .iter()
+                .any(|v| approx_color(v.color, [0.86, 0.28, 0.18]))
         );
     }
 

@@ -1053,6 +1053,33 @@ mod tests {
     }
 
     #[test]
+    fn load_world_source_classifies_poi_nodes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("poi.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0">
+    <tag k="amenity" v="restaurant"/>
+  </node>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.point_features.len(), 1);
+        let point_feature = &source.point_features[0];
+        assert_eq!(
+            point_feature.tags.get("amenity").map(String::as_str),
+            Some("restaurant")
+        );
+        assert_eq!(point_feature.rep_lat, 38.0);
+        assert_eq!(point_feature.rep_lon, -121.0);
+    }
+
+    #[test]
     fn point_feature_index_maps_points_to_owner_tiles() {
         let mut source = empty_source();
         source.point_features.push(ResolvedPointFeature {
@@ -1364,6 +1391,36 @@ mod tests {
         let mut source = empty_source();
         source.point_features.push(ResolvedPointFeature {
             tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
+            point: (10.0, -20.0),
+            elevation: 2.0,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        let refs = crate::stream::tile::TileFeatureRefs {
+            point_features: vec![0],
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+        );
+
+        let vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::POINT_FEATURE)
+        );
+    }
+
+    #[test]
+    fn tile_mesh_emits_poi_point_feature_geometry() {
+        let mut source = empty_source();
+        source.point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("shop".to_string(), "convenience".to_string())]),
             point: (10.0, -20.0),
             elevation: 2.0,
             rep_lat: 1.0,

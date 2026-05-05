@@ -5,16 +5,16 @@ use std::collections::HashMap;
 use crate::render::vertex::{Vertex, feature};
 
 const TRACK_GAUGE: f32 = 1.435;
-const BALLAST_WIDTH: f32 = 3.6;
-const RAIL_HEAD_WIDTH: f32 = 0.32;
+const BALLAST_WIDTH: f32 = 4.2;
+const RAIL_HEAD_WIDTH: f32 = 0.50;
 const TIE_LENGTH: f32 = 2.8;
 const TIE_WIDTH: f32 = 0.45;
 const TIE_SPACING: f32 = 3.0;
 const BALLAST_Y_OFFSET: f32 = 0.02;
 const TIE_Y_OFFSET: f32 = 0.08;
 const RAIL_Y_OFFSET: f32 = 0.26;
-const BALLAST_COLOR: [f32; 3] = [0.34, 0.34, 0.32];
-const RAIL_COLOR: [f32; 3] = [0.78, 0.78, 0.72];
+const BALLAST_COLOR: [f32; 3] = [0.48, 0.48, 0.44];
+const RAIL_COLOR: [f32; 3] = [0.90, 0.90, 0.84];
 const TIE_COLOR: [f32; 3] = [0.24, 0.16, 0.10];
 
 pub fn is_renderable_railway(tags: &HashMap<String, String>) -> bool {
@@ -201,7 +201,20 @@ fn push_quad(
             uv: [0.0, 0.0],
         });
     }
-    idxs.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+    let normal_y = triangle_normal_y(positions[0], positions[1], positions[2]);
+    if normal_y >= 0.0 {
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+    } else {
+        idxs.extend_from_slice(&[base, base + 2, base + 1, base + 3, base + 1, base + 2]);
+    }
+}
+
+fn triangle_normal_y(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> f32 {
+    let ux = b[0] - a[0];
+    let uz = b[2] - a[2];
+    let vx = c[0] - a[0];
+    let vz = c[2] - a[2];
+    uz * vx - ux * vz
 }
 
 #[cfg(test)]
@@ -224,6 +237,26 @@ mod tests {
         assert!(vertices.iter().any(|v| v.color == BALLAST_COLOR));
         assert!(vertices.iter().any(|v| v.color == RAIL_COLOR));
         assert!(vertices.iter().any(|v| v.color == TIE_COLOR));
+    }
+
+    #[test]
+    fn railway_track_triangles_face_up_for_back_face_culling() {
+        let tags = HashMap::from([("railway".to_string(), "rail".to_string())]);
+        let points = [(0.0, 0.0), (12.0, 0.0)];
+        let elevations = [1.0, 1.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        generate_railway_track(&tags, &points, &elevations, &mut vertices, &mut indices);
+
+        for tri in indices.chunks_exact(3) {
+            let normal_y = triangle_normal_y(
+                vertices[tri[0] as usize].position,
+                vertices[tri[1] as usize].position,
+                vertices[tri[2] as usize].position,
+            );
+            assert!(normal_y > 0.0, "triangle {tri:?} normal_y={normal_y}");
+        }
     }
 
     #[test]

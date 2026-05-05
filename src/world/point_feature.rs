@@ -135,8 +135,8 @@ fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs:
         BoxSpec {
             point,
             base_y: elevation,
-            half_extents: (0.32, 0.32),
-            height: 1.7,
+            half_extents: (0.45, 0.45),
+            height: 2.2,
             color: TREE_TRUNK_COLOR,
         },
         verts,
@@ -144,9 +144,9 @@ fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs:
     );
     append_pyramid(
         point,
-        elevation + 1.15,
-        elevation + 3.55,
-        1.25,
+        elevation + 1.5,
+        elevation + 5.2,
+        1.9,
         TREE_CANOPY_COLOR,
         verts,
         idxs,
@@ -209,8 +209,8 @@ fn append_poi_marker(
         BoxSpec {
             point,
             base_y: elevation,
-            half_extents: (0.11, 0.11),
-            height: 1.25,
+            half_extents: (0.18, 0.18),
+            height: 2.0,
             color: POI_POST_COLOR,
         },
         verts,
@@ -218,9 +218,9 @@ fn append_poi_marker(
     );
     append_pyramid(
         point,
-        elevation + 1.25,
-        elevation + 2.15,
-        0.48,
+        elevation + 2.0,
+        elevation + 3.4,
+        0.9,
         poi_color(category),
         verts,
         idxs,

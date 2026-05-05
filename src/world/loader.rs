@@ -341,6 +341,25 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
                     && tags.get("natural").map(|s| s.as_str()) != Some("wetland"))
                 || tags.contains_key("leisure"));
 
+        if super::point_feature::point_feature_style(tags).is_some() {
+            let base_elevation = elev(rep_lat, rep_lon);
+            let marker_elevation = if is_building {
+                base_elevation + super::building::parse_building_height(tags) + 0.25
+            } else {
+                base_elevation
+            };
+            point_features.push(ResolvedPointFeature {
+                tags: tags.clone(),
+                point: conv.to_world_xz(rep_lat, rep_lon),
+                elevation: marker_elevation,
+                rep_lat,
+                rep_lon,
+            });
+        }
+        if is_closed && is_tree_area(tags) {
+            append_tree_area_point_features(&resolved, &conv, &elev, &mut point_features);
+        }
+
         if is_building {
             buildings.push(resolved.clone());
         } else if is_water {
@@ -403,6 +422,19 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
             rep_lon,
         };
 
+        if super::point_feature::point_feature_style(tags).is_some() {
+            point_features.push(ResolvedPointFeature {
+                tags: tags.clone(),
+                point: conv.to_world_xz(rep_lat, rep_lon),
+                elevation: elev(rep_lat, rep_lon),
+                rep_lat,
+                rep_lon,
+            });
+        }
+        if !is_water && is_tree_area(tags) {
+            append_tree_area_point_features(&resolved, &conv, &elev, &mut point_features);
+        }
+
         if is_water {
             waters.push(resolved);
         } else {
@@ -448,6 +480,76 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
         landuses,
         point_features,
     })
+}
+
+const TREE_AREA_SPACING_METRES: f32 = 28.0;
+const MAX_TREE_AREA_POINT_FEATURES: usize = 120;
+
+fn is_tree_area(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("landuse").map(String::as_str),
+        Some("forest" | "orchard")
+    ) || matches!(tags.get("natural").map(String::as_str), Some("wood"))
+}
+
+fn append_tree_area_point_features(
+    area: &ResolvedFeature,
+    conv: &CoordConverter,
+    elev: &impl Fn(f64, f64) -> f32,
+    point_features: &mut Vec<ResolvedPointFeature>,
+) {
+    if area.points.len() < 3 {
+        return;
+    }
+
+    let Some((min_x, min_z, max_x, max_z)) = feature_bbox(area) else {
+        return;
+    };
+    let mut emitted = 0usize;
+    let mut row = 0usize;
+    let mut z = min_z + TREE_AREA_SPACING_METRES * 0.5;
+    while z <= max_z && emitted < MAX_TREE_AREA_POINT_FEATURES {
+        let row_offset = if row.is_multiple_of(2) {
+            0.0
+        } else {
+            TREE_AREA_SPACING_METRES * 0.5
+        };
+        let mut x = min_x + TREE_AREA_SPACING_METRES * 0.5 + row_offset;
+        while x <= max_x && emitted < MAX_TREE_AREA_POINT_FEATURES {
+            if point_in_polygon((x, z), &area.points) {
+                let (lat, lon) = conv.world_xz_to_lat_lon(x, z);
+                point_features.push(ResolvedPointFeature {
+                    tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
+                    point: (x, z),
+                    elevation: elev(lat, lon),
+                    rep_lat: lat,
+                    rep_lon: lon,
+                });
+                emitted += 1;
+            }
+            x += TREE_AREA_SPACING_METRES;
+        }
+        row += 1;
+        z += TREE_AREA_SPACING_METRES;
+    }
+}
+
+fn point_in_polygon(point: (f32, f32), polygon: &[(f32, f32)]) -> bool {
+    let (x, z) = point;
+    let mut inside = false;
+    let mut j = polygon.len() - 1;
+    for i in 0..polygon.len() {
+        let (xi, zi) = polygon[i];
+        let (xj, zj) = polygon[j];
+        if (zi > z) != (zj > z) {
+            let x_intersection = (xj - xi) * (z - zi) / (zj - zi) + xi;
+            if x < x_intersection {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
 }
 
 pub fn generate_world_mesh(source: &WorldSource) -> WorldMesh {
@@ -1077,6 +1179,79 @@ mod tests {
         );
         assert_eq!(point_feature.rep_lat, 38.0);
         assert_eq!(point_feature.rep_lon, -121.0);
+    }
+
+    #[test]
+    fn load_world_source_classifies_poi_ways() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("poi-way.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.999"/>
+  <node id="3" lat="38.001" lon="-120.999"/>
+  <node id="4" lat="38.001" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="building" v="yes"/>
+    <tag k="shop" v="convenience"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.buildings.len(), 1);
+        assert_eq!(source.point_features.len(), 1);
+        let point_feature = &source.point_features[0];
+        assert_eq!(
+            point_feature.tags.get("shop").map(String::as_str),
+            Some("convenience")
+        );
+        assert!(point_feature.elevation > 10.0);
+    }
+
+    #[test]
+    fn load_world_source_synthesizes_trees_for_orchard_areas() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("orchard.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.998"/>
+  <node id="3" lat="38.002" lon="-120.998"/>
+  <node id="4" lat="38.002" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="landuse" v="orchard"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.landuses.len(), 1);
+        assert!(source.point_features.len() > 4);
+        assert!(
+            source
+                .point_features
+                .iter()
+                .all(|feature| { feature.tags.get("natural").map(String::as_str) == Some("tree") })
+        );
     }
 
     #[test]

@@ -1,10 +1,17 @@
 use crate::camera::Flycam;
 
 fn player_arrow_direction(camera: &Flycam, rotate_with_camera: bool) -> egui::Vec2 {
-    let forward = horizontal_forward(camera);
+    world_direction_on_minimap(camera, rotate_with_camera, horizontal_forward(camera))
+}
+
+fn world_direction_on_minimap(
+    camera: &Flycam,
+    rotate_with_camera: bool,
+    world_direction: glam::Vec3,
+) -> egui::Vec2 {
     let map_up = minimap_up(camera, rotate_with_camera);
     let view = glam::Mat4::look_to_rh(glam::Vec3::ZERO, glam::Vec3::NEG_Y, map_up);
-    let screen_direction = view.transform_vector3(forward);
+    let screen_direction = view.transform_vector3(world_direction);
     egui::vec2(screen_direction.x, screen_direction.y).normalized()
 }
 
@@ -42,6 +49,71 @@ impl Default for MinimapState {
             texture_id: None,
         }
     }
+}
+
+fn compass_heading_degrees(camera: &Flycam) -> f32 {
+    let forward = horizontal_forward(camera);
+    let degrees = forward.x.atan2(-forward.z).to_degrees().rem_euclid(360.0);
+    if degrees >= 359.999 { 0.0 } else { degrees }
+}
+
+fn compass_heading_label(degrees: f32) -> &'static str {
+    const LABELS: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    let index = ((degrees + 22.5) / 45.0).floor() as usize % LABELS.len();
+    LABELS[index]
+}
+
+fn draw_compass(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    camera: &Flycam,
+    rotate_with_camera: bool,
+) {
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.5 - 17.0;
+    let cardinals = [
+        ("N", glam::Vec3::NEG_Z, egui::Color32::from_rgb(255, 80, 64)),
+        ("E", glam::Vec3::X, egui::Color32::WHITE),
+        ("S", glam::Vec3::Z, egui::Color32::LIGHT_GRAY),
+        ("W", glam::Vec3::NEG_X, egui::Color32::WHITE),
+    ];
+
+    painter.circle_stroke(
+        center,
+        radius,
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(150)),
+    );
+
+    for (label, world_direction, color) in cardinals {
+        let direction = world_direction_on_minimap(camera, rotate_with_camera, world_direction);
+        let pos = center + direction * radius;
+        painter.text(
+            pos,
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(13.0),
+            color,
+        );
+    }
+
+    let heading = compass_heading_degrees(camera);
+    let heading_text = format!(
+        "{} {:03.0}°",
+        compass_heading_label(heading),
+        heading.round()
+    );
+    let label_rect = egui::Rect::from_min_size(
+        rect.left_top() + egui::vec2(7.0, 7.0),
+        egui::vec2(72.0, 20.0),
+    );
+    painter.rect_filled(label_rect, 3.0, egui::Color32::from_black_alpha(155));
+    painter.text(
+        label_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        heading_text,
+        egui::FontId::monospace(12.0),
+        egui::Color32::WHITE,
+    );
 }
 
 fn handle_minimap_click(state: &mut MinimapState, clicked: bool, ctrl_down: bool) -> bool {
@@ -98,6 +170,7 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
                     let right = tail - wing_direction * arrow_size * 0.45;
 
                     let painter = ui.painter_at(rect);
+                    draw_compass(&painter, rect, camera, state.rotate_with_camera);
                     painter.add(egui::Shape::convex_polygon(
                         vec![tip, left, right],
                         egui::Color32::WHITE,
@@ -122,6 +195,28 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compass_heading_uses_north_zero_clockwise_degrees() {
+        let mut camera = Flycam::new(1.0);
+        camera.pitch = 0.0;
+
+        camera.yaw = -std::f32::consts::FRAC_PI_2;
+        assert!((compass_heading_degrees(&camera) - 0.0).abs() < 0.001);
+        assert_eq!(compass_heading_label(compass_heading_degrees(&camera)), "N");
+
+        camera.yaw = 0.0;
+        assert!((compass_heading_degrees(&camera) - 90.0).abs() < 0.001);
+        assert_eq!(compass_heading_label(compass_heading_degrees(&camera)), "E");
+
+        camera.yaw = std::f32::consts::FRAC_PI_2;
+        assert!((compass_heading_degrees(&camera) - 180.0).abs() < 0.001);
+        assert_eq!(compass_heading_label(compass_heading_degrees(&camera)), "S");
+
+        camera.yaw = std::f32::consts::PI;
+        assert!((compass_heading_degrees(&camera) - 270.0).abs() < 0.001);
+        assert_eq!(compass_heading_label(compass_heading_degrees(&camera)), "W");
+    }
 
     #[test]
     fn ctrl_click_toggles_minimap_rotation() {

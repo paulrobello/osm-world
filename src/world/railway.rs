@@ -14,7 +14,7 @@ const BALLAST_Y_OFFSET: f32 = 0.02;
 const TIE_Y_OFFSET: f32 = 0.08;
 const RAIL_Y_OFFSET: f32 = 0.26;
 const BALLAST_COLOR: [f32; 3] = [0.48, 0.48, 0.44];
-const RAIL_COLOR: [f32; 3] = [0.90, 0.90, 0.84];
+const RAIL_COLOR: [f32; 3] = [0.72, 0.72, 0.672];
 const TIE_COLOR: [f32; 3] = [0.24, 0.16, 0.10];
 
 pub fn is_renderable_railway(tags: &HashMap<String, String>) -> bool {

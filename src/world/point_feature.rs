@@ -68,12 +68,13 @@ pub fn generate_point_feature(
 
 fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
     append_box(
-        point,
-        elevation,
-        0.32,
-        0.32,
-        1.7,
-        TREE_TRUNK_COLOR,
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.32, 0.32),
+            height: 1.7,
+            color: TREE_TRUNK_COLOR,
+        },
         verts,
         idxs,
     );
@@ -95,12 +96,13 @@ fn append_landmark(
     idxs: &mut Vec<u32>,
 ) {
     append_box(
-        point,
-        elevation,
-        0.72,
-        0.72,
-        4.2,
-        LANDMARK_COLOR,
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.72, 0.72),
+            height: 4.2,
+            color: LANDMARK_COLOR,
+        },
         verts,
         idxs,
     );
@@ -132,83 +134,81 @@ fn append_nature_marker(
     );
 }
 
-fn append_box(
+struct BoxSpec {
     point: (f32, f32),
     base_y: f32,
-    half_x: f32,
-    half_z: f32,
+    half_extents: (f32, f32),
     height: f32,
     color: [f32; 3],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
-    let (x, z) = point;
+}
+
+fn append_box(spec: BoxSpec, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+    let (x, z) = spec.point;
+    let (half_x, half_z) = spec.half_extents;
     let min_x = x - half_x;
     let max_x = x + half_x;
     let min_z = z - half_z;
     let max_z = z + half_z;
-    let top_y = base_y + height;
+    let top_y = spec.base_y + spec.height;
 
-    append_quad(
-        [min_x, base_y, min_z],
-        [max_x, base_y, min_z],
-        [max_x, top_y, min_z],
-        [min_x, top_y, min_z],
-        [0.0, 0.0, -1.0],
-        color,
-        verts,
-        idxs,
-    );
-    append_quad(
-        [max_x, base_y, max_z],
-        [min_x, base_y, max_z],
-        [min_x, top_y, max_z],
-        [max_x, top_y, max_z],
-        [0.0, 0.0, 1.0],
-        color,
-        verts,
-        idxs,
-    );
-    append_quad(
-        [min_x, base_y, max_z],
-        [min_x, base_y, min_z],
-        [min_x, top_y, min_z],
-        [min_x, top_y, max_z],
-        [-1.0, 0.0, 0.0],
-        color,
-        verts,
-        idxs,
-    );
-    append_quad(
-        [max_x, base_y, min_z],
-        [max_x, base_y, max_z],
-        [max_x, top_y, max_z],
-        [max_x, top_y, min_z],
-        [1.0, 0.0, 0.0],
-        color,
-        verts,
-        idxs,
-    );
-    append_quad(
-        [min_x, top_y, min_z],
-        [max_x, top_y, min_z],
-        [max_x, top_y, max_z],
-        [min_x, top_y, max_z],
-        [0.0, 1.0, 0.0],
-        color,
-        verts,
-        idxs,
-    );
-    append_quad(
-        [min_x, base_y, max_z],
-        [max_x, base_y, max_z],
-        [max_x, base_y, min_z],
-        [min_x, base_y, min_z],
-        [0.0, -1.0, 0.0],
-        color,
-        verts,
-        idxs,
-    );
+    for face in [
+        QuadFace {
+            positions: [
+                [min_x, spec.base_y, min_z],
+                [max_x, spec.base_y, min_z],
+                [max_x, top_y, min_z],
+                [min_x, top_y, min_z],
+            ],
+            normal: [0.0, 0.0, -1.0],
+        },
+        QuadFace {
+            positions: [
+                [max_x, spec.base_y, max_z],
+                [min_x, spec.base_y, max_z],
+                [min_x, top_y, max_z],
+                [max_x, top_y, max_z],
+            ],
+            normal: [0.0, 0.0, 1.0],
+        },
+        QuadFace {
+            positions: [
+                [min_x, spec.base_y, max_z],
+                [min_x, spec.base_y, min_z],
+                [min_x, top_y, min_z],
+                [min_x, top_y, max_z],
+            ],
+            normal: [-1.0, 0.0, 0.0],
+        },
+        QuadFace {
+            positions: [
+                [max_x, spec.base_y, min_z],
+                [max_x, spec.base_y, max_z],
+                [max_x, top_y, max_z],
+                [max_x, top_y, min_z],
+            ],
+            normal: [1.0, 0.0, 0.0],
+        },
+        QuadFace {
+            positions: [
+                [min_x, top_y, min_z],
+                [max_x, top_y, min_z],
+                [max_x, top_y, max_z],
+                [min_x, top_y, max_z],
+            ],
+            normal: [0.0, 1.0, 0.0],
+        },
+        QuadFace {
+            positions: [
+                [min_x, spec.base_y, max_z],
+                [max_x, spec.base_y, max_z],
+                [max_x, spec.base_y, min_z],
+                [min_x, spec.base_y, min_z],
+            ],
+            normal: [0.0, -1.0, 0.0],
+        },
+    ] {
+        append_quad(face, spec.color, verts, idxs);
+    }
 }
 
 fn append_pyramid(
@@ -227,28 +227,31 @@ fn append_pyramid(
     let p3 = [x - half_size, base_y, z + half_size];
     let apex = [x, apex_y, z];
 
-    append_quad(p3, p2, p1, p0, [0.0, -1.0, 0.0], color, verts, idxs);
+    append_quad(
+        QuadFace {
+            positions: [p3, p2, p1, p0],
+            normal: [0.0, -1.0, 0.0],
+        },
+        color,
+        verts,
+        idxs,
+    );
     append_tri(p0, p1, apex, color, verts, idxs);
     append_tri(p1, p2, apex, color, verts, idxs);
     append_tri(p2, p3, apex, color, verts, idxs);
     append_tri(p3, p0, apex, color, verts, idxs);
 }
 
-fn append_quad(
-    p0: [f32; 3],
-    p1: [f32; 3],
-    p2: [f32; 3],
-    p3: [f32; 3],
+struct QuadFace {
+    positions: [[f32; 3]; 4],
     normal: [f32; 3],
-    color: [f32; 3],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
+}
+
+fn append_quad(face: QuadFace, color: [f32; 3], verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
     let base = verts.len() as u32;
-    verts.push(vertex(p0, normal, color));
-    verts.push(vertex(p1, normal, color));
-    verts.push(vertex(p2, normal, color));
-    verts.push(vertex(p3, normal, color));
+    for position in face.positions {
+        verts.push(vertex(position, face.normal, color));
+    }
     idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 

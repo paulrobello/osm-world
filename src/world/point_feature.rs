@@ -229,17 +229,17 @@ fn append_pyramid(
 
     append_quad(
         QuadFace {
-            positions: [p3, p2, p1, p0],
+            positions: [p0, p1, p2, p3],
             normal: [0.0, -1.0, 0.0],
         },
         color,
         verts,
         idxs,
     );
-    append_tri(p0, p1, apex, color, verts, idxs);
-    append_tri(p1, p2, apex, color, verts, idxs);
-    append_tri(p2, p3, apex, color, verts, idxs);
-    append_tri(p3, p0, apex, color, verts, idxs);
+    append_tri(p1, p0, apex, color, verts, idxs);
+    append_tri(p2, p1, apex, color, verts, idxs);
+    append_tri(p3, p2, apex, color, verts, idxs);
+    append_tri(p0, p3, apex, color, verts, idxs);
 }
 
 struct QuadFace {
@@ -252,7 +252,13 @@ fn append_quad(face: QuadFace, color: [f32; 3], verts: &mut Vec<Vertex>, idxs: &
     for position in face.positions {
         verts.push(vertex(position, face.normal, color));
     }
-    idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+
+    let geometric_normal = triangle_normal(face.positions[0], face.positions[1], face.positions[2]);
+    if glam::Vec3::from_array(geometric_normal).dot(glam::Vec3::from_array(face.normal)) >= 0.0 {
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    } else {
+        idxs.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
 }
 
 fn append_tri(
@@ -386,6 +392,40 @@ mod tests {
 
         assert!(!landmark_idxs.is_empty());
         assert!(landmark_top > trunk_top);
+    }
+
+    #[test]
+    fn point_feature_triangles_face_outward_from_marker_center() {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        let point = (2.0, -4.0);
+
+        generate_point_feature(
+            &tags(&[("natural", "tree")]),
+            point,
+            1.0,
+            &mut verts,
+            &mut idxs,
+        );
+
+        for tri in idxs.chunks_exact(3) {
+            let a = verts[tri[0] as usize].position;
+            let b = verts[tri[1] as usize].position;
+            let c = verts[tri[2] as usize].position;
+            let normal = glam::Vec3::from_array(triangle_normal(a, b, c));
+            let center =
+                (glam::Vec3::from_array(a) + glam::Vec3::from_array(b) + glam::Vec3::from_array(c))
+                    / 3.0;
+            let horizontal_from_marker =
+                glam::Vec3::new(center.x - point.0, 0.0, center.z - point.1);
+            let normal_horizontal = glam::Vec3::new(normal.x, 0.0, normal.z);
+            if horizontal_from_marker.length() > 1e-4 && normal_horizontal.length() > 1e-4 {
+                assert!(
+                    normal.dot(horizontal_from_marker.normalize()) > 0.0,
+                    "triangle {tri:?} normal {normal:?} points inward from {center:?}"
+                );
+            }
+        }
     }
 
     #[test]

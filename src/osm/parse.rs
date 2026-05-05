@@ -10,10 +10,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// A geographic point from the OSM dataset.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct OsmNode {
     pub lat: f64,
     pub lon: f64,
+    pub tags: HashMap<String, String>,
 }
 
 /// An OSM way: an ordered sequence of node references with tags.
@@ -167,7 +168,11 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
                 min_lon = min_lon.min(lon);
                 max_lat = max_lat.max(lat);
                 max_lon = max_lon.max(lon);
-                nodes.insert(n.id(), OsmNode { lat, lon });
+                let tags: HashMap<String, String> = n
+                    .tags()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                nodes.insert(n.id(), OsmNode { lat, lon, tags });
             }
             Element::DenseNode(n) => {
                 let lat = n.lat();
@@ -176,7 +181,11 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
                 min_lon = min_lon.min(lon);
                 max_lat = max_lat.max(lat);
                 max_lon = max_lon.max(lon);
-                nodes.insert(n.id(), OsmNode { lat, lon });
+                let tags: HashMap<String, String> = n
+                    .tags()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                nodes.insert(n.id(), OsmNode { lat, lon, tags });
             }
             Element::Way(w) => {
                 let tags: HashMap<String, String> = w
@@ -242,6 +251,48 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
     })
 }
 
+fn parse_node_attrs(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> (Option<i64>, Option<f64>, Option<f64>) {
+    let mut id: Option<i64> = None;
+    let mut lat: Option<f64> = None;
+    let mut lon: Option<f64> = None;
+    for attr in e.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"id" => {
+                id = std::str::from_utf8(&attr.value)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            }
+            b"lat" => {
+                lat = std::str::from_utf8(&attr.value)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            }
+            b"lon" => {
+                lon = std::str::from_utf8(&attr.value)
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            }
+            _ => {}
+        }
+    }
+    (id, lat, lon)
+}
+
+fn parse_tag_attrs(e: &quick_xml::events::BytesStart<'_>) -> Option<(String, String)> {
+    let mut k = String::new();
+    let mut v = String::new();
+    for attr in e.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"k" => k = std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+            b"v" => v = std::str::from_utf8(&attr.value).unwrap_or("").to_string(),
+            _ => {}
+        }
+    }
+    (!k.is_empty()).then_some((k, v))
+}
+
 /// Parse an OSM XML string into `OsmData`.
 ///
 /// Uses a two-pass approach: nodes are collected in the first pass so that
@@ -258,73 +309,85 @@ pub fn parse_osm_xml_str(xml: &str) -> Result<OsmData> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
+    let mut in_node = false;
+    let mut current_node_id: Option<i64> = None;
+    let mut current_node_lat: Option<f64> = None;
+    let mut current_node_lon: Option<f64> = None;
+    let mut current_node_tags: HashMap<String, String> = HashMap::new();
+
+    let update_bounds = |lat: f64,
+                         lon: f64,
+                         min_lat: &mut f64,
+                         min_lon: &mut f64,
+                         max_lat: &mut f64,
+                         max_lon: &mut f64| {
+        *min_lat = min_lat.min(lat);
+        *min_lon = min_lon.min(lon);
+        *max_lat = max_lat.max(lat);
+        *max_lon = max_lon.max(lon);
+    };
+
     loop {
         match reader.read_event() {
-            // Self-closing node (no child tags)
             Ok(Event::Empty(ref e)) if e.name().as_ref() == b"node" => {
-                let mut id: Option<i64> = None;
-                let mut lat: Option<f64> = None;
-                let mut lon: Option<f64> = None;
-                for attr in e.attributes().flatten() {
-                    match attr.key.as_ref() {
-                        b"id" => {
-                            id = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .and_then(|s| s.parse().ok())
-                        }
-                        b"lat" => {
-                            lat = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .and_then(|s| s.parse().ok())
-                        }
-                        b"lon" => {
-                            lon = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .and_then(|s| s.parse().ok())
-                        }
-                        _ => {}
-                    }
-                }
+                let (id, lat, lon) = parse_node_attrs(e);
                 if let (Some(id), Some(lat), Some(lon)) = (id, lat, lon) {
-                    min_lat = min_lat.min(lat);
-                    min_lon = min_lon.min(lon);
-                    max_lat = max_lat.max(lat);
-                    max_lon = max_lon.max(lon);
-                    nodes.insert(id, OsmNode { lat, lon });
+                    update_bounds(
+                        lat,
+                        lon,
+                        &mut min_lat,
+                        &mut min_lon,
+                        &mut max_lat,
+                        &mut max_lon,
+                    );
+                    nodes.insert(
+                        id,
+                        OsmNode {
+                            lat,
+                            lon,
+                            tags: HashMap::new(),
+                        },
+                    );
                 }
             }
-            // Opening <node> tag (may have child <tag> elements, but we only need id/lat/lon)
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"node" => {
-                let mut id: Option<i64> = None;
-                let mut lat: Option<f64> = None;
-                let mut lon: Option<f64> = None;
-                for attr in e.attributes().flatten() {
-                    match attr.key.as_ref() {
-                        b"id" => {
-                            id = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .and_then(|s| s.parse().ok())
-                        }
-                        b"lat" => {
-                            lat = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .and_then(|s| s.parse().ok())
-                        }
-                        b"lon" => {
-                            lon = std::str::from_utf8(&attr.value)
-                                .ok()
-                                .and_then(|s| s.parse().ok())
-                        }
-                        _ => {}
-                    }
+                let (id, lat, lon) = parse_node_attrs(e);
+                in_node = true;
+                current_node_id = id;
+                current_node_lat = lat;
+                current_node_lon = lon;
+                current_node_tags.clear();
+            }
+            Ok(Event::Empty(ref e)) if in_node && e.name().as_ref() == b"tag" => {
+                if let Some((k, v)) = parse_tag_attrs(e) {
+                    current_node_tags.insert(k, v);
                 }
-                if let (Some(id), Some(lat), Some(lon)) = (id, lat, lon) {
-                    min_lat = min_lat.min(lat);
-                    min_lon = min_lon.min(lon);
-                    max_lat = max_lat.max(lat);
-                    max_lon = max_lon.max(lon);
-                    nodes.insert(id, OsmNode { lat, lon });
+            }
+            Ok(Event::End(ref e)) if in_node && e.name().as_ref() == b"node" => {
+                in_node = false;
+                if let (Some(id), Some(lat), Some(lon)) = (
+                    current_node_id.take(),
+                    current_node_lat.take(),
+                    current_node_lon.take(),
+                ) {
+                    update_bounds(
+                        lat,
+                        lon,
+                        &mut min_lat,
+                        &mut min_lon,
+                        &mut max_lat,
+                        &mut max_lon,
+                    );
+                    nodes.insert(
+                        id,
+                        OsmNode {
+                            lat,
+                            lon,
+                            tags: current_node_tags.clone(),
+                        },
+                    );
                 }
+                current_node_tags.clear();
             }
             Ok(Event::Eof) => break,
             Err(e) => {
@@ -533,6 +596,20 @@ mod tests {
         assert_eq!(data.ways[0].tags["highway"], "residential");
         assert_eq!(data.ways[0].tags["name"], "Test Street");
         assert_eq!(data.ways[0].node_refs, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn parse_xml_tagged_nodes() {
+        let xml = r#"<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0">
+    <tag k="natural" v="tree"/>
+  </node>
+</osm>"#;
+
+        let data = parse_osm_xml_str(xml).unwrap();
+        let node = data.nodes.get(&1).unwrap();
+
+        assert_eq!(node.tags.get("natural").map(String::as_str), Some("tree"));
     }
 
     #[test]

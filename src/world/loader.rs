@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::geo::{CoordConverter, ElevationData};
 use crate::osm::parse::parse_osm_file;
 use crate::render::vertex::Vertex;
+use crate::world::street_sign::ResolvedStreetSign;
 
 /// Combined mesh for the entire world.
 pub struct WorldMesh {
@@ -58,6 +59,7 @@ pub struct WorldSource {
     pub waters: Vec<ResolvedFeature>,
     pub landuses: Vec<ResolvedFeature>,
     pub point_features: Vec<ResolvedPointFeature>,
+    pub street_signs: Vec<ResolvedStreetSign>,
 }
 
 impl WorldSource {
@@ -134,6 +136,14 @@ impl WorldSource {
                 .entry(coord)
                 .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
                 .point_features
+                .push(feature_idx);
+        }
+        for (feature_idx, sign) in self.street_signs.iter().enumerate() {
+            let coord = crate::stream::TileCoord::from_world(sign.point.0, sign.point.1, tile_size);
+            index
+                .entry(coord)
+                .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                .street_signs
                 .push(feature_idx);
         }
 
@@ -466,6 +476,8 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
         ensure_ccw(&mut lu.points, &mut lu.elevations);
     }
 
+    let street_signs = super::street_sign::street_signs_for_roads(&roads);
+
     Ok(WorldSource {
         min_lat,
         min_lon,
@@ -479,6 +491,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
         waters,
         landuses,
         point_features,
+        street_signs,
     })
 }
 
@@ -663,7 +676,7 @@ fn append_road_feature_mesh(
 }
 
 fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
-    // Generate meshes in order: terrain, landuse, water, roads, railways, buildings
+    // Generate meshes in order: terrain, landuse, water, roads, railways, point features, street signs, buildings
 
     // Terrain
     super::terrain::generate_terrain(
@@ -790,6 +803,10 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
         );
     }
 
+    for sign in &source.street_signs {
+        super::street_sign::append_street_sign(sign, verts, idxs);
+    }
+
     // Buildings
     for b in &source.buildings {
         let color = super::color::building_color(&b.tags);
@@ -804,13 +821,14 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
     }
 
     log::info!(
-        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} point features, {} water areas, {} landuse areas",
+        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} point features, {} street signs, {} water areas, {} landuse areas",
         verts.len(),
         idxs.len(),
         source.buildings.len(),
         source.roads.len(),
         source.railways.len(),
         source.point_features.len(),
+        source.street_signs.len(),
         source.waters.len(),
         source.landuses.len(),
     );
@@ -945,6 +963,13 @@ fn append_tile_features_mesh(
             verts,
             idxs,
         );
+    }
+
+    for &feature_idx in &refs.street_signs {
+        let Some(sign) = source.street_signs.get(feature_idx) else {
+            continue;
+        };
+        super::street_sign::append_street_sign(sign, verts, idxs);
     }
 
     for &feature_idx in &refs.buildings {
@@ -1414,6 +1439,65 @@ mod tests {
     }
 
     #[test]
+    fn load_world_source_generates_street_signs_for_named_drivable_roads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("street_signs.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <bounds minlat="38.0" minlon="-121.0" maxlat="38.01" maxlon="-120.99"/>
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.995"/>
+  <node id="3" lat="38.0" lon="-120.99"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Main Street"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert!(!source.street_signs.is_empty());
+        assert!(
+            source
+                .street_signs
+                .iter()
+                .any(|sign| sign.name == "Main Street")
+        );
+    }
+
+    #[test]
+    fn street_sign_index_maps_signs_to_owner_tiles() {
+        let mut source = empty_source();
+        source
+            .street_signs
+            .push(crate::world::street_sign::ResolvedStreetSign {
+                name: "Main Street".to_string(),
+                point: (125.0, -75.0),
+                elevation: 3.0,
+                tangent: (1.0, 0.0),
+                rep_lat: 1.0,
+                rep_lon: 2.0,
+            });
+
+        let index = source.feature_index_for_tile_size(100.0);
+
+        assert_eq!(
+            index
+                .get(&crate::stream::TileCoord { x: 1, z: -1 })
+                .unwrap()
+                .street_signs,
+            vec![0]
+        );
+    }
+
+    #[test]
     fn world_source_bbox_center_matches_converter() {
         let source = WorldSource {
             min_lat: 1.0,
@@ -1428,6 +1512,7 @@ mod tests {
             waters: Vec::new(),
             landuses: Vec::new(),
             point_features: Vec::new(),
+            street_signs: Vec::new(),
         };
 
         let (cx, cz) = source.conv.bbox_centre(
@@ -1481,6 +1566,7 @@ mod tests {
             waters: Vec::new(),
             landuses: Vec::new(),
             point_features: Vec::new(),
+            street_signs: Vec::new(),
         }
     }
 
@@ -1600,7 +1686,8 @@ mod tests {
             && refs.railways.is_empty()
             && refs.waters.is_empty()
             && refs.landuses.is_empty()
-            && refs.point_features.is_empty()));
+            && refs.point_features.is_empty()
+            && refs.street_signs.is_empty()));
     }
 
     #[test]
@@ -1725,6 +1812,62 @@ mod tests {
             vertices
                 .iter()
                 .any(|v| v.feature_type == crate::render::vertex::feature::POINT_FEATURE)
+        );
+    }
+
+    #[test]
+    fn world_mesh_emits_street_sign_geometry() {
+        let mut source = empty_source();
+        source
+            .street_signs
+            .push(crate::world::street_sign::ResolvedStreetSign {
+                name: "Main Street".to_string(),
+                point: (10.0, -20.0),
+                elevation: 2.0,
+                tangent: (1.0, 0.0),
+                rep_lat: 1.0,
+                rep_lon: 2.0,
+            });
+
+        let mesh = generate_world_mesh(&source);
+
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::STREET_SIGN)
+        );
+    }
+
+    #[test]
+    fn tile_mesh_emits_street_sign_geometry() {
+        let mut source = empty_source();
+        source
+            .street_signs
+            .push(crate::world::street_sign::ResolvedStreetSign {
+                name: "Main Street".to_string(),
+                point: (10.0, -20.0),
+                elevation: 2.0,
+                tangent: (1.0, 0.0),
+                rep_lat: 1.0,
+                rep_lon: 2.0,
+            });
+        let refs = crate::stream::tile::TileFeatureRefs {
+            street_signs: vec![0],
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+        );
+
+        let vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::STREET_SIGN)
         );
     }
 

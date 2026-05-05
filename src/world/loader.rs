@@ -530,33 +530,56 @@ fn append_tree_area_point_features(
     let Some((min_x, min_z, max_x, max_z)) = feature_bbox(area) else {
         return;
     };
-    let mut emitted = 0usize;
+    let mut candidates = Vec::new();
     let mut row = 0usize;
     let mut z = min_z + config.spacing_metres * 0.5;
-    while z <= max_z && emitted < config.max_points {
+    while z <= max_z {
         let row_offset = if row.is_multiple_of(2) {
             0.0
         } else {
             config.spacing_metres * 0.5
         };
         let mut x = min_x + config.spacing_metres * 0.5 + row_offset;
-        while x <= max_x && emitted < config.max_points {
+        while x <= max_x {
             if point_in_polygon((x, z), &area.points) {
-                let (lat, lon) = conv.world_xz_to_lat_lon(x, z);
-                point_features.push(ResolvedPointFeature {
-                    tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
-                    point: (x, z),
-                    elevation: elev(lat, lon),
-                    rep_lat: lat,
-                    rep_lon: lon,
-                });
-                emitted += 1;
+                candidates.push((x, z));
             }
             x += config.spacing_metres;
         }
         row += 1;
         z += config.spacing_metres;
     }
+
+    for (x, z) in evenly_capped_points(&candidates, config.max_points) {
+        let (lat, lon) = conv.world_xz_to_lat_lon(x, z);
+        point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
+            point: (x, z),
+            elevation: elev(lat, lon),
+            rep_lat: lat,
+            rep_lon: lon,
+        });
+    }
+}
+
+fn evenly_capped_points(candidates: &[(f32, f32)], max_points: usize) -> Vec<(f32, f32)> {
+    if candidates.len() <= max_points {
+        return candidates.to_vec();
+    }
+    if max_points == 0 {
+        return Vec::new();
+    }
+    if max_points == 1 {
+        return vec![candidates[candidates.len() / 2]];
+    }
+
+    let last = candidates.len() - 1;
+    (0..max_points)
+        .map(|i| {
+            let index = (i * last + (max_points - 1) / 2) / (max_points - 1);
+            candidates[index]
+        })
+        .collect()
 }
 
 fn point_in_polygon(point: (f32, f32), polygon: &[(f32, f32)]) -> bool {
@@ -1314,6 +1337,58 @@ mod tests {
                 .iter()
                 .all(|feature| { feature.tags.get("natural").map(String::as_str) == Some("tree") })
         );
+    }
+
+    #[test]
+    fn capped_synthetic_trees_are_spread_across_large_green_area() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("large-grass.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.990"/>
+  <node id="3" lat="38.010" lon="-120.990"/>
+  <node id="4" lat="38.010" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="landuse" v="grass"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.point_features.len(), 12);
+        let min_x = source
+            .point_features
+            .iter()
+            .map(|feature| feature.point.0)
+            .fold(f32::INFINITY, f32::min);
+        let max_x = source
+            .point_features
+            .iter()
+            .map(|feature| feature.point.0)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_z = source
+            .point_features
+            .iter()
+            .map(|feature| feature.point.1)
+            .fold(f32::INFINITY, f32::min);
+        let max_z = source
+            .point_features
+            .iter()
+            .map(|feature| feature.point.1)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(max_x - min_x > 500.0, "x span was {}", max_x - min_x);
+        assert!(max_z - min_z > 800.0, "z span was {}", max_z - min_z);
     }
 
     #[test]

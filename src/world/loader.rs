@@ -356,7 +356,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
                 rep_lon,
             });
         }
-        if is_closed && is_tree_area(tags) {
+        if is_closed {
             append_tree_area_point_features(&resolved, &conv, &elev, &mut point_features);
         }
 
@@ -431,7 +431,7 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
                 rep_lon,
             });
         }
-        if !is_water && is_tree_area(tags) {
+        if !is_water {
             append_tree_area_point_features(&resolved, &conv, &elev, &mut point_features);
         }
 
@@ -482,14 +482,36 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
     })
 }
 
-const TREE_AREA_SPACING_METRES: f32 = 28.0;
-const MAX_TREE_AREA_POINT_FEATURES: usize = 120;
+#[derive(Clone, Copy)]
+struct TreeAreaConfig {
+    spacing_metres: f32,
+    max_points: usize,
+}
 
-fn is_tree_area(tags: &HashMap<String, String>) -> bool {
-    matches!(
+fn tree_area_config(tags: &HashMap<String, String>) -> Option<TreeAreaConfig> {
+    if matches!(
         tags.get("landuse").map(String::as_str),
         Some("forest" | "orchard")
     ) || matches!(tags.get("natural").map(String::as_str), Some("wood"))
+    {
+        return Some(TreeAreaConfig {
+            spacing_metres: 28.0,
+            max_points: 120,
+        });
+    }
+    if matches!(
+        tags.get("landuse").map(String::as_str),
+        Some("grass" | "meadow" | "recreation_ground" | "cemetery")
+    ) || matches!(
+        tags.get("leisure").map(String::as_str),
+        Some("park" | "garden")
+    ) {
+        return Some(TreeAreaConfig {
+            spacing_metres: 45.0,
+            max_points: 12,
+        });
+    }
+    None
 }
 
 fn append_tree_area_point_features(
@@ -502,20 +524,23 @@ fn append_tree_area_point_features(
         return;
     }
 
+    let Some(config) = tree_area_config(&area.tags) else {
+        return;
+    };
     let Some((min_x, min_z, max_x, max_z)) = feature_bbox(area) else {
         return;
     };
     let mut emitted = 0usize;
     let mut row = 0usize;
-    let mut z = min_z + TREE_AREA_SPACING_METRES * 0.5;
-    while z <= max_z && emitted < MAX_TREE_AREA_POINT_FEATURES {
+    let mut z = min_z + config.spacing_metres * 0.5;
+    while z <= max_z && emitted < config.max_points {
         let row_offset = if row.is_multiple_of(2) {
             0.0
         } else {
-            TREE_AREA_SPACING_METRES * 0.5
+            config.spacing_metres * 0.5
         };
-        let mut x = min_x + TREE_AREA_SPACING_METRES * 0.5 + row_offset;
-        while x <= max_x && emitted < MAX_TREE_AREA_POINT_FEATURES {
+        let mut x = min_x + config.spacing_metres * 0.5 + row_offset;
+        while x <= max_x && emitted < config.max_points {
             if point_in_polygon((x, z), &area.points) {
                 let (lat, lon) = conv.world_xz_to_lat_lon(x, z);
                 point_features.push(ResolvedPointFeature {
@@ -527,10 +552,10 @@ fn append_tree_area_point_features(
                 });
                 emitted += 1;
             }
-            x += TREE_AREA_SPACING_METRES;
+            x += config.spacing_metres;
         }
         row += 1;
-        z += TREE_AREA_SPACING_METRES;
+        z += config.spacing_metres;
     }
 }
 
@@ -1246,6 +1271,43 @@ mod tests {
 
         assert_eq!(source.landuses.len(), 1);
         assert!(source.point_features.len() > 4);
+        assert!(
+            source
+                .point_features
+                .iter()
+                .all(|feature| { feature.tags.get("natural").map(String::as_str) == Some("tree") })
+        );
+    }
+
+    #[test]
+    fn load_world_source_synthesizes_sparse_trees_for_grass_areas() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("grass.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.998"/>
+  <node id="3" lat="38.002" lon="-120.998"/>
+  <node id="4" lat="38.002" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="landuse" v="grass"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.landuses.len(), 1);
+        assert!(!source.point_features.is_empty());
+        assert!(source.point_features.len() <= 12);
         assert!(
             source
                 .point_features

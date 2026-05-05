@@ -6,11 +6,11 @@ const TREE_TRUNK_COLOR: [f32; 3] = [0.45, 0.24, 0.10];
 const TREE_CANOPY_COLOR: [f32; 3] = [0.16, 0.48, 0.18];
 const LANDMARK_COLOR: [f32; 3] = [0.72, 0.64, 0.45];
 const NATURE_MARKER_COLOR: [f32; 3] = [0.24, 0.42, 0.58];
-const POI_FOOD_COLOR: [f32; 3] = [0.86, 0.28, 0.18];
-const POI_SERVICE_COLOR: [f32; 3] = [0.20, 0.42, 0.86];
-const POI_SHOP_COLOR: [f32; 3] = [0.82, 0.36, 0.78];
-const POI_TOURISM_COLOR: [f32; 3] = [0.92, 0.66, 0.18];
-const POI_LEISURE_COLOR: [f32; 3] = [0.24, 0.68, 0.28];
+const POI_FOOD_COLOR: [f32; 3] = [1.00, 0.30, 0.16];
+const POI_SERVICE_COLOR: [f32; 3] = [0.12, 0.50, 1.00];
+const POI_SHOP_COLOR: [f32; 3] = [1.00, 0.30, 0.92];
+const POI_TOURISM_COLOR: [f32; 3] = [1.00, 0.78, 0.12];
+const POI_LEISURE_COLOR: [f32; 3] = [0.20, 0.90, 0.24];
 const POI_POST_COLOR: [f32; 3] = [0.18, 0.18, 0.18];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -209,19 +209,31 @@ fn append_poi_marker(
         BoxSpec {
             point,
             base_y: elevation,
-            half_extents: (0.18, 0.18),
-            height: 2.0,
+            half_extents: (0.22, 0.22),
+            height: 2.4,
             color: POI_POST_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    let color = poi_color(category);
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation + 2.45,
+            half_extents: (0.85, 0.85),
+            height: 1.25,
+            color,
         },
         verts,
         idxs,
     );
     append_pyramid(
         point,
-        elevation + 2.0,
-        elevation + 3.4,
-        0.9,
-        poi_color(category),
+        elevation + 3.75,
+        elevation + 4.9,
+        1.0,
+        color,
         verts,
         idxs,
     );
@@ -330,15 +342,6 @@ fn append_pyramid(
     let p3 = [x - half_size, base_y, z + half_size];
     let apex = [x, apex_y, z];
 
-    append_quad(
-        QuadFace {
-            positions: [p0, p1, p2, p3],
-            normal: [0.0, -1.0, 0.0],
-        },
-        color,
-        verts,
-        idxs,
-    );
     append_tri(p1, p0, apex, color, verts, idxs);
     append_tri(p2, p1, apex, color, verts, idxs);
     append_tri(p3, p2, apex, color, verts, idxs);
@@ -607,8 +610,35 @@ mod tests {
         assert!(
             verts
                 .iter()
-                .any(|v| approx_color(v.color, [0.86, 0.28, 0.18]))
+                .any(|v| approx_color(v.color, [1.00, 0.30, 0.16]))
         );
+        let colored_top = verts
+            .iter()
+            .filter(|v| approx_color(v.color, [1.00, 0.30, 0.16]))
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(colored_top >= 5.8);
+    }
+
+    #[test]
+    fn tree_canopy_avoids_flat_base_faces_that_z_fight() {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+
+        generate_point_feature(
+            &tags(&[("natural", "tree")]),
+            (2.0, -4.0),
+            1.0,
+            &mut verts,
+            &mut idxs,
+        );
+
+        let canopy_downward_vertices = verts
+            .iter()
+            .filter(|v| approx_color(v.color, [0.16, 0.48, 0.18]))
+            .filter(|v| v.normal[1] < -0.99)
+            .count();
+        assert_eq!(canopy_downward_vertices, 0);
     }
 
     fn approx_color(actual: [f32; 3], expected: [f32; 3]) -> bool {

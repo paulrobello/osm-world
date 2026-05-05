@@ -177,12 +177,13 @@ fn push_sign_for_point(
     if signs_seen_for_road(seen, road_index) >= MAX_SIGNS_PER_ROAD {
         return;
     }
-    let point = road.points[point_index];
-    if !seen.insert((road_index, point_key(point))) {
+    let centerline_point = road.points[point_index];
+    if !seen.insert((road_index, point_key(centerline_point))) {
         return;
     }
     let tangent = tangent_at_point(road, point_index);
-    let elevation = road.elevations.get(point_index).copied().unwrap_or(0.0);
+    let terrain_elevation = road.elevations.get(point_index).copied().unwrap_or(0.0);
+    let (point, elevation) = sign_pose(road, centerline_point, terrain_elevation, tangent);
     signs.push(ResolvedStreetSign {
         name: name.to_string(),
         point,
@@ -204,8 +205,8 @@ fn push_interpolated_sign(
 ) -> bool {
     let p0 = road.points[segment_index];
     let p1 = road.points[segment_index + 1];
-    let point = (p0.0 + (p1.0 - p0.0) * t, p0.1 + (p1.1 - p0.1) * t);
-    if !seen.insert((road_index, point_key(point))) {
+    let centerline_point = (p0.0 + (p1.0 - p0.0) * t, p0.1 + (p1.1 - p0.1) * t);
+    if !seen.insert((road_index, point_key(centerline_point))) {
         return false;
     }
     let e0 = road.elevations.get(segment_index).copied().unwrap_or(0.0);
@@ -214,15 +215,40 @@ fn push_interpolated_sign(
         .get(segment_index + 1)
         .copied()
         .unwrap_or(e0);
+    let terrain_elevation = e0 + (e1 - e0) * t;
+    let tangent = normalize_2d((p1.0 - p0.0, p1.1 - p0.1));
+    let (point, elevation) = sign_pose(road, centerline_point, terrain_elevation, tangent);
     signs.push(ResolvedStreetSign {
         name: name.to_string(),
         point,
-        elevation: e0 + (e1 - e0) * t,
-        tangent: normalize_2d((p1.0 - p0.0, p1.1 - p0.1)),
+        elevation,
+        tangent,
         rep_lat: road.rep_lat,
         rep_lon: road.rep_lon,
     });
     true
+}
+
+fn sign_pose(
+    road: &ResolvedFeature,
+    centerline_point: (f32, f32),
+    terrain_elevation: f32,
+    tangent: (f32, f32),
+) -> ((f32, f32), f32) {
+    const SIGN_ROADSIDE_CLEARANCE: f32 = 1.25;
+    const SIGN_BASE_SURFACE_CLEARANCE: f32 = 0.12;
+
+    let perpendicular = (-tangent.1, tangent.0);
+    let lateral_offset = super::color::road_width(&road.tags) * 0.5 + SIGN_ROADSIDE_CLEARANCE;
+    let point = (
+        centerline_point.0 + perpendicular.0 * lateral_offset,
+        centerline_point.1 + perpendicular.1 * lateral_offset,
+    );
+    let elevation = terrain_elevation
+        + super::road::road_layer_y_offset(&road.tags)
+        + super::road::ROAD_Y_OFFSET
+        + SIGN_BASE_SURFACE_CLEARANCE;
+    (point, elevation)
 }
 
 fn tangent_at_point(road: &ResolvedFeature, point_index: usize) -> (f32, f32) {
@@ -460,15 +486,13 @@ mod tests {
             ),
         ];
         let signs = street_signs_for_roads(&roads);
+        assert!(signs.iter().any(|sign| sign.name == "Main Street"));
+        assert!(signs.iter().any(|sign| sign.name == "Broadway"));
         assert!(
-            signs
-                .iter()
-                .any(|sign| sign.name == "Main Street" && (sign.point.0 - 100.0).abs() < 0.01)
-        );
-        assert!(
-            signs
-                .iter()
-                .any(|sign| sign.name == "Broadway" && (sign.point.0 - 100.0).abs() < 0.01)
+            signs.iter().any(|sign| sign.name == "Broadway"
+                && (sign.point.1 - 0.0).abs() < 0.01
+                && sign.point.0 < 100.0),
+            "Broadway sign should be offset beside the vertical road: {signs:?}"
         );
     }
 
@@ -509,36 +533,33 @@ mod tests {
             ),
         ];
 
-        let expected = vec![
-            ("Main Street", (0.0, 0.0)),
-            ("First Avenue", (0.0, 0.0)),
-            ("Elm Street", (0.0, 0.0)),
-            ("First Avenue", (0.0, 10.0)),
-            ("Cedar Road", (0.0, 10.0)),
-            ("Ash Avenue", (0.0, 10.0)),
-            ("Oak Street", (5.0, 5.0)),
-            ("Pine Street", (5.0, 5.0)),
-            ("Elm Street", (5.0, 5.0)),
-            ("Ash Avenue", (5.0, 5.0)),
-            ("Oak Street", (5.0, 10.0)),
-            ("Cedar Road", (5.0, 10.0)),
-            ("Main Street", (10.0, 0.0)),
-            ("Maple Avenue", (10.0, 0.0)),
-            ("Ash Avenue", (10.0, 0.0)),
-            ("Pine Street", (10.0, 5.0)),
-            ("Maple Avenue", (10.0, 5.0)),
-            ("Maple Avenue", (10.0, 10.0)),
-            ("Cedar Road", (10.0, 10.0)),
-            ("Elm Street", (10.0, 10.0)),
+        let expected_names = vec![
+            "Main Street",
+            "First Avenue",
+            "Elm Street",
+            "First Avenue",
+            "Cedar Road",
+            "Ash Avenue",
+            "Oak Street",
+            "Pine Street",
+            "Elm Street",
+            "Ash Avenue",
+            "Oak Street",
+            "Cedar Road",
+            "Main Street",
+            "Maple Avenue",
+            "Ash Avenue",
+            "Pine Street",
+            "Maple Avenue",
+            "Maple Avenue",
+            "Cedar Road",
+            "Elm Street",
         ];
 
         for _ in 0..8 {
             let signs = street_signs_for_roads(&roads);
-            let actual: Vec<_> = signs
-                .iter()
-                .map(|sign| (sign.name.as_str(), sign.point))
-                .collect();
-            assert_eq!(actual, expected);
+            let actual_names: Vec<_> = signs.iter().map(|sign| sign.name.as_str()).collect();
+            assert_eq!(actual_names, expected_names);
         }
     }
 
@@ -601,6 +622,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn street_signs_are_offset_from_road_centerline_and_above_road_surface() {
+        let terrain_y = 10.0;
+        let roads = vec![ResolvedFeature {
+            tags: tags(&[("name", "Main Street"), ("highway", "residential")]),
+            points: vec![(0.0, 0.0), (400.0, 0.0)],
+            elevations: vec![terrain_y, terrain_y],
+            rep_lat: 38.0,
+            rep_lon: -121.0,
+        }];
+
+        let signs = street_signs_for_roads(&roads);
+        let sign = signs
+            .iter()
+            .find(|sign| sign.name == "Main Street")
+            .expect("expected a periodic street sign");
+
+        assert!(
+            sign.point.1.abs() > super::super::color::road_width(&roads[0].tags) * 0.5,
+            "sign should be placed beside the road, got {:?}",
+            sign.point
+        );
+        assert!(
+            sign.elevation > terrain_y + super::super::road::ROAD_Y_OFFSET,
+            "sign base should sit above the visible road surface, got {}",
+            sign.elevation
+        );
     }
 
     #[test]

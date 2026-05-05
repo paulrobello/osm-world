@@ -13,6 +13,12 @@ Included tags:
 - Trees: `natural=tree`
 - Nature markers: `natural=peak`, `natural=rock`, `natural=spring`
 - Landmarks: `tourism=attraction`, `tourism=viewpoint`, `tourism=artwork`, any `historic=*`, and `man_made=tower`, `man_made=water_tower`, `man_made=chimney`
+- POIs:
+  - Food/drink: `amenity=restaurant`, `cafe`, `bar`, `pub`, `fast_food`
+  - Services: `amenity=school`, `hospital`, `clinic`, `pharmacy`, `bank`, `fuel`, `parking`
+  - Shops: any `shop=*`
+  - Tourism: `tourism=hotel`, `museum`, `guest_house`
+  - Leisure: `leisure=park`, `playground`, `sports_centre`, `pitch`
 
 ## Architecture
 
@@ -31,6 +37,7 @@ Create `src/world/point_feature.rs` with tag classification and mesh generation:
 - Tree: low-poly brown trunk plus green canopy.
 - Landmark: vertical stone/gold marker or simple tower.
 - Nature marker: small colored cone/marker.
+- POI marker: short post plus colored cap. Cap color is category-driven so food, services, shops, tourism, and leisure are visually distinct.
 
 Point features render after roads/railways and before buildings in both full-world and tile mesh paths. Geometry uses existing `Vertex` with a new `feature::POINT_FEATURE` material. Meshes stay intentionally small and deterministic.
 
@@ -46,12 +53,13 @@ Point features render after roads/railways and before buildings in both full-wor
 - Parser tests for tagged XML nodes and PBF-compatible node tag storage where practical.
 - Loader test that tagged OSM nodes become `WorldSource.point_features`.
 - Tile mesh test that point features emit `feature::POINT_FEATURE` vertices.
-- Mesh tests for tree/landmark/nature classification and generated geometry.
+- Mesh tests for tree/landmark/nature/POI classification and generated geometry.
 - Existing `make checkall` and `graphify update .` remain required.
 
 ## Deferred Work
 
 - Labels and icon billboards.
+- Detailed POI-specific icons or text labels.
 - Polygon-derived forests or distributed tree placement.
 - Detailed landmark-specific models.
 - Collision/navigation integration.

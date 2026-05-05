@@ -12,7 +12,9 @@ fn world_direction_on_minimap(
     let map_up = minimap_up(camera, rotate_with_camera);
     let view = glam::Mat4::look_to_rh(glam::Vec3::ZERO, glam::Vec3::NEG_Y, map_up);
     let screen_direction = view.transform_vector3(world_direction);
-    egui::vec2(screen_direction.x, screen_direction.y).normalized()
+    // `look_to_rh(..., NEG_Y, map_up)` produces a view-space +X axis that is
+    // opposite egui's screen-right direction for this top-down overlay.
+    egui::vec2(-screen_direction.x, screen_direction.y).normalized()
 }
 
 fn horizontal_forward(camera: &Flycam) -> glam::Vec3 {
@@ -216,6 +218,21 @@ mod tests {
         camera.yaw = std::f32::consts::PI;
         assert!((compass_heading_degrees(&camera) - 270.0).abs() < 0.001);
         assert_eq!(compass_heading_label(compass_heading_degrees(&camera)), "W");
+    }
+
+    #[test]
+    fn fixed_map_places_east_right_and_west_left() {
+        let mut camera = Flycam::new(1.0);
+        camera.yaw = -std::f32::consts::FRAC_PI_2;
+        camera.pitch = 0.0;
+
+        let east = world_direction_on_minimap(&camera, false, glam::Vec3::X);
+        let west = world_direction_on_minimap(&camera, false, glam::Vec3::NEG_X);
+
+        assert!(east.x > 0.99, "east should be right, got {east:?}");
+        assert!(west.x < -0.99, "west should be left, got {west:?}");
+        assert!(east.y.abs() < 0.001);
+        assert!(west.y.abs() < 0.001);
     }
 
     #[test]

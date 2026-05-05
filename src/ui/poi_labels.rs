@@ -3,6 +3,8 @@ use crate::world::loader::ResolvedPointFeature;
 use crate::world::point_feature::{PointFeatureKind, point_feature_label, point_feature_style};
 
 const MAX_VISIBLE_LABELS: usize = 24;
+const STREET_SIGN_BOARD_LABEL_Y_OFFSET: f32 = 2.56;
+const STREET_SIGN_ON_SIGN_DISTANCE: f32 = 120.0;
 
 #[derive(Clone, Debug)]
 pub struct PoiLabelSettings {
@@ -45,6 +47,20 @@ struct LabelDrawStyle {
     fill: egui::Color32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StreetSignLabelMode {
+    OnSign,
+    FloatingBadge,
+}
+
+fn street_sign_label_mode(distance: f32) -> StreetSignLabelMode {
+    if distance <= STREET_SIGN_ON_SIGN_DISTANCE {
+        StreetSignLabelMode::OnSign
+    } else {
+        StreetSignLabelMode::FloatingBadge
+    }
+}
+
 pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Vec<PoiLabel> {
     point_features
         .iter()
@@ -82,7 +98,11 @@ pub fn labels_from_street_signs(
         .filter(|sign| !sign.name.trim().is_empty())
         .map(|sign| PoiLabel {
             text: sign.name.trim().to_string(),
-            position: glam::vec3(sign.point.0, sign.elevation + 3.2, sign.point.1),
+            position: glam::vec3(
+                sign.point.0,
+                sign.elevation + STREET_SIGN_BOARD_LABEL_Y_OFFSET,
+                sign.point.1,
+            ),
         })
         .collect()
 }
@@ -115,18 +135,43 @@ pub fn draw_street_signs(
     settings: &StreetSignLabelSettings,
     viewport_size: egui::Vec2,
 ) {
-    draw_projected_labels(
-        ctx,
-        camera,
-        labels,
-        settings.visible,
-        settings.max_distance,
-        viewport_size,
-        LabelDrawStyle {
-            id_prefix: "street_sign_label",
-            fill: egui::Color32::from_rgba_unmultiplied(8, 74, 38, 220),
-        },
-    );
+    if !settings.visible || labels.is_empty() {
+        return;
+    }
+
+    let mut visible: Vec<_> = labels
+        .iter()
+        .enumerate()
+        .filter_map(|(index, label)| {
+            let distance = label.position.distance(camera.position);
+            if distance > settings.max_distance {
+                return None;
+            }
+            let screen_pos = project_world_to_screen(camera, label.position, viewport_size)?;
+            Some((distance, index, label, screen_pos))
+        })
+        .collect();
+    visible.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("street_sign_board_labels"),
+    ));
+    for (distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
+        match street_sign_label_mode(distance) {
+            StreetSignLabelMode::OnSign => draw_on_sign_text(&painter, label, screen_pos),
+            StreetSignLabelMode::FloatingBadge => draw_floating_label(
+                ctx,
+                &LabelDrawStyle {
+                    id_prefix: "street_sign_label",
+                    fill: egui::Color32::from_rgba_unmultiplied(8, 74, 38, 220),
+                },
+                index,
+                label,
+                screen_pos,
+            ),
+        }
+    }
 }
 
 fn draw_projected_labels(
@@ -157,24 +202,52 @@ fn draw_projected_labels(
     visible.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     for (_distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
-        egui::Area::new(egui::Id::new((style.id_prefix, index)))
-            .order(egui::Order::Foreground)
-            .interactable(false)
-            .fixed_pos(screen_pos + egui::vec2(8.0, -30.0))
-            .show(ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(style.fill)
-                    .corner_radius(3.0)
-                    .inner_margin(egui::Margin::symmetric(5, 2))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(&label.text)
-                                .color(egui::Color32::WHITE)
-                                .small(),
-                        );
-                    });
-            });
+        draw_floating_label(ctx, &style, index, label, screen_pos);
     }
+}
+
+fn draw_floating_label(
+    ctx: &egui::Context,
+    style: &LabelDrawStyle,
+    index: usize,
+    label: &PoiLabel,
+    screen_pos: egui::Pos2,
+) {
+    egui::Area::new(egui::Id::new((style.id_prefix, index)))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .fixed_pos(screen_pos + egui::vec2(8.0, -30.0))
+        .show(ctx, |ui| {
+            egui::Frame::NONE
+                .fill(style.fill)
+                .corner_radius(3.0)
+                .inner_margin(egui::Margin::symmetric(5, 2))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(&label.text)
+                            .color(egui::Color32::WHITE)
+                            .small(),
+                    );
+                });
+        });
+}
+
+fn draw_on_sign_text(painter: &egui::Painter, label: &PoiLabel, screen_pos: egui::Pos2) {
+    let font = egui::FontId::proportional(12.0);
+    painter.text(
+        screen_pos + egui::vec2(1.0, 1.0),
+        egui::Align2::CENTER_CENTER,
+        &label.text,
+        font.clone(),
+        egui::Color32::from_black_alpha(190),
+    );
+    painter.text(
+        screen_pos,
+        egui::Align2::CENTER_CENTER,
+        &label.text,
+        font,
+        egui::Color32::WHITE,
+    );
 }
 
 fn project_world_to_screen(
@@ -260,7 +333,19 @@ mod tests {
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Main Street");
-        assert_eq!(labels[0].position, glam::vec3(1.0, 6.2, 2.0));
+        assert_eq!(labels[0].position, glam::vec3(1.0, 5.56, 2.0));
+    }
+
+    #[test]
+    fn close_street_sign_labels_draw_on_the_sign_before_floating() {
+        assert_eq!(
+            street_sign_label_mode(STREET_SIGN_ON_SIGN_DISTANCE - 1.0),
+            StreetSignLabelMode::OnSign
+        );
+        assert_eq!(
+            street_sign_label_mode(STREET_SIGN_ON_SIGN_DISTANCE + 1.0),
+            StreetSignLabelMode::FloatingBadge
+        );
     }
 
     #[test]

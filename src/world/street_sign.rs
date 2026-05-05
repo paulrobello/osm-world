@@ -32,17 +32,21 @@ pub fn street_name_for_road(tags: &HashMap<String, String>) -> Option<String> {
 }
 
 fn is_drivable_highway(highway: &str) -> bool {
-    !matches!(
+    matches!(
         highway,
-        "footway"
-            | "path"
-            | "cycleway"
-            | "bridleway"
-            | "steps"
-            | "pedestrian"
-            | "corridor"
-            | "service"
-            | "track"
+        "motorway"
+            | "trunk"
+            | "primary"
+            | "secondary"
+            | "tertiary"
+            | "unclassified"
+            | "residential"
+            | "living_street"
+            | "motorway_link"
+            | "trunk_link"
+            | "primary_link"
+            | "secondary_link"
+            | "tertiary_link"
     )
 }
 
@@ -239,67 +243,93 @@ fn normalize_2d(v: (f32, f32)) -> (f32, f32) {
 
 pub fn append_street_sign(sign: &ResolvedStreetSign, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
     append_oriented_box(
-        sign.point,
-        sign.elevation,
-        (0.08, 0.08),
-        2.4,
-        (1.0, 0.0),
-        SIGN_POST_COLOR,
+        OrientedBoxSpec {
+            point: sign.point,
+            base_y: sign.elevation,
+            half_extents: (0.08, 0.08),
+            height: 2.4,
+            tangent: (1.0, 0.0),
+            color: SIGN_POST_COLOR,
+        },
         verts,
         idxs,
     );
     append_oriented_box(
-        sign.point,
-        sign.elevation + 2.25,
-        (1.45, 0.08),
-        0.62,
-        sign.tangent,
-        SIGN_TRIM_COLOR,
+        OrientedBoxSpec {
+            point: sign.point,
+            base_y: sign.elevation + 2.25,
+            half_extents: (1.45, 0.08),
+            height: 0.62,
+            tangent: sign.tangent,
+            color: SIGN_TRIM_COLOR,
+        },
         verts,
         idxs,
     );
     append_oriented_box(
-        sign.point,
-        sign.elevation + 2.32,
-        (1.32, 0.09),
-        0.48,
-        sign.tangent,
-        SIGN_BOARD_COLOR,
+        OrientedBoxSpec {
+            point: sign.point,
+            base_y: sign.elevation + 2.32,
+            half_extents: (1.32, 0.09),
+            height: 0.48,
+            tangent: sign.tangent,
+            color: SIGN_BOARD_COLOR,
+        },
         verts,
         idxs,
     );
 }
 
-fn append_oriented_box(
+struct OrientedBoxSpec {
     point: (f32, f32),
     base_y: f32,
     half_extents: (f32, f32),
     height: f32,
     tangent: (f32, f32),
     color: [f32; 3],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
-    let t = normalize_2d(tangent);
+}
+
+fn append_oriented_box(spec: OrientedBoxSpec, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+    let t = normalize_2d(spec.tangent);
     let n = (-t.1, t.0);
-    let center = glam::vec3(point.0, base_y, point.1);
-    let hx = half_extents.0;
-    let hz = half_extents.1;
+    let center = glam::vec3(spec.point.0, spec.base_y, spec.point.1);
+    let hx = spec.half_extents.0;
+    let hz = spec.half_extents.1;
     let corners = [
         center + glam::vec3(-t.0 * hx - n.0 * hz, 0.0, -t.1 * hx - n.1 * hz),
         center + glam::vec3(t.0 * hx - n.0 * hz, 0.0, t.1 * hx - n.1 * hz),
         center + glam::vec3(t.0 * hx + n.0 * hz, 0.0, t.1 * hx + n.1 * hz),
         center + glam::vec3(-t.0 * hx + n.0 * hz, 0.0, -t.1 * hx + n.1 * hz),
     ];
-    let top = corners.map(|p| p + glam::vec3(0.0, height, 0.0));
-    append_quad([corners[0], corners[1], top[1], top[0]], color, verts, idxs);
-    append_quad([corners[1], corners[2], top[2], top[1]], color, verts, idxs);
-    append_quad([corners[2], corners[3], top[3], top[2]], color, verts, idxs);
-    append_quad([corners[3], corners[0], top[0], top[3]], color, verts, idxs);
-    append_quad([top[0], top[1], top[2], top[3]], color, verts, idxs);
+    let top = corners.map(|p| p + glam::vec3(0.0, spec.height, 0.0));
+    append_quad(
+        [corners[0], corners[1], top[1], top[0]],
+        spec.color,
+        verts,
+        idxs,
+    );
+    append_quad(
+        [corners[1], corners[2], top[2], top[1]],
+        spec.color,
+        verts,
+        idxs,
+    );
+    append_quad(
+        [corners[2], corners[3], top[3], top[2]],
+        spec.color,
+        verts,
+        idxs,
+    );
+    append_quad(
+        [corners[3], corners[0], top[0], top[3]],
+        spec.color,
+        verts,
+        idxs,
+    );
+    append_quad([top[0], top[1], top[2], top[3]], spec.color, verts, idxs);
     append_quad(
         [corners[3], corners[2], corners[1], corners[0]],
-        color,
+        spec.color,
         verts,
         idxs,
     );
@@ -355,14 +385,29 @@ mod tests {
 
     #[test]
     fn named_drivable_roads_are_eligible() {
-        assert_eq!(
-            street_name_for_road(&tags(&[
-                ("name", "Main Street"),
-                ("highway", "residential")
-            ]))
-            .as_deref(),
-            Some("Main Street")
-        );
+        let drivable_highways = [
+            "motorway",
+            "trunk",
+            "primary",
+            "secondary",
+            "tertiary",
+            "unclassified",
+            "residential",
+            "living_street",
+            "motorway_link",
+            "trunk_link",
+            "primary_link",
+            "secondary_link",
+            "tertiary_link",
+        ];
+        for highway in drivable_highways {
+            assert_eq!(
+                street_name_for_road(&tags(&[("name", "Main Street"), ("highway", highway)]))
+                    .as_deref(),
+                Some("Main Street"),
+                "expected {highway} to be eligible"
+            );
+        }
         assert_eq!(
             street_name_for_road(&tags(&[("name", " Broadway "), ("highway", "primary")]))
                 .as_deref(),
@@ -378,6 +423,14 @@ mod tests {
         );
         assert!(
             street_name_for_road(&tags(&[("name", "Service Road"), ("highway", "service")]))
+                .is_none()
+        );
+        assert!(
+            street_name_for_road(&tags(&[("name", "Future Road"), ("highway", "proposed")]))
+                .is_none()
+        );
+        assert!(
+            street_name_for_road(&tags(&[("name", "Work Zone"), ("highway", "construction")]))
                 .is_none()
         );
     }

@@ -630,6 +630,16 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
         );
     }
 
+    for point_feature in &source.point_features {
+        super::point_feature::generate_point_feature(
+            &point_feature.tags,
+            point_feature.point,
+            point_feature.elevation,
+            verts,
+            idxs,
+        );
+    }
+
     // Buildings
     for b in &source.buildings {
         let color = super::color::building_color(&b.tags);
@@ -644,12 +654,13 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
     }
 
     log::info!(
-        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} water areas, {} landuse areas",
+        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} point features, {} water areas, {} landuse areas",
         verts.len(),
         idxs.len(),
         source.buildings.len(),
         source.roads.len(),
         source.railways.len(),
+        source.point_features.len(),
         source.waters.len(),
         source.landuses.len(),
     );
@@ -768,6 +779,19 @@ fn append_tile_features_mesh(
             &railway.tags,
             &railway.points,
             &railway.elevations,
+            verts,
+            idxs,
+        );
+    }
+
+    for &feature_idx in &refs.point_features {
+        let Some(point_feature) = source.point_features.get(feature_idx) else {
+            continue;
+        };
+        super::point_feature::generate_point_feature(
+            &point_feature.tags,
+            point_feature.point,
+            point_feature.elevation,
             verts,
             idxs,
         );
@@ -1312,6 +1336,56 @@ mod tests {
             vertices
                 .iter()
                 .any(|v| v.feature_type == crate::render::vertex::feature::ROAD_MARKING)
+        );
+    }
+
+    #[test]
+    fn world_mesh_emits_point_feature_geometry() {
+        let mut source = empty_source();
+        source.point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("historic".to_string(), "monument".to_string())]),
+            point: (10.0, -20.0),
+            elevation: 2.0,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+
+        let mesh = generate_world_mesh(&source);
+
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::POINT_FEATURE)
+        );
+    }
+
+    #[test]
+    fn tile_mesh_emits_point_feature_geometry() {
+        let mut source = empty_source();
+        source.point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
+            point: (10.0, -20.0),
+            elevation: 2.0,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        let refs = crate::stream::tile::TileFeatureRefs {
+            point_features: vec![0],
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+        );
+
+        let vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
+        assert!(
+            vertices
+                .iter()
+                .any(|v| v.feature_type == crate::render::vertex::feature::POINT_FEATURE)
         );
     }
 

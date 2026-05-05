@@ -120,8 +120,10 @@ fn get_material(feature: f32) -> Material {
         return Material(0.0, 1.0);            // landuse
     } else if (feature < 5.5) {
         return Material(0.05, 8.0);           // road marking
-    } else {
+    } else if (feature < 6.5) {
         return Material(0.25, 48.0);          // railway
+    } else {
+        return Material(0.12, 24.0);          // point feature
     }
 }
 

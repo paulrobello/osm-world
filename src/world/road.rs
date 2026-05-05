@@ -693,36 +693,9 @@ fn segment_frame(a: Point2, b: Point2) -> Option<SegmentFrame> {
 }
 
 fn append_segment_strip_box(strip: SegmentStripBox, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
-    let Some(frame) = segment_frame(strip.a, strip.b) else {
-        return;
-    };
-    let (px, pz) = frame.perpendicular;
-    let corners = [
-        (
-            strip.a.0 + px * (strip.lateral_offset - strip.half_width),
-            strip.a.1 + pz * (strip.lateral_offset - strip.half_width),
-        ),
-        (
-            strip.a.0 + px * (strip.lateral_offset + strip.half_width),
-            strip.a.1 + pz * (strip.lateral_offset + strip.half_width),
-        ),
-        (
-            strip.b.0 + px * (strip.lateral_offset - strip.half_width),
-            strip.b.1 + pz * (strip.lateral_offset - strip.half_width),
-        ),
-        (
-            strip.b.0 + px * (strip.lateral_offset + strip.half_width),
-            strip.b.1 + pz * (strip.lateral_offset + strip.half_width),
-        ),
-    ];
-    let (min_x, max_x, min_z, max_z) = bounds2d(&corners);
-    append_box(
-        [min_x, strip.min_y, min_z],
-        [max_x, strip.max_y, max_z],
-        strip.color,
-        verts,
-        idxs,
-    );
+    let min_y = strip.min_y;
+    let max_y = strip.max_y;
+    append_sloped_segment_strip_box(strip, min_y, max_y, min_y, max_y, verts, idxs);
 }
 
 fn push_prism_face(
@@ -1296,6 +1269,40 @@ mod tests {
             .map(|v| v.position[1])
             .fold(f32::NEG_INFINITY, f32::max);
         assert!(max_y > min_y + 0.5);
+    }
+
+    #[test]
+    fn segment_strip_box_stays_close_to_diagonal_segment() {
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_segment_strip_box(
+            SegmentStripBox {
+                a: (0.0, 0.0),
+                b: (10.0, 10.0),
+                lateral_offset: 0.0,
+                half_width: 0.5,
+                min_y: 1.0,
+                max_y: 2.0,
+                color: BRIDGE_STRUCTURE_COLOR,
+            },
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(!indices.is_empty());
+        let max_distance_from_segment = vertices
+            .iter()
+            .map(|vertex| {
+                let x = vertex.position[0];
+                let z = vertex.position[2];
+                ((z - x).abs()) / 2.0_f32.sqrt()
+            })
+            .fold(0.0_f32, f32::max);
+
+        assert!(
+            max_distance_from_segment <= 0.51,
+            "diagonal strip expanded into a broad axis-aligned slab: max distance {max_distance_from_segment}"
+        );
     }
 
     #[test]

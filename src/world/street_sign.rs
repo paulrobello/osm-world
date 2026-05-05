@@ -5,7 +5,6 @@ use crate::render::vertex::{Vertex, feature};
 use super::loader::ResolvedFeature;
 
 pub const MAX_SIGNS_PER_ROAD: usize = 6;
-const MAX_STREET_SIGNS: usize = 600;
 const PERIODIC_SIGN_SPACING_METERS: f32 = 260.0;
 const MIN_PERIODIC_ROAD_LENGTH_METERS: f32 = 360.0;
 const INTERSECTION_KEY_SCALE: f32 = 10.0;
@@ -63,7 +62,6 @@ pub fn street_signs_for_roads(roads: &[ResolvedFeature]) -> Vec<ResolvedStreetSi
     let mut seen = HashSet::new();
     add_intersection_signs(&eligible, &mut signs, &mut seen);
     add_periodic_signs(&eligible, &mut signs, &mut seen);
-    signs.truncate(MAX_STREET_SIGNS);
     signs
 }
 
@@ -555,6 +553,28 @@ mod tests {
                 .collect();
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn street_signs_include_later_roads_in_large_areas() {
+        let road_count = 620;
+        let roads: Vec<_> = (0..road_count)
+            .map(|index| {
+                let x = index as f32 * 20.0;
+                road(
+                    &format!("Road {index}"),
+                    "residential",
+                    vec![(x, 0.0), (x, 400.0)],
+                )
+            })
+            .collect();
+
+        let signs = street_signs_for_roads(&roads);
+
+        assert!(
+            signs.iter().any(|sign| sign.name == "Road 619"),
+            "later roads should not be starved by a global truncation cap"
+        );
     }
 
     #[test]

@@ -91,7 +91,18 @@ fn add_intersection_signs(
         }
     }
 
-    for (_key, refs) in point_roads.into_iter().filter(|(_, refs)| refs.len() > 1) {
+    let roads_by_index: HashMap<usize, (&str, &ResolvedFeature)> = roads
+        .iter()
+        .map(|(road_index, name, road)| (*road_index, (name.as_str(), *road)))
+        .collect();
+    let mut intersections: Vec<_> = point_roads
+        .into_iter()
+        .filter(|(_, refs)| refs.len() > 1)
+        .collect();
+    intersections.sort_by_key(|(key, _)| *key);
+
+    for (_key, mut refs) in intersections {
+        refs.sort_unstable();
         let road_count = refs
             .iter()
             .map(|(road_index, _)| *road_index)
@@ -101,8 +112,7 @@ fn add_intersection_signs(
             continue;
         }
         for (road_index, point_index) in refs {
-            let Some((_idx, name, road)) = roads.iter().find(|(idx, _, _)| *idx == road_index)
-            else {
+            let Some(&(name, road)) = roads_by_index.get(&road_index) else {
                 continue;
             };
             push_sign_for_point(signs, seen, road_index, name, road, point_index);
@@ -303,32 +313,32 @@ fn append_oriented_box(spec: OrientedBoxSpec, verts: &mut Vec<Vertex>, idxs: &mu
     ];
     let top = corners.map(|p| p + glam::vec3(0.0, spec.height, 0.0));
     append_quad(
-        [corners[0], corners[1], top[1], top[0]],
+        [corners[0], top[0], top[1], corners[1]],
         spec.color,
         verts,
         idxs,
     );
     append_quad(
-        [corners[1], corners[2], top[2], top[1]],
+        [corners[1], top[1], top[2], corners[2]],
         spec.color,
         verts,
         idxs,
     );
     append_quad(
-        [corners[2], corners[3], top[3], top[2]],
+        [corners[2], top[2], top[3], corners[3]],
         spec.color,
         verts,
         idxs,
     );
     append_quad(
-        [corners[3], corners[0], top[0], top[3]],
+        [corners[3], top[3], top[0], corners[0]],
         spec.color,
         verts,
         idxs,
     );
-    append_quad([top[0], top[1], top[2], top[3]], spec.color, verts, idxs);
+    append_quad([top[0], top[3], top[2], top[1]], spec.color, verts, idxs);
     append_quad(
-        [corners[3], corners[2], corners[1], corners[0]],
+        [corners[0], corners[1], corners[2], corners[3]],
         spec.color,
         verts,
         idxs,
@@ -475,6 +485,116 @@ mod tests {
                 .iter()
                 .any(|sign| sign.name == "Broadway" && (sign.point.0 - 100.0).abs() < 0.01)
         );
+    }
+
+    #[test]
+    fn intersection_signs_are_emitted_in_stable_point_and_road_order() {
+        let roads = vec![
+            road("Main Street", "residential", vec![(0.0, 0.0), (10.0, 0.0)]),
+            road("First Avenue", "primary", vec![(0.0, 0.0), (0.0, 10.0)]),
+            road(
+                "Oak Street",
+                "residential",
+                vec![(5.0, 0.0), (5.0, 5.0), (5.0, 10.0)],
+            ),
+            road(
+                "Pine Street",
+                "residential",
+                vec![(0.0, 5.0), (5.0, 5.0), (10.0, 5.0)],
+            ),
+            road(
+                "Maple Avenue",
+                "primary",
+                vec![(10.0, 0.0), (10.0, 5.0), (10.0, 10.0)],
+            ),
+            road(
+                "Cedar Road",
+                "secondary",
+                vec![(0.0, 10.0), (5.0, 10.0), (10.0, 10.0)],
+            ),
+            road(
+                "Elm Street",
+                "tertiary",
+                vec![(0.0, 0.0), (5.0, 5.0), (10.0, 10.0)],
+            ),
+            road(
+                "Ash Avenue",
+                "residential",
+                vec![(10.0, 0.0), (5.0, 5.0), (0.0, 10.0)],
+            ),
+        ];
+
+        let expected = vec![
+            ("Main Street", (0.0, 0.0)),
+            ("First Avenue", (0.0, 0.0)),
+            ("Elm Street", (0.0, 0.0)),
+            ("First Avenue", (0.0, 10.0)),
+            ("Cedar Road", (0.0, 10.0)),
+            ("Ash Avenue", (0.0, 10.0)),
+            ("Oak Street", (5.0, 5.0)),
+            ("Pine Street", (5.0, 5.0)),
+            ("Elm Street", (5.0, 5.0)),
+            ("Ash Avenue", (5.0, 5.0)),
+            ("Oak Street", (5.0, 10.0)),
+            ("Cedar Road", (5.0, 10.0)),
+            ("Main Street", (10.0, 0.0)),
+            ("Maple Avenue", (10.0, 0.0)),
+            ("Ash Avenue", (10.0, 0.0)),
+            ("Pine Street", (10.0, 5.0)),
+            ("Maple Avenue", (10.0, 5.0)),
+            ("Maple Avenue", (10.0, 10.0)),
+            ("Cedar Road", (10.0, 10.0)),
+            ("Elm Street", (10.0, 10.0)),
+        ];
+
+        for _ in 0..8 {
+            let signs = street_signs_for_roads(&roads);
+            let actual: Vec<_> = signs
+                .iter()
+                .map(|sign| (sign.name.as_str(), sign.point))
+                .collect();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn street_sign_box_face_normals_point_outward() {
+        let sign = ResolvedStreetSign {
+            name: "Main Street".to_string(),
+            point: (10.0, -20.0),
+            elevation: 2.0,
+            tangent: (1.0, 0.0),
+            rep_lat: 38.0,
+            rep_lon: -121.0,
+        };
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        append_street_sign(&sign, &mut vertices, &mut indices);
+
+        let component_centers = [
+            glam::vec3(sign.point.0, sign.elevation + 1.2, sign.point.1),
+            glam::vec3(sign.point.0, sign.elevation + 2.56, sign.point.1),
+            glam::vec3(sign.point.0, sign.elevation + 2.56, sign.point.1),
+        ];
+
+        for (component_index, center) in component_centers.into_iter().enumerate() {
+            let vertex_start = component_index * 24;
+            for face_index in 0..6 {
+                let face_start = vertex_start + face_index * 4;
+                let face_vertices = &vertices[face_start..face_start + 4];
+                let face_center = face_vertices
+                    .iter()
+                    .map(|vertex| glam::Vec3::from_array(vertex.position))
+                    .sum::<glam::Vec3>()
+                    / 4.0;
+                let normal = glam::Vec3::from_array(face_vertices[0].normal);
+
+                assert!(
+                    normal.dot(face_center - center) > 0.0,
+                    "component {component_index} face {face_index} normal {normal:?} points inward from center {center:?} to face {face_center:?}"
+                );
+            }
+        }
     }
 
     #[test]

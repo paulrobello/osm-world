@@ -159,6 +159,7 @@ impl ApplicationHandler for App {
                             day_cycle: &mut self.day_cycle,
                             show_settings: &mut self.show_settings,
                             minimap: &mut self.minimap,
+                            poi_labels: &mut self.poi_labels,
                             performance: &mut self.performance,
                         },
                     );

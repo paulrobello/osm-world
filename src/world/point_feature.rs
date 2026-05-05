@@ -153,42 +153,48 @@ pub fn generate_point_feature(
 }
 
 fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
-    append_box(
-        BoxSpec {
-            point,
-            base_y: elevation,
-            half_extents: (0.45, 0.45),
-            height: 2.2,
-            color: TREE_TRUNK_COLOR,
-        },
-        verts,
-        idxs,
-    );
-    append_low_poly_canopy(point, elevation + 1.45, verts, idxs);
+    append_hex_trunk(point, elevation, 0.65, 3.0, verts, idxs);
+    append_icosphere_canopy(point, elevation + 4.2, 2.0, verts, idxs);
 }
 
-fn append_low_poly_canopy(
+fn append_hex_trunk(
     point: (f32, f32),
     base_y: f32,
+    radius: f32,
+    height: f32,
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
-    let lower = canopy_ring(point, base_y, 2.0, 0.0);
-    let middle = canopy_ring(point, base_y + 1.7, 1.55, std::f32::consts::FRAC_PI_8);
-    let upper = canopy_ring(point, base_y + 2.8, 0.85, 0.0);
-    let apex = [point.0, base_y + 3.9, point.1];
-
-    append_ring_band(point, &lower, &middle, TREE_CANOPY_COLOR, verts, idxs);
-    append_ring_band(point, &middle, &upper, [0.13, 0.42, 0.15], verts, idxs);
-    for i in 0..upper.len() {
-        let next = (i + 1) % upper.len();
-        append_tri(upper[next], upper[i], apex, [0.18, 0.55, 0.20], verts, idxs);
+    let bottom = hex_ring(point, base_y, radius);
+    let top = hex_ring(point, base_y + height, radius * 0.82);
+    for i in 0..bottom.len() {
+        let next = (i + 1) % bottom.len();
+        let p0 = bottom[i];
+        let p1 = bottom[next];
+        let p2 = top[next];
+        let p3 = top[i];
+        let face_center = (glam::Vec3::from_array(p0)
+            + glam::Vec3::from_array(p1)
+            + glam::Vec3::from_array(p2)
+            + glam::Vec3::from_array(p3))
+            / 4.0;
+        let normal =
+            glam::vec3(face_center.x - point.0, 0.0, face_center.z - point.1).normalize_or_zero();
+        append_quad(
+            QuadFace {
+                positions: [p0, p1, p2, p3],
+                normal: normal.to_array(),
+            },
+            TREE_TRUNK_COLOR,
+            verts,
+            idxs,
+        );
     }
 }
 
-fn canopy_ring(point: (f32, f32), y: f32, radius: f32, phase: f32) -> [[f32; 3]; 8] {
+fn hex_ring(point: (f32, f32), y: f32, radius: f32) -> [[f32; 3]; 6] {
     std::array::from_fn(|i| {
-        let angle = phase + i as f32 * std::f32::consts::TAU / 8.0;
+        let angle = std::f32::consts::FRAC_PI_6 + i as f32 * std::f32::consts::TAU / 6.0;
         [
             point.0 + angle.cos() * radius,
             y,
@@ -197,42 +203,65 @@ fn canopy_ring(point: (f32, f32), y: f32, radius: f32, phase: f32) -> [[f32; 3];
     })
 }
 
-fn append_ring_band(
+fn append_icosphere_canopy(
     point: (f32, f32),
-    lower: &[[f32; 3]; 8],
-    upper: &[[f32; 3]; 8],
-    color: [f32; 3],
+    center_y: f32,
+    radius: f32,
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
-    for i in 0..lower.len() {
-        let next = (i + 1) % lower.len();
-        let p0 = lower[i];
-        let p1 = lower[next];
-        let p2 = upper[next];
-        let p3 = upper[i];
-        let face_center = (glam::Vec3::from_array(p0)
-            + glam::Vec3::from_array(p1)
-            + glam::Vec3::from_array(p2)
-            + glam::Vec3::from_array(p3))
-            / 4.0;
-        let desired =
-            glam::vec3(face_center.x - point.0, 0.0, face_center.z - point.1).normalize_or_zero();
-        let mut normal = glam::Vec3::from_array(triangle_normal(p0, p1, p2));
-        if normal.dot(desired) < 0.0 {
-            normal = -normal;
-        }
-        append_quad(
-            QuadFace {
-                positions: [p0, p1, p2, p3],
-                normal: normal.to_array(),
-            },
-            color,
+    let center = glam::vec3(point.0, center_y, point.1);
+    let phi = (1.0 + 5.0_f32.sqrt()) * 0.5;
+    let raw = [
+        glam::vec3(-1.0, phi, 0.0),
+        glam::vec3(1.0, phi, 0.0),
+        glam::vec3(-1.0, -phi, 0.0),
+        glam::vec3(1.0, -phi, 0.0),
+        glam::vec3(0.0, -1.0, phi),
+        glam::vec3(0.0, 1.0, phi),
+        glam::vec3(0.0, -1.0, -phi),
+        glam::vec3(0.0, 1.0, -phi),
+        glam::vec3(phi, 0.0, -1.0),
+        glam::vec3(phi, 0.0, 1.0),
+        glam::vec3(-phi, 0.0, -1.0),
+        glam::vec3(-phi, 0.0, 1.0),
+    ];
+    let points = raw.map(|p| (center + p.normalize() * radius).to_array());
+    for [a, b, c] in ICOSPHERE_FACES {
+        append_outward_tri(
+            center,
+            points[a],
+            points[b],
+            points[c],
+            TREE_CANOPY_COLOR,
             verts,
             idxs,
         );
     }
 }
+
+const ICOSPHERE_FACES: [[usize; 3]; 20] = [
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
+];
 
 fn append_landmark(
     point: (f32, f32),
@@ -445,6 +474,26 @@ fn append_quad(face: QuadFace, color: [f32; 3], verts: &mut Vec<Vertex>, idxs: &
         idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     } else {
         idxs.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+}
+
+fn append_outward_tri(
+    center: glam::Vec3,
+    p0: [f32; 3],
+    p1: [f32; 3],
+    p2: [f32; 3],
+    color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let face_center =
+        (glam::Vec3::from_array(p0) + glam::Vec3::from_array(p1) + glam::Vec3::from_array(p2))
+            / 3.0;
+    let normal = glam::Vec3::from_array(triangle_normal(p0, p1, p2));
+    if normal.dot(face_center - center) >= 0.0 {
+        append_tri(p0, p1, p2, color, verts, idxs);
+    } else {
+        append_tri(p0, p2, p1, color, verts, idxs);
     }
 }
 
@@ -699,6 +748,56 @@ mod tests {
             .map(|v| v.position[1])
             .fold(f32::NEG_INFINITY, f32::max);
         assert!(colored_top >= 5.8);
+    }
+
+    #[test]
+    fn tree_trunk_is_visible_hexagonal_prism() {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+
+        generate_point_feature(
+            &tags(&[("natural", "tree")]),
+            (2.0, -4.0),
+            1.0,
+            &mut verts,
+            &mut idxs,
+        );
+
+        let trunk_verts: Vec<_> = verts
+            .iter()
+            .filter(|v| approx_color(v.color, [0.45, 0.24, 0.10]))
+            .collect();
+        assert_eq!(trunk_verts.len(), 24);
+        let min_y = trunk_verts
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::INFINITY, f32::min);
+        let max_y = trunk_verts
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!((min_y - 1.0).abs() < 0.001);
+        assert!((max_y - 4.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn tree_canopy_is_low_poly_icosphere() {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+
+        generate_point_feature(
+            &tags(&[("natural", "tree")]),
+            (2.0, -4.0),
+            1.0,
+            &mut verts,
+            &mut idxs,
+        );
+
+        let canopy_triangles = idxs
+            .chunks_exact(3)
+            .filter(|tri| approx_color(verts[tri[0] as usize].color, [0.16, 0.48, 0.18]))
+            .count();
+        assert_eq!(canopy_triangles, 20);
     }
 
     #[test]

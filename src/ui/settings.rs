@@ -6,6 +6,7 @@ pub fn draw(
     day: &mut crate::atmosphere::DayCycleState,
     performance: &mut crate::app::PerformanceState,
     minimap: &mut crate::ui::minimap::MinimapState,
+    poi_labels: &mut crate::ui::poi_labels::PoiLabelSettings,
     show: &mut bool,
 ) {
     egui::Window::new("Settings")
@@ -16,6 +17,7 @@ pub fn draw(
                 day_cycle_section(ui, day, atm);
                 performance_section(ui, performance);
                 minimap_section(ui, minimap);
+                poi_labels_section(ui, poi_labels);
                 clouds_section(ui, atm);
                 fog_section(ui, atm);
                 sky_colors_section(ui, atm);
@@ -71,6 +73,19 @@ fn minimap_section(ui: &mut egui::Ui, minimap: &mut crate::ui::minimap::MinimapS
         .show(ui, |ui| {
             ui.checkbox(&mut minimap.visible, "Visible");
             ui.checkbox(&mut minimap.rotate_with_camera, "Rotate map with camera");
+        });
+}
+
+fn poi_labels_section(ui: &mut egui::Ui, poi_labels: &mut crate::ui::poi_labels::PoiLabelSettings) {
+    CollapsingHeader::new(RichText::new("POI Labels").strong())
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.checkbox(&mut poi_labels.visible, "Visible");
+            ui.add(
+                Slider::new(&mut poi_labels.max_distance, 50.0..=2000.0)
+                    .step_by(25.0)
+                    .text("Max distance (m)"),
+            );
         });
 }
 

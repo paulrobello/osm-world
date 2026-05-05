@@ -2,8 +2,22 @@ use crate::camera::Flycam;
 use crate::world::loader::ResolvedPointFeature;
 use crate::world::point_feature::{PointFeatureKind, point_feature_label, point_feature_style};
 
-const MAX_LABEL_DISTANCE: f32 = 1_500.0;
 const MAX_VISIBLE_LABELS: usize = 24;
+
+#[derive(Clone, Debug)]
+pub struct PoiLabelSettings {
+    pub visible: bool,
+    pub max_distance: f32,
+}
+
+impl Default for PoiLabelSettings {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            max_distance: 300.0,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PoiLabel {
@@ -40,8 +54,14 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
         .collect()
 }
 
-pub fn draw(ctx: &egui::Context, camera: &Flycam, labels: &[PoiLabel], viewport_size: egui::Vec2) {
-    if labels.is_empty() {
+pub fn draw(
+    ctx: &egui::Context,
+    camera: &Flycam,
+    labels: &[PoiLabel],
+    settings: &PoiLabelSettings,
+    viewport_size: egui::Vec2,
+) {
+    if !settings.visible || labels.is_empty() {
         return;
     }
 
@@ -50,7 +70,7 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, labels: &[PoiLabel], viewport_
         .enumerate()
         .filter_map(|(index, label)| {
             let distance = label.position.distance(camera.position);
-            if distance > MAX_LABEL_DISTANCE {
+            if distance > settings.max_distance {
                 return None;
             }
             let screen_pos = project_world_to_screen(camera, label.position, viewport_size)?;
@@ -138,6 +158,14 @@ mod tests {
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Taco Bell");
         assert_eq!(labels[0].position, glam::vec3(1.0, 8.4, 2.0));
+    }
+
+    #[test]
+    fn label_settings_default_to_nearby_labels_only() {
+        let settings = PoiLabelSettings::default();
+
+        assert!(settings.visible);
+        assert_eq!(settings.max_distance, 300.0);
     }
 
     #[test]

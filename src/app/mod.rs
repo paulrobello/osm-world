@@ -90,6 +90,7 @@ pub struct App {
     pub performance: PerformanceState,
     pub show_settings: bool,
     pub minimap: crate::ui::minimap::MinimapState,
+    pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
 }
 
 impl App {
@@ -117,6 +118,7 @@ impl App {
             day_cycle,
             performance: PerformanceState::default(),
             minimap: crate::ui::minimap::MinimapState::default(),
+            poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
         }
     }
 }

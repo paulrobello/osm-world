@@ -12,6 +12,7 @@ pub struct RenderUiState<'a> {
     pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
     pub show_settings: &'a mut bool,
     pub minimap: &'a mut crate::ui::minimap::MinimapState,
+    pub poi_labels: &'a mut crate::ui::poi_labels::PoiLabelSettings,
     pub performance: &'a mut crate::app::PerformanceState,
 }
 
@@ -262,7 +263,13 @@ pub fn render(
             ui_state.day_cycle,
             ui_state.performance,
         );
-        crate::ui::poi_labels::draw(ctx, &state.camera, &state.poi_labels, viewport_size);
+        crate::ui::poi_labels::draw(
+            ctx,
+            &state.camera,
+            &state.poi_labels,
+            ui_state.poi_labels,
+            viewport_size,
+        );
         if *ui_state.show_settings {
             crate::ui::settings::draw(
                 ctx,
@@ -270,6 +277,7 @@ pub fn render(
                 ui_state.day_cycle,
                 ui_state.performance,
                 ui_state.minimap,
+                ui_state.poi_labels,
                 ui_state.show_settings,
             );
         }

@@ -6,6 +6,8 @@ pub mod update;
 
 use crate::camera::CameraController;
 
+const PREFS_SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub use init::AppState;
 
 #[derive(Clone, Debug)]
@@ -92,6 +94,8 @@ pub struct App {
     pub show_settings: bool,
     pub minimap: crate::ui::minimap::MinimapState,
     pub persisted_minimap: crate::app::prefs::MinimapPrefs,
+    pub persisted_camera: Option<crate::app::prefs::CameraPrefs>,
+    pub last_prefs_save: std::time::Instant,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
 }
@@ -126,6 +130,8 @@ impl App {
             performance: PerformanceState::default(),
             minimap,
             persisted_minimap: prefs.minimap,
+            persisted_camera: prefs.camera,
+            last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
             street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
         }

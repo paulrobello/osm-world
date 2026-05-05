@@ -16,6 +16,7 @@ impl ApplicationHandler for App {
                 self.opts.input_path.as_deref(),
                 self.opts.srtm_dir.as_deref(),
                 self.opts.cam_override.as_ref(),
+                self.persisted_camera.as_ref(),
             ) {
                 Ok((state, egui)) => {
                     log::info!("WGPU initialized: {:?}", state.device.adapter_info());
@@ -50,7 +51,7 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                self.persist_minimap_preferences_if_changed();
+                self.persist_preferences_if_changed(true);
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
@@ -165,7 +166,7 @@ impl ApplicationHandler for App {
                             performance: &mut self.performance,
                         },
                     );
-                    self.persist_minimap_preferences_if_changed();
+                    self.persist_preferences_if_changed(false);
                 }
 
                 if screenshot_path.is_some() {
@@ -173,6 +174,7 @@ impl ApplicationHandler for App {
                 }
 
                 if self.check_auto_exit() {
+                    self.persist_preferences_if_changed(true);
                     event_loop.exit();
                     return;
                 }
@@ -218,18 +220,37 @@ impl App {
         }
     }
 
-    fn persist_minimap_preferences_if_changed(&mut self) {
+    fn persist_preferences_if_changed(&mut self, force: bool) {
         let minimap = crate::app::prefs::MinimapPrefs::from_minimap_state(&self.minimap);
-        if minimap == self.persisted_minimap {
+        let camera = self
+            .state
+            .as_ref()
+            .map(|state| crate::app::prefs::CameraPrefs::from_camera(&state.camera))
+            .or_else(|| self.persisted_camera.clone());
+        let minimap_changed = minimap != self.persisted_minimap;
+        let camera_changed = camera != self.persisted_camera;
+        if !minimap_changed && !camera_changed {
+            return;
+        }
+        if camera_changed
+            && !minimap_changed
+            && !force
+            && self.last_prefs_save.elapsed() < super::PREFS_SAVE_INTERVAL
+        {
             return;
         }
 
         let prefs = crate::app::prefs::UserPrefs {
             minimap: minimap.clone(),
+            camera: camera.clone(),
         };
         match crate::app::prefs::save_user_prefs(&prefs) {
-            Ok(()) => self.persisted_minimap = minimap,
-            Err(err) => log::warn!("Failed to save minimap preferences: {err}"),
+            Ok(()) => {
+                self.persisted_minimap = minimap;
+                self.persisted_camera = camera;
+                self.last_prefs_save = std::time::Instant::now();
+            }
+            Err(err) => log::warn!("Failed to save preferences: {err}"),
         }
     }
 

@@ -42,6 +42,7 @@ pub fn init_wgpu(
     input_path: Option<&str>,
     srtm_dir: Option<&str>,
     cam_override: Option<&crate::camera::CameraOverride>,
+    persisted_camera: Option<&crate::app::prefs::CameraPrefs>,
 ) -> anyhow::Result<(AppState, crate::ui::EguiState)> {
     let window = Arc::new(
         event_loop.create_window(
@@ -131,9 +132,8 @@ pub fn init_wgpu(
             let street_sign_labels =
                 crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
             let world = crate::world::loader::generate_world_mesh(&source);
-            camera.position = glam::Vec3::new(5645.5, 122.8, -10505.8);
-            camera.yaw = (-124.80_f32).to_radians();
-            camera.pitch = (-16.30_f32).to_radians();
+            apply_default_input_camera(&mut camera);
+            apply_persisted_camera_if_allowed(&mut camera, persisted_camera, cam_override);
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
             }
@@ -190,6 +190,38 @@ pub fn init_wgpu(
         },
         egui,
     ))
+}
+
+fn apply_default_input_camera(camera: &mut Flycam) {
+    camera.position = glam::Vec3::new(5645.5, 122.8, -10505.8);
+    camera.yaw = (-124.80_f32).to_radians();
+    camera.pitch = (-16.30_f32).to_radians();
+}
+
+fn apply_persisted_camera_if_allowed(
+    camera: &mut Flycam,
+    persisted_camera: Option<&crate::app::prefs::CameraPrefs>,
+    cam_override: Option<&crate::camera::CameraOverride>,
+) {
+    if has_camera_override(cam_override) {
+        return;
+    }
+    if let Some(persisted_camera) = persisted_camera {
+        persisted_camera.apply_to_camera(camera);
+    }
+}
+
+fn has_camera_override(cam_override: Option<&crate::camera::CameraOverride>) -> bool {
+    let Some(ov) = cam_override else {
+        return false;
+    };
+    ov.x.is_some()
+        || ov.y.is_some()
+        || ov.z.is_some()
+        || ov.yaw.is_some()
+        || ov.pitch.is_some()
+        || ov.spawn_lat.is_some()
+        || ov.spawn_lon.is_some()
 }
 
 fn camera_spawn_lat_lon(
@@ -263,6 +295,52 @@ mod tests {
 
         assert!(camera_spawn_lat_lon(Some(&lat_only)).is_err());
         assert!(camera_spawn_lat_lon(Some(&lon_only)).is_err());
+    }
+
+    #[test]
+    fn persisted_camera_applies_when_no_camera_override_is_present() {
+        let mut camera = Flycam::new(1.0);
+        apply_default_input_camera(&mut camera);
+        let prefs = crate::app::prefs::CameraPrefs {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+            yaw: 1.0,
+            pitch: -0.5,
+        };
+
+        apply_persisted_camera_if_allowed(&mut camera, Some(&prefs), None);
+
+        assert_eq!(camera.position, glam::vec3(10.0, 20.0, 30.0));
+        assert_eq!(camera.yaw, 1.0);
+        assert_eq!(camera.pitch, -0.5);
+    }
+
+    #[test]
+    fn explicit_spawn_override_skips_persisted_camera() {
+        let mut camera = Flycam::new(1.0);
+        apply_default_input_camera(&mut camera);
+        let before = camera.position;
+        let prefs = crate::app::prefs::CameraPrefs {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+            yaw: 1.0,
+            pitch: -0.5,
+        };
+        let override_with_spawn = crate::camera::CameraOverride {
+            x: None,
+            y: None,
+            z: None,
+            yaw: None,
+            pitch: None,
+            spawn_lat: Some(38.65671),
+            spawn_lon: Some(-121.72179),
+        };
+
+        apply_persisted_camera_if_allowed(&mut camera, Some(&prefs), Some(&override_with_spawn));
+
+        assert_eq!(camera.position, before);
     }
 
     #[test]

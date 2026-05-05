@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct UserPrefs {
     pub minimap: MinimapPrefs,
+    pub camera: Option<CameraPrefs>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -37,6 +38,33 @@ impl MinimapPrefs {
         state.visible = self.visible;
         state.zoom = self.zoom;
         state.rotate_with_camera = self.rotate_with_camera;
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct CameraPrefs {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+impl CameraPrefs {
+    pub fn from_camera(camera: &crate::camera::Flycam) -> Self {
+        Self {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z,
+            yaw: camera.yaw,
+            pitch: camera.pitch,
+        }
+    }
+
+    pub fn apply_to_camera(&self, camera: &mut crate::camera::Flycam) {
+        camera.position = glam::vec3(self.x, self.y, self.z);
+        camera.yaw = self.yaw;
+        camera.pitch = self.pitch;
     }
 }
 
@@ -101,12 +129,36 @@ mod tests {
                 zoom: 875.0,
                 rotate_with_camera: true,
             },
+            camera: Some(CameraPrefs {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+                yaw: 4.0,
+                pitch: 5.0,
+            }),
         };
 
         save_user_prefs_to_path(&prefs, &path).unwrap();
         let loaded = load_user_prefs_from_path(&path).unwrap();
 
         assert_eq!(loaded, prefs);
+    }
+
+    #[test]
+    fn camera_prefs_round_trip_through_camera() {
+        let mut camera = crate::camera::Flycam::new(1.6);
+        camera.position = glam::vec3(12.0, 34.0, -56.0);
+        camera.yaw = 1.25;
+        camera.pitch = -0.35;
+        let prefs = CameraPrefs::from_camera(&camera);
+
+        let mut restored = crate::camera::Flycam::new(1.6);
+        prefs.apply_to_camera(&mut restored);
+
+        assert_eq!(restored.position, camera.position);
+        assert_eq!(restored.yaw, camera.yaw);
+        assert_eq!(restored.pitch, camera.pitch);
+        assert_eq!(restored.aspect, 1.6);
     }
 
     #[test]

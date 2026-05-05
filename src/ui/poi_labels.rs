@@ -271,19 +271,19 @@ fn street_sign_text_world_quads(
     const GLYPH_ROWS: usize = 7;
     const GLYPH_GAP_COLUMNS: usize = 1;
     const CELL_FILL: f32 = 0.82;
+    const MIN_READABLE_FACE_DOT: f32 = 0.18;
 
     let text = label.text.trim().to_uppercase();
     if text.is_empty() {
         return Vec::new();
     }
 
+    let char_count = text.chars().count();
     let total_columns = text
         .chars()
         .enumerate()
         .fold(0usize, |columns, (index, ch)| {
-            columns
-                + glyph_width(ch)
-                + usize::from(index + 1 < text.chars().count()) * GLYPH_GAP_COLUMNS
+            columns + glyph_width(ch) + usize::from(index + 1 < char_count) * GLYPH_GAP_COLUMNS
         });
     if total_columns == 0 {
         return Vec::new();
@@ -296,13 +296,17 @@ fn street_sign_text_world_quads(
     let text_height = GLYPH_ROWS as f32 * cell;
 
     let tangent = normalize_label_tangent(label.tangent);
-    let right = glam::vec3(tangent.0, 0.0, tangent.1);
+    let sign_right = glam::vec3(tangent.0, 0.0, tangent.1);
     let normal_candidate = glam::vec3(-tangent.1, 0.0, tangent.0);
-    let camera_side = (camera_position - label.position).dot(normal_candidate);
-    let face_normal = if camera_side >= 0.0 {
-        normal_candidate
+    let to_camera = (camera_position - label.position).normalize_or_zero();
+    let camera_side = to_camera.dot(normal_candidate);
+    if camera_side.abs() < MIN_READABLE_FACE_DOT {
+        return Vec::new();
+    }
+    let (face_normal, right) = if camera_side >= 0.0 {
+        (normal_candidate, sign_right)
     } else {
-        -normal_candidate
+        (-normal_candidate, -sign_right)
     };
     let up = glam::Vec3::Y;
     let origin = label.position + face_normal * TEXT_FACE_OFFSET - right * (text_width * 0.5)
@@ -602,6 +606,44 @@ mod tests {
             "glyphs should advance along the sign tangent, z range was {}",
             max_z - min_z
         );
+    }
+
+    #[test]
+    fn street_sign_text_flips_horizontally_on_back_face() {
+        let label = StreetSignLabel {
+            text: "A".to_string(),
+            position: glam::Vec3::ZERO,
+            tangent: (0.0, 1.0),
+        };
+
+        let front = street_sign_text_world_quads(&label, glam::vec3(-10.0, 0.0, 0.0));
+        let back = street_sign_text_world_quads(&label, glam::vec3(10.0, 0.0, 0.0));
+
+        assert!(!front.is_empty());
+        assert!(!back.is_empty());
+        let front_first_z = front[0][0].z;
+        let back_first_z = back[0][0].z;
+        assert!(
+            front_first_z < 0.0,
+            "front text should start on the left side of the front face"
+        );
+        assert!(
+            back_first_z > 0.0,
+            "back text should flip its horizontal basis so it reads from behind"
+        );
+    }
+
+    #[test]
+    fn street_sign_text_is_hidden_at_grazing_angles() {
+        let label = StreetSignLabel {
+            text: "A".to_string(),
+            position: glam::Vec3::ZERO,
+            tangent: (0.0, 1.0),
+        };
+
+        let quads = street_sign_text_world_quads(&label, glam::vec3(0.01, 0.0, 10.0));
+
+        assert!(quads.is_empty());
     }
 
     #[test]

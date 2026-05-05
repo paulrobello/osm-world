@@ -41,3 +41,4 @@ test_images/
 graphify-out/
 statusline-*.json
 .superpowers/
+.worktrees/

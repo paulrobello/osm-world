@@ -42,6 +42,13 @@ pub struct PoiLabel {
     pub position: glam::Vec3,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct StreetSignLabel {
+    pub text: String,
+    pub position: glam::Vec3,
+    pub tangent: (f32, f32),
+}
+
 struct LabelDrawStyle {
     id_prefix: &'static str,
     fill: egui::Color32,
@@ -92,17 +99,18 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
 
 pub fn labels_from_street_signs(
     street_signs: &[crate::world::street_sign::ResolvedStreetSign],
-) -> Vec<PoiLabel> {
+) -> Vec<StreetSignLabel> {
     street_signs
         .iter()
         .filter(|sign| !sign.name.trim().is_empty())
-        .map(|sign| PoiLabel {
+        .map(|sign| StreetSignLabel {
             text: sign.name.trim().to_string(),
             position: glam::vec3(
                 sign.point.0,
                 sign.elevation + STREET_SIGN_BOARD_LABEL_Y_OFFSET,
                 sign.point.1,
             ),
+            tangent: sign.tangent,
         })
         .collect()
 }
@@ -131,7 +139,7 @@ pub fn draw(
 pub fn draw_street_signs(
     ctx: &egui::Context,
     camera: &Flycam,
-    labels: &[PoiLabel],
+    labels: &[StreetSignLabel],
     settings: &StreetSignLabelSettings,
     viewport_size: egui::Vec2,
 ) {
@@ -159,7 +167,9 @@ pub fn draw_street_signs(
     ));
     for (distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
         match street_sign_label_mode(distance) {
-            StreetSignLabelMode::OnSign => draw_on_sign_text(&painter, label, screen_pos),
+            StreetSignLabelMode::OnSign => {
+                draw_on_sign_text(&painter, camera, label, viewport_size)
+            }
             StreetSignLabelMode::FloatingBadge => draw_floating_label(
                 ctx,
                 &LabelDrawStyle {
@@ -167,7 +177,7 @@ pub fn draw_street_signs(
                     fill: egui::Color32::from_rgba_unmultiplied(8, 74, 38, 220),
                 },
                 index,
-                label,
+                &label.text,
                 screen_pos,
             ),
         }
@@ -202,7 +212,7 @@ fn draw_projected_labels(
     visible.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     for (_distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
-        draw_floating_label(ctx, &style, index, label, screen_pos);
+        draw_floating_label(ctx, &style, index, &label.text, screen_pos);
     }
 }
 
@@ -210,7 +220,7 @@ fn draw_floating_label(
     ctx: &egui::Context,
     style: &LabelDrawStyle,
     index: usize,
-    label: &PoiLabel,
+    text: &str,
     screen_pos: egui::Pos2,
 ) {
     egui::Area::new(egui::Id::new((style.id_prefix, index)))
@@ -224,7 +234,7 @@ fn draw_floating_label(
                 .inner_margin(egui::Margin::symmetric(5, 2))
                 .show(ui, |ui| {
                     ui.label(
-                        egui::RichText::new(&label.text)
+                        egui::RichText::new(text)
                             .color(egui::Color32::WHITE)
                             .small(),
                     );
@@ -232,22 +242,246 @@ fn draw_floating_label(
         });
 }
 
-fn draw_on_sign_text(painter: &egui::Painter, label: &PoiLabel, screen_pos: egui::Pos2) {
-    let font = egui::FontId::proportional(12.0);
-    painter.text(
-        screen_pos + egui::vec2(1.0, 1.0),
-        egui::Align2::CENTER_CENTER,
-        &label.text,
-        font.clone(),
-        egui::Color32::from_black_alpha(190),
-    );
-    painter.text(
-        screen_pos,
-        egui::Align2::CENTER_CENTER,
-        &label.text,
-        font,
-        egui::Color32::WHITE,
-    );
+fn draw_on_sign_text(
+    painter: &egui::Painter,
+    camera: &Flycam,
+    label: &StreetSignLabel,
+    viewport_size: egui::Vec2,
+) {
+    for quad in street_sign_text_world_quads(label, camera.position) {
+        let Some(points) = project_world_quad_to_screen(camera, quad, viewport_size) else {
+            continue;
+        };
+        painter.add(egui::Shape::convex_polygon(
+            points.to_vec(),
+            egui::Color32::WHITE,
+            egui::Stroke::NONE,
+        ));
+    }
+}
+
+fn street_sign_text_world_quads(
+    label: &StreetSignLabel,
+    camera_position: glam::Vec3,
+) -> Vec<[glam::Vec3; 4]> {
+    const BOARD_HALF_WIDTH: f32 = 1.32;
+    const BOARD_HALF_HEIGHT: f32 = 0.24;
+    const TEXT_FACE_OFFSET: f32 = 0.105;
+    const GLYPH_COLUMNS: usize = 5;
+    const GLYPH_ROWS: usize = 7;
+    const GLYPH_GAP_COLUMNS: usize = 1;
+    const CELL_FILL: f32 = 0.82;
+
+    let text = label.text.trim().to_uppercase();
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let total_columns = text
+        .chars()
+        .enumerate()
+        .fold(0usize, |columns, (index, ch)| {
+            columns
+                + glyph_width(ch)
+                + usize::from(index + 1 < text.chars().count()) * GLYPH_GAP_COLUMNS
+        });
+    if total_columns == 0 {
+        return Vec::new();
+    }
+
+    let max_width = BOARD_HALF_WIDTH * 2.0 * 0.86;
+    let max_height = BOARD_HALF_HEIGHT * 2.0 * 0.70;
+    let cell = (max_width / total_columns as f32).min(max_height / GLYPH_ROWS as f32);
+    let text_width = total_columns as f32 * cell;
+    let text_height = GLYPH_ROWS as f32 * cell;
+
+    let tangent = normalize_label_tangent(label.tangent);
+    let right = glam::vec3(tangent.0, 0.0, tangent.1);
+    let normal_candidate = glam::vec3(-tangent.1, 0.0, tangent.0);
+    let camera_side = (camera_position - label.position).dot(normal_candidate);
+    let face_normal = if camera_side >= 0.0 {
+        normal_candidate
+    } else {
+        -normal_candidate
+    };
+    let up = glam::Vec3::Y;
+    let origin = label.position + face_normal * TEXT_FACE_OFFSET - right * (text_width * 0.5)
+        + up * (text_height * 0.5);
+
+    let mut quads = Vec::new();
+    let mut cursor_column = 0usize;
+    for ch in text.chars() {
+        let rows = glyph_rows(ch);
+        let width = glyph_width(ch);
+        for (row, bits) in rows.iter().enumerate() {
+            for col in 0..width.min(GLYPH_COLUMNS) {
+                let mask = 1 << (GLYPH_COLUMNS - 1 - col);
+                if bits & mask == 0 {
+                    continue;
+                }
+                let x0 = (cursor_column + col) as f32 * cell;
+                let x1 = x0 + cell * CELL_FILL;
+                let y0 = -(row as f32) * cell;
+                let y1 = y0 - cell * CELL_FILL;
+                quads.push([
+                    origin + right * x0 + up * y0,
+                    origin + right * x1 + up * y0,
+                    origin + right * x1 + up * y1,
+                    origin + right * x0 + up * y1,
+                ]);
+            }
+        }
+        cursor_column += width + GLYPH_GAP_COLUMNS;
+    }
+    quads
+}
+
+fn normalize_label_tangent(tangent: (f32, f32)) -> (f32, f32) {
+    let len = (tangent.0 * tangent.0 + tangent.1 * tangent.1).sqrt();
+    if len <= 1e-6 {
+        (1.0, 0.0)
+    } else {
+        (tangent.0 / len, tangent.1 / len)
+    }
+}
+
+fn glyph_width(ch: char) -> usize {
+    if ch == ' ' { 3 } else { 5 }
+}
+
+fn glyph_rows(ch: char) -> [u8; 7] {
+    match ch {
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01111, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b01111,
+        ],
+        'D' => [
+            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'G' => [
+            0b01111, 0b10000, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111,
+        ],
+        'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'I' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111,
+        ],
+        'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b10010, 0b10010, 0b01100,
+        ],
+        'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'N' => [
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010,
+        ],
+        'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b00001, 0b00001, 0b11110,
+        ],
+        '6' => [
+            0b01110, 0b10000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110,
+        ],
+        '-' => [0, 0, 0, 0b11111, 0, 0, 0],
+        '/' => [
+            0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000,
+        ],
+        '&' => [
+            0b01100, 0b10010, 0b10100, 0b01000, 0b10101, 0b10010, 0b01101,
+        ],
+        ' ' => [0; 7],
+        _ => [0b11111, 0b00001, 0b00010, 0b00100, 0b00100, 0, 0b00100],
+    }
+}
+
+fn project_world_quad_to_screen(
+    camera: &Flycam,
+    quad: [glam::Vec3; 4],
+    viewport_size: egui::Vec2,
+) -> Option<[egui::Pos2; 4]> {
+    Some([
+        project_world_to_screen(camera, quad[0], viewport_size)?,
+        project_world_to_screen(camera, quad[1], viewport_size)?,
+        project_world_to_screen(camera, quad[2], viewport_size)?,
+        project_world_to_screen(camera, quad[3], viewport_size)?,
+    ])
 }
 
 fn project_world_to_screen(
@@ -334,6 +568,40 @@ mod tests {
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Main Street");
         assert_eq!(labels[0].position, glam::vec3(1.0, 5.56, 2.0));
+        assert_eq!(labels[0].tangent, (1.0, 0.0));
+    }
+
+    #[test]
+    fn street_sign_text_quads_follow_the_sign_plane() {
+        let label = StreetSignLabel {
+            text: "A".to_string(),
+            position: glam::Vec3::ZERO,
+            tangent: (0.0, 1.0),
+        };
+
+        let quads = street_sign_text_world_quads(&label, glam::vec3(-10.0, 0.0, 0.0));
+
+        assert!(!quads.is_empty());
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_z = f32::MAX;
+        let mut max_z = f32::MIN;
+        for point in quads.iter().flatten() {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_z = min_z.min(point.z);
+            max_z = max_z.max(point.z);
+        }
+        assert!(
+            max_x - min_x < 0.01,
+            "sign-plane glyphs should stay on the face plane, x range was {}",
+            max_x - min_x
+        );
+        assert!(
+            max_z - min_z > 0.01,
+            "glyphs should advance along the sign tangent, z range was {}",
+            max_z - min_z
+        );
     }
 
     #[test]

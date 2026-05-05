@@ -23,7 +23,7 @@ pub struct AppState {
     pub camera: Flycam,
     pub coord_converter: Option<crate::geo::CoordConverter>,
     pub poi_labels: Vec<crate::ui::poi_labels::PoiLabel>,
-    pub street_sign_labels: Vec<crate::ui::poi_labels::PoiLabel>,
+    pub street_sign_labels: Vec<crate::ui::poi_labels::StreetSignLabel>,
     pub camera_bg: SceneBindGroup,
     pub pipeline: CityPipeline,
     pub sky_pipeline: SkyPipeline,

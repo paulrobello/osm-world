@@ -2698,6 +2698,7 @@ dependencies = [
  "image",
  "log",
  "memmap2 0.9.10",
+ "naga",
  "osmpbf",
  "par-osm-rust",
  "pollster",

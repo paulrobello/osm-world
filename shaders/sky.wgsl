@@ -108,9 +108,39 @@ fn get_sun(ray: vec3<f32>) -> vec3<f32> {
     let sun = scene.sun_direction;
     let daylight = get_daylight(sun.y);
     let cos_angle = dot(normalize(ray), sun);
-    let disk = smoothstep(0.998, 0.9995, cos_angle) * daylight;
-    let glow = pow(max(cos_angle, 0.0), 64.0) * 0.3 * daylight;
-    return vec3<f32>(1.0, 0.95, 0.8) * (disk + glow);
+
+    let sun_radius = 0.0027;
+    let sun_radius_norm = max((1.0 - cos_angle) / sun_radius, 0.0);
+    let sun_disk = 1.0 - smoothstep(0.82, 1.08, sun_radius_norm);
+    let sun_limb = 1.0 - smoothstep(0.0, 0.95, sun_radius_norm);
+    let sun_core = 1.0 - smoothstep(0.0, 0.34, sun_radius_norm);
+
+    var sun_right = cross(vec3<f32>(0.0, 1.0, 0.0), sun);
+    if (length(sun_right) < 0.001) {
+        sun_right = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    sun_right = normalize(sun_right);
+    let sun_up = normalize(cross(sun, sun_right));
+    let sun_uv = vec2<f32>(dot(ray, sun_right), dot(ray, sun_up)) / sun_radius;
+    let sun_surface = mix(
+        0.90,
+        1.08,
+        fbm(
+            sun_uv * 2.4 + vec2<f32>(scene.animation_time * 0.006, -scene.animation_time * 0.004),
+        ),
+    );
+
+    let limb_color = vec3<f32>(0.92, 0.48, 0.16);
+    let core_color = vec3<f32>(1.0, 0.86, 0.42);
+    let disk_color =
+        mix(limb_color, core_color, sun_limb) * sun_disk * (0.46 + sun_core * 0.24) * sun_surface;
+
+    let tight_glow = pow(max(cos_angle, 0.0), 220.0) * 0.13;
+    let wide_glow = pow(max(cos_angle, 0.0), 36.0) * 0.045;
+    let sun_corona = (tight_glow + wide_glow) * (0.35 + daylight * 0.65);
+    let corona_color = vec3<f32>(1.0, 0.62, 0.25) * sun_corona;
+
+    return (disk_color + corona_color) * daylight;
 }
 
 fn get_moon(ray: vec3<f32>) -> vec3<f32> {

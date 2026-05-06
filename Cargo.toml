@@ -44,4 +44,5 @@ opt-level = 1
 opt-level = 3
 
 [dev-dependencies]
+naga = { version = "29.0.1", features = ["wgsl-in"] }
 tempfile = "3.27.0"

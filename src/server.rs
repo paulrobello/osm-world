@@ -789,8 +789,20 @@ mod tests {
     }
 
     fn cache_xml_for_bbox(bbox: [f64; 4], filter: &par_osm_rust::filter::FeatureFilter) -> String {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+</osm>"#;
+        cache_xml_for_bbox_with_xml(bbox, filter, xml)
+    }
+
+    fn cache_xml_for_bbox_with_xml(
+        bbox: [f64; 4],
+        filter: &par_osm_rust::filter::FeatureFilter,
+        xml: &str,
+    ) -> String {
         let overpass_url = par_osm_rust::overpass::default_overpass_url();
-        cache_xml_for_bbox_with_overpass_url(bbox, filter, overpass_url)
+        cache_xml_for_bbox_with_xml_and_overpass_url(bbox, filter, xml, overpass_url)
     }
 
     fn cache_xml_for_bbox_with_overpass_url(
@@ -798,13 +810,22 @@ mod tests {
         filter: &par_osm_rust::filter::FeatureFilter,
         overpass_url: &str,
     ) -> String {
-        let bbox_tuple = (bbox[0], bbox[1], bbox[2], bbox[3]);
-        let cache_key =
-            par_osm_rust::osm_cache::cache_key_for_url(bbox_tuple, filter, overpass_url);
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <osm version="0.6">
   <node id="1" lat="38.0" lon="-121.0"/>
 </osm>"#;
+        cache_xml_for_bbox_with_xml_and_overpass_url(bbox, filter, xml, overpass_url)
+    }
+
+    fn cache_xml_for_bbox_with_xml_and_overpass_url(
+        bbox: [f64; 4],
+        filter: &par_osm_rust::filter::FeatureFilter,
+        xml: &str,
+        overpass_url: &str,
+    ) -> String {
+        let bbox_tuple = (bbox[0], bbox[1], bbox[2], bbox[3]);
+        let cache_key =
+            par_osm_rust::osm_cache::cache_key_for_url(bbox_tuple, filter, overpass_url);
         par_osm_rust::osm_cache::write_for_url(&cache_key, bbox_tuple, filter, xml, overpass_url)
             .unwrap();
         cache_key
@@ -1141,6 +1162,47 @@ mod tests {
 
         assert!(serde_json::from_value::<PrepareAreaRequest>(invalid_poi_mode).is_err());
         assert!(serde_json::from_value::<PrepareAreaRequest>(invalid_failure_mode).is_err());
+    }
+
+    #[test]
+    fn prepare_area_writes_renderable_poi_xml() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <bounds minlat="38.0" minlon="-121.0" maxlat="38.001" maxlon="-120.999"/>
+  <node id="1" lat="38.0005" lon="-120.9995">
+    <tag k="amenity" v="restaurant"/>
+    <tag k="name" v="Test Cafe"/>
+  </node>
+</osm>"#;
+        cache_xml_for_bbox_with_xml(bbox, &filter, xml);
+
+        let response = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
+        let source =
+            crate::world::loader::load_world_source(Path::new(&response.osm_path), None).unwrap();
+
+        assert_eq!(source.point_features.len(), 1);
+        assert_eq!(
+            source.point_features[0]
+                .tags
+                .get("name")
+                .map(String::as_str),
+            Some("Test Cafe")
+        );
     }
 
     #[test]

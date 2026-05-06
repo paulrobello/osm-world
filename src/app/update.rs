@@ -84,6 +84,7 @@ mod tests {
             cam_override: None,
             show_settings: false,
             initial_time_of_day: None,
+            real_time_of_day: false,
             hide_poi_labels: false,
             hide_address_labels: false,
             hide_street_sign_labels: false,

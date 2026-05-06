@@ -21,6 +21,7 @@ anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 image = "0.25"
 osmpbf = "0.3.8"
 earcutr = "0.4"

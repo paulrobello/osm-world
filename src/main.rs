@@ -179,6 +179,10 @@ struct Args {
     #[arg(long, value_parser = hour_of_day)]
     time_of_day: Option<f32>,
 
+    /// Sync the in-game time of day to the local wall clock
+    #[arg(long)]
+    real_time_of_day: bool,
+
     /// Start with POI labels hidden
     #[arg(long)]
     hide_poi_labels: bool,
@@ -333,6 +337,7 @@ fn main() -> anyhow::Result<()> {
         cam_override,
         show_settings: args.show_settings,
         initial_time_of_day: args.time_of_day.map(|hours| hours / 24.0),
+        real_time_of_day: args.real_time_of_day,
         hide_poi_labels: args.hide_poi_labels,
         hide_address_labels: args.hide_address_labels,
         hide_street_sign_labels: args.hide_street_sign_labels,
@@ -416,6 +421,13 @@ mod tests {
 
         assert_eq!(args.time_of_day, Some(21.5));
         assert!(args.debug_shadow_cascades);
+    }
+
+    #[test]
+    fn parses_real_time_of_day_flag() {
+        let args = Args::try_parse_from(["osm-world", "--real-time-of-day"]).unwrap();
+
+        assert!(args.real_time_of_day);
     }
 
     #[test]

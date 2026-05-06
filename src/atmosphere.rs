@@ -1,3 +1,5 @@
+use chrono::Timelike;
+
 pub const DAY_CYCLE_DURATION: f32 = 120.0;
 pub const DEFAULT_TIME_OF_DAY: f32 = 14.0 / 24.0;
 pub const MOON_LIGHT_INTENSITY: f32 = 0.25;
@@ -40,6 +42,7 @@ pub struct DayCycleState {
     pub time_of_day: f32,
     pub animation_time: f32,
     pub paused: bool,
+    pub real_clock: bool,
 }
 
 impl Default for DayCycleState {
@@ -48,17 +51,34 @@ impl Default for DayCycleState {
             time_of_day: DEFAULT_TIME_OF_DAY,
             animation_time: 0.0,
             paused: true,
+            real_clock: false,
         }
     }
 }
 
 impl DayCycleState {
     pub fn update(&mut self, dt: f32) {
-        if !self.paused {
+        self.update_with_clock(dt, local_clock_time_of_day);
+    }
+
+    pub fn update_with_clock(&mut self, dt: f32, clock_time_of_day: impl FnOnce() -> f32) {
+        if self.real_clock {
+            self.time_of_day = clock_time_of_day().rem_euclid(1.0);
+        } else if !self.paused {
             self.time_of_day = (self.time_of_day + dt / DAY_CYCLE_DURATION).rem_euclid(1.0);
         }
         self.animation_time += dt;
     }
+}
+
+pub fn local_clock_time_of_day() -> f32 {
+    let now = chrono::Local::now();
+    time_of_day_from_hms(now.hour(), now.minute(), now.second())
+}
+
+pub fn time_of_day_from_hms(hour: u32, minute: u32, second: u32) -> f32 {
+    let seconds = (hour % 24) * 3600 + (minute % 60) * 60 + (second % 60);
+    seconds as f32 / 86_400.0
 }
 
 pub fn sun_direction(time_of_day: f32) -> [f32; 3] {
@@ -112,6 +132,28 @@ mod tests {
 
         assert!(day_cycle.paused);
         assert_eq!(day_cycle.time_of_day, 14.0 / 24.0);
+    }
+
+    #[test]
+    fn real_clock_fraction_uses_hours_minutes_and_seconds() {
+        let fraction = time_of_day_from_hms(6, 30, 0);
+
+        assert!((fraction - 6.5 / 24.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn real_clock_update_overrides_paused_animation() {
+        let mut day_cycle = DayCycleState {
+            time_of_day: 14.0 / 24.0,
+            animation_time: 0.0,
+            paused: true,
+            real_clock: true,
+        };
+
+        day_cycle.update_with_clock(0.5, || 21.25 / 24.0);
+
+        assert_eq!(day_cycle.time_of_day, 21.25 / 24.0);
+        assert_eq!(day_cycle.animation_time, 0.5);
     }
 
     #[test]

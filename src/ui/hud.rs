@@ -36,12 +36,14 @@ pub fn draw(
 
                     let hours = (day_cycle.time_of_day * 24.0) as u32;
                     let mins = ((day_cycle.time_of_day * 24.0 - hours as f32) * 60.0) as u32;
-                    ui.label(format!(
-                        "Time: {:02}:{:02} {}",
-                        hours,
-                        mins,
-                        if day_cycle.paused { "[PAUSED]" } else { "" }
-                    ));
+                    let time_mode = if day_cycle.real_clock {
+                        "[REAL]"
+                    } else if day_cycle.paused {
+                        "[PAUSED]"
+                    } else {
+                        ""
+                    };
+                    ui.label(format!("Time: {:02}:{:02} {}", hours, mins, time_mode));
 
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new("F1: Settings").small().weak());

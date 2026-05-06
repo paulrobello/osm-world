@@ -261,6 +261,33 @@ fn should_discard_vegetation(feature_type: f32, uv: vec2<f32>, distance_to_camer
         && (scene.visual_params.w < 0.5 || distance_to_camera > scene.visual_params.z);
 }
 
+fn is_water_feature(feature_type: f32) -> bool {
+    return feature_type > 2.5 && feature_type < 3.5;
+}
+
+fn water_normal(world_position: vec3<f32>, base_normal: vec3<f32>) -> vec3<f32> {
+    let p = world_position.xz;
+    let t = scene.animation_time;
+    let wave_a = vec2<f32>(
+        sin(dot(p, vec2<f32>(0.032, 0.014)) + t * 0.85),
+        cos(dot(p, vec2<f32>(-0.018, 0.027)) + t * 0.62)
+    );
+    let wave_b = vec2<f32>(
+        sin(dot(p, vec2<f32>(0.071, -0.023)) - t * 1.18),
+        cos(dot(p, vec2<f32>(0.041, 0.052)) + t * 0.94)
+    );
+    let ripple = wave_a * 0.050 + wave_b * 0.025;
+    return normalize(base_normal + vec3<f32>(ripple.x, 0.0, ripple.y));
+}
+
+fn water_sun_glint(normal: vec3<f32>, view_dir: vec3<f32>) -> f32 {
+    let sun_visibility = smoothstep(-0.05, 0.25, scene.sun_direction.y);
+    let sun_reflect = reflect(-normalize(scene.sun_direction), normal);
+    let tight_glint = pow(max(dot(sun_reflect, view_dir), 0.0), 96.0);
+    let broad_glint = pow(max(dot(sun_reflect, view_dir), 0.0), 24.0) * 0.20;
+    return (tight_glint * 1.65 + broad_glint) * sun_visibility;
+}
+
 fn apply_bike_ped_overlay(color: vec3<f32>, feature_type: f32) -> vec3<f32> {
     if (scene.visual_params2.y < 0.5) {
         return color;
@@ -283,7 +310,11 @@ fn apply_bike_ped_overlay(color: vec3<f32>, feature_type: f32) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let normal = normalize(in.world_normal);
+    let water = is_water_feature(in.feature_type);
+    var normal = normalize(in.world_normal);
+    if (water) {
+        normal = water_normal(in.world_position, normal);
+    }
     let light_dir = normalize(scene.light_direction);
 
     // Hemisphere ambient
@@ -304,7 +335,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let half_vec = normalize(light_dir + view_dir);
     let mat = get_material(in.feature_type);
     let spec = pow(max(dot(normal, half_vec), 0.0), mat.shininess);
-    let specular = mat.specular_strength * spec;
+    var specular = mat.specular_strength * spec;
+    if (water) {
+        specular += water_sun_glint(normal, view_dir);
+    }
 
     let lighting = ambient + (diffuse + specular) * scene.light_intensity * (1.0 - scene.ambient_light);
     let varied_color = apply_building_facade_variation(in.color, in.feature_type, normal, in.uv);

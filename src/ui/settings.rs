@@ -81,11 +81,16 @@ fn day_cycle_section(
     let response = CollapsingHeader::new(RichText::new("Day / Night Cycle").strong())
         .default_open(*expanded)
         .show(ui, |ui| {
-            ui.checkbox(&mut day.paused, "Paused");
+            ui.checkbox(&mut day.real_clock, "Match real clock");
+            ui.add_enabled(
+                !day.real_clock,
+                egui::Checkbox::new(&mut day.paused, "Paused"),
+            );
 
             let mut hours = day.time_of_day * 24.0;
             if ui
-                .add(
+                .add_enabled(
+                    !day.real_clock,
                     Slider::new(&mut hours, 0.0..=24.0)
                         .step_by(0.1)
                         .text("Time"),
@@ -93,6 +98,9 @@ fn day_cycle_section(
                 .changed()
             {
                 day.time_of_day = hours / 24.0;
+            }
+            if day.real_clock {
+                ui.label("Time follows the local system clock.");
             }
 
             ui.add(

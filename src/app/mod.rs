@@ -80,6 +80,7 @@ pub struct AppOptions {
     pub cam_override: Option<crate::camera::CameraOverride>,
     pub show_settings: bool,
     pub initial_time_of_day: Option<f32>,
+    pub real_time_of_day: bool,
     pub hide_poi_labels: bool,
     pub hide_address_labels: bool,
     pub hide_street_sign_labels: bool,
@@ -161,6 +162,7 @@ impl App {
         if let Some(time_of_day) = opts.initial_time_of_day {
             day_cycle.time_of_day = time_of_day;
         }
+        day_cycle.real_clock = opts.real_time_of_day;
 
         let visual_detail = opts.visual_detail.clone();
         let prefs = crate::app::prefs::load_user_prefs();
@@ -238,6 +240,7 @@ mod tests {
             cam_override: None,
             show_settings: false,
             initial_time_of_day: None,
+            real_time_of_day: false,
             hide_poi_labels: false,
             hide_address_labels: false,
             hide_street_sign_labels: false,

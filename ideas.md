@@ -5,13 +5,6 @@ Grounded in the current project: a Rust/WGPU 3D OpenStreetMap renderer with tile
 Remove completed items from this list.
 
 ## Visual and rendering ideas
-3. **Real time of day**
-   - add option for game time to match real clock.
-
-3. **Improved water rendering**
-   - Add subtle animated normal/wave distortion and stronger sun glints for rivers and lakes.
-   - Keep geometry unchanged; start as shader-only work.
-
 7. **Terrain tunnel cuts and bridge abutments**
     - Follow up the current bridge/tunnel visuals with terrain carving around tunnel portals and stronger bridge approach structures.
     - Value: removes the main visual mismatch in layered roads.

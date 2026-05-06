@@ -718,12 +718,21 @@ fn append_road_feature_mesh(
 ) -> (Vec<f32>, f32, [f32; 3]) {
     let width = super::color::road_width(&road.tags);
     let color = super::color::road_color(&road.tags);
+    let profile = super::road::road_profile(&road.tags);
     let render_path = super::road::road_render_path(&road.tags, &road.points, &road.elevations);
 
-    let feature_type = if super::color::is_sidewalk_like_road(&road.tags) {
+    let is_surface = profile.kind == super::road::RoadProfileKind::Surface;
+    let feature_type = if !is_surface {
+        crate::render::vertex::feature::ROAD_LAYERED
+    } else if super::color::is_sidewalk_like_road(&road.tags) {
         crate::render::vertex::feature::ROAD_PATH
     } else {
         crate::render::vertex::feature::ROAD
+    };
+    let marking_feature_type = if is_surface {
+        crate::render::vertex::feature::ROAD_MARKING
+    } else {
+        crate::render::vertex::feature::ROAD_MARKING_LAYERED
     };
     super::road::generate_road_with_elevations_and_feature_type(
         &render_path.points,
@@ -734,10 +743,11 @@ fn append_road_feature_mesh(
         verts,
         idxs,
     );
-    super::road::append_road_centerline_dashes(
+    super::road::append_road_centerline_dashes_with_feature_type(
         &render_path.points,
         &render_path.road_elevations,
         width,
+        marking_feature_type,
         verts,
         idxs,
     );

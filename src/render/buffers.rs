@@ -384,6 +384,12 @@ mod tests {
             vertex(feature::ROAD_MARKING),
             vertex(feature::ROAD_MARKING),
             vertex(feature::ROAD_MARKING),
+            vertex(feature::ROAD_LAYERED),
+            vertex(feature::ROAD_LAYERED),
+            vertex(feature::ROAD_LAYERED),
+            vertex(feature::ROAD_MARKING_LAYERED),
+            vertex(feature::ROAD_MARKING_LAYERED),
+            vertex(feature::ROAD_MARKING_LAYERED),
             vertex(feature::BUILDING),
             vertex(feature::BUILDING),
             vertex(feature::BUILDING),
@@ -400,7 +406,7 @@ mod tests {
         assert_eq!(layers.road, vec![15, 16, 17]);
         assert_eq!(layers.railway, vec![18, 19, 20]);
         assert_eq!(layers.road_marking, vec![21, 22, 23]);
-        assert_eq!(layers.solids, vec![24, 25, 26]);
+        assert_eq!(layers.solids, vec![24, 25, 26, 27, 28, 29, 30, 31, 32]);
     }
 
     #[test]

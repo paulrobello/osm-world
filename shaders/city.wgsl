@@ -208,33 +208,11 @@ fn sample_shadow(world_pos: vec3<f32>, normal: vec3<f32>, distance_to_camera: f3
     return mix(1.0, shadow_factor / shadow_strength, shadow_strength);
 }
 
-fn surface_depth_bias(feature: f32) -> f32 {
-    // Geometry offsets stay visually near the terrain; this tiny clip-space
-    // bias provides stable decal-like ordering without making roads/paths
-    // appear to float. Lower depth wins because the city pipeline uses Less.
-    if (feature < 1.5) {
-        return 0.0;       // terrain/buildings
-    } else if (feature < 2.5) {
-        return 0.000030;  // roads/paths above water and landuse
-    } else if (feature < 3.5) {
-        return 0.000020;  // water above landuse
-    } else if (feature < 4.5) {
-        return 0.000010;  // landuse above terrain
-    } else if (feature < 5.5) {
-        return 0.000040;  // road markings above roads
-    } else if (feature < 6.5) {
-        return 0.000035;  // railways above road/terrain surfaces
-    }
-    return 0.0;
-}
-
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let world_pos = in.position;
-    var clip_position = scene.view_proj * vec4<f32>(world_pos, 1.0);
-    clip_position.z = clip_position.z - surface_depth_bias(in.feature_type) * clip_position.w;
-    out.clip_position = clip_position;
+    out.clip_position = scene.view_proj * vec4<f32>(world_pos, 1.0);
     out.world_position = world_pos;
     out.world_normal = in.normal;
     out.color = in.color;

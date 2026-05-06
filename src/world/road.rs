@@ -470,6 +470,24 @@ pub fn append_road_centerline_dashes(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
+    append_road_centerline_dashes_with_feature_type(
+        points,
+        road_elevations,
+        road_width,
+        feature::ROAD_MARKING,
+        verts,
+        idxs,
+    );
+}
+
+pub fn append_road_centerline_dashes_with_feature_type(
+    points: &[(f32, f32)],
+    road_elevations: &[f32],
+    road_width: f32,
+    feature_type: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     if road_width < CENTERLINE_MIN_ROAD_WIDTH
         || points.len() != road_elevations.len()
         || points.len() < 2
@@ -483,6 +501,7 @@ pub fn append_road_centerline_dashes(
             points[i + 1],
             road_elevations[i],
             road_elevations[i + 1],
+            feature_type,
             verts,
             idxs,
         );
@@ -494,6 +513,7 @@ fn append_centerline_dashes_for_segment(
     b: (f32, f32),
     start_elevation: f32,
     end_elevation: f32,
+    feature_type: f32,
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
@@ -540,7 +560,7 @@ fn append_centerline_dashes_for_segment(
                     normal: [0.0, 1.0, 0.0],
                     color: CENTERLINE_COLOR,
                     uv: [0.0, 0.0],
-                    feature_type: feature::ROAD_MARKING,
+                    feature_type,
                 });
             }
             idxs.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
@@ -1232,6 +1252,30 @@ mod tests {
 
         assert_eq!(road_profile(&tags).kind, RoadProfileKind::Tunnel);
         assert!(road_layer_y_offset(&tags) < 0.0);
+    }
+
+    #[test]
+    fn centerline_dashes_can_use_layered_marking_feature_type() {
+        let points = [(0.0, 0.0), (20.0, 0.0)];
+        let road_elevations = [3.0, 3.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_road_centerline_dashes_with_feature_type(
+            &points,
+            &road_elevations,
+            6.0,
+            feature::ROAD_MARKING_LAYERED,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(!indices.is_empty());
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.feature_type == feature::ROAD_MARKING_LAYERED)
+        );
     }
 
     #[test]

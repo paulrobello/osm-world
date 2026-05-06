@@ -1,9 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::Context;
 use axum::{
     Json, Router,
-    extract::{State, rejection::JsonRejection},
+    extract::{Path as AxumPath, State, rejection::JsonRejection},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -63,10 +66,91 @@ pub struct PrepareAreaResponse {
     pub command_args: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+pub struct PreparedAreaEntry {
+    pub cache_key: String,
+    pub display_name: Option<String>,
+    pub favorite: bool,
+    pub bbox: [f64; 4],
+    pub filter: par_osm_rust::filter::FeatureFilter,
+    pub use_elevation: bool,
+    pub overture: bool,
+    pub overture_themes: Vec<String>,
+    pub poi_source_mode: Option<par_osm_rust::sources::PoiSourceMode>,
+    pub overture_failure_mode: Option<par_osm_rust::sources::OvertureFailureMode>,
+    pub overture_timeout: Option<u64>,
+    pub source_status: String,
+    pub warnings: Vec<String>,
+    pub osm_path: String,
+    pub srtm_dir: Option<String>,
+    pub spawn_lat: Option<f64>,
+    pub spawn_lon: Option<f64>,
+    pub command: String,
+    pub command_cwd: String,
+    pub command_program: String,
+    pub command_args: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PreparedAreaUpdate {
+    pub display_name: Option<String>,
+    pub favorite: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LaunchRendererRequest {
+    pub osm_path: String,
+    pub srtm_dir: Option<String>,
+    pub spawn_lat: Option<f64>,
+    pub spawn_lon: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RendererLaunchCommand {
+    pub program: String,
+    pub args: Vec<String>,
+    pub command: String,
+    pub command_cwd: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LaunchRendererResponse {
+    status: &'static str,
+    pid: u32,
+    #[serde(flatten)]
+    command: RendererLaunchCommand,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct PreparedCacheMetadata {
     source_status: String,
     warnings: Vec<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    favorite: bool,
+    #[serde(default)]
+    bbox: Option<[f64; 4]>,
+    #[serde(default)]
+    filter: Option<par_osm_rust::filter::FeatureFilter>,
+    #[serde(default)]
+    use_elevation: bool,
+    #[serde(default)]
+    overture: bool,
+    #[serde(default)]
+    overture_themes: Vec<String>,
+    #[serde(default)]
+    poi_source_mode: Option<par_osm_rust::sources::PoiSourceMode>,
+    #[serde(default)]
+    overture_failure_mode: Option<par_osm_rust::sources::OvertureFailureMode>,
+    #[serde(default)]
+    overture_timeout: Option<u64>,
+    #[serde(default)]
+    srtm_dir: Option<String>,
+    #[serde(default)]
+    spawn_lat: Option<f64>,
+    #[serde(default)]
+    spawn_lon: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -190,7 +274,13 @@ pub fn build_router(project_root: PathBuf) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/cache/areas", get(cache_areas))
+        .route("/areas/prepared", get(prepared_areas_handler))
+        .route(
+            "/areas/prepared/{cache_key}",
+            post(update_prepared_area_handler),
+        )
         .route("/areas/prepare", post(prepare_area_handler))
+        .route("/renderer/launch", post(launch_renderer_handler))
         .fallback(not_found)
         .with_state(AppState { project_root })
         .layer(CorsLayer::permissive())
@@ -234,6 +324,44 @@ async fn prepare_area_handler(
     task::spawn_blocking(move || prepare_area(req, &project_root))
         .await
         .map_err(|err| ApiError::internal(format!("prepare task failed: {err}")))?
+        .map(Json)
+        .map_err(ApiError::from_prepare_error)
+}
+
+async fn prepared_areas_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PreparedAreaEntry>>, ApiError> {
+    let project_root = state.project_root;
+    task::spawn_blocking(move || list_prepared_areas(&project_root))
+        .await
+        .map_err(|err| ApiError::internal(format!("prepared areas task failed: {err}")))?
+        .map(Json)
+        .map_err(ApiError::from_prepare_error)
+}
+
+async fn update_prepared_area_handler(
+    State(state): State<AppState>,
+    AxumPath(cache_key): AxumPath<String>,
+    payload: Result<Json<PreparedAreaUpdate>, JsonRejection>,
+) -> Result<Json<PreparedAreaEntry>, ApiError> {
+    let Json(update) = payload.map_err(ApiError::invalid_request)?;
+    let project_root = state.project_root;
+    task::spawn_blocking(move || update_prepared_area_details(&cache_key, update, &project_root))
+        .await
+        .map_err(|err| ApiError::internal(format!("prepared area update task failed: {err}")))?
+        .map(Json)
+        .map_err(ApiError::from_prepare_error)
+}
+
+async fn launch_renderer_handler(
+    State(state): State<AppState>,
+    payload: Result<Json<LaunchRendererRequest>, JsonRejection>,
+) -> Result<Json<LaunchRendererResponse>, ApiError> {
+    let Json(req) = payload.map_err(ApiError::invalid_request)?;
+    let project_root = state.project_root;
+    task::spawn_blocking(move || launch_renderer(&project_root, &req))
+        .await
+        .map_err(|err| ApiError::internal(format!("renderer launch task failed: {err}")))?
         .map(Json)
         .map_err(ApiError::from_prepare_error)
 }
@@ -345,8 +473,6 @@ pub(crate) fn prepare_area(
             })?;
             write_atomic(&osm_path, &xml)
                 .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
-            write_prepared_cache_metadata(&metadata_path, &source_status, &warnings)
-                .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
 
             let cache_status = if req.force_refresh {
                 "force_refreshed".to_string()
@@ -376,26 +502,40 @@ pub(crate) fn prepare_area(
     };
 
     let osm_path = path_string(osm_path);
-    let mut command_args = vec![
-        "run".to_string(),
-        "--manifest-path".to_string(),
-        path_string(project_root.join("Cargo.toml")),
-        "--".to_string(),
-        "--input".to_string(),
-        osm_path.clone(),
-    ];
-    if let Some((lat, lon)) = spawn {
-        command_args.push("--spawn-lat".to_string());
-        command_args.push(lat.to_string());
-        command_args.push("--spawn-lon".to_string());
-        command_args.push(lon.to_string());
-    }
-    if let Some(srtm_dir) = &srtm_dir {
-        command_args.push("--srtm-dir".to_string());
-        command_args.push(srtm_dir.clone());
-    }
-    let command_program = "cargo".to_string();
-    let command = shell_command(&command_program, &command_args);
+    let spawn_lat = spawn.map(|(lat, _)| lat);
+    let spawn_lon = spawn.map(|(_, lon)| lon);
+    let existing_metadata = read_prepared_cache_metadata_struct(&metadata_path).ok();
+    let metadata = PreparedCacheMetadata {
+        source_status: source_status.clone(),
+        warnings: warnings.clone(),
+        display_name: existing_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.display_name.clone()),
+        favorite: existing_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.favorite),
+        bbox: Some(req.bbox),
+        filter: Some(req.filter.clone()),
+        use_elevation: req.use_elevation,
+        overture: req.overture,
+        overture_themes: req.overture_themes.clone(),
+        poi_source_mode: req.poi_source_mode,
+        overture_failure_mode: req.overture_failure_mode,
+        overture_timeout: req.overture_timeout,
+        srtm_dir: srtm_dir.clone(),
+        spawn_lat,
+        spawn_lon,
+    };
+    write_prepared_cache_metadata(&metadata_path, &metadata)
+        .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+
+    let launch_req = LaunchRendererRequest {
+        osm_path: osm_path.clone(),
+        srtm_dir: srtm_dir.clone(),
+        spawn_lat,
+        spawn_lon,
+    };
+    let launch_command = renderer_launch_command(project_root, &launch_req)?;
 
     Ok(PrepareAreaResponse {
         bbox: req.bbox,
@@ -405,13 +545,209 @@ pub(crate) fn prepare_area(
         warnings,
         osm_path,
         srtm_dir,
-        spawn_lat: spawn.map(|(lat, _)| lat),
-        spawn_lon: spawn.map(|(_, lon)| lon),
+        spawn_lat,
+        spawn_lon,
+        command: launch_command.command,
+        command_cwd: launch_command.command_cwd,
+        command_program: launch_command.program,
+        command_args: launch_command.args,
+    })
+}
+
+pub(crate) fn list_prepared_areas(project_root: &Path) -> PrepareResult<Vec<PreparedAreaEntry>> {
+    let prepared_dir = prepared_area_dir();
+    let read_dir = match std::fs::read_dir(&prepared_dir) {
+        Ok(read_dir) => read_dir,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => {
+            return Err(PrepareAreaError::internal(
+                "failed to prepare area",
+                anyhow::Error::new(err).context(format!(
+                    "reading prepared cache dir {}",
+                    prepared_dir.display()
+                )),
+            ));
+        }
+    };
+    let entries = read_dir
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "osm"))
+        .filter_map(|entry| prepared_entry_from_osm_path(project_root, &entry.path()).ok())
+        .collect::<Vec<_>>();
+
+    let mut entries = entries;
+    entries.sort_by(|left, right| {
+        right
+            .favorite
+            .cmp(&left.favorite)
+            .then_with(|| left.display_name.cmp(&right.display_name))
+            .then_with(|| left.cache_key.cmp(&right.cache_key))
+    });
+    Ok(entries)
+}
+
+pub(crate) fn update_prepared_area_details(
+    cache_key: &str,
+    update: PreparedAreaUpdate,
+    project_root: &Path,
+) -> PrepareResult<PreparedAreaEntry> {
+    validate_cache_key(cache_key)?;
+    let osm_path = prepared_area_dir().join(format!("{cache_key}.osm"));
+    if !osm_path.exists() {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "unknown prepared area cache key"
+        )));
+    }
+    let metadata_path = prepared_metadata_path(&osm_path);
+    let mut metadata = read_prepared_cache_metadata_struct(&metadata_path)
+        .map_err(|message| PrepareAreaError::bad_request(anyhow::anyhow!(message)))?;
+    if let Some(display_name) = update.display_name {
+        let trimmed = display_name.trim();
+        metadata.display_name = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+    }
+    if let Some(favorite) = update.favorite {
+        metadata.favorite = favorite;
+    }
+    write_prepared_cache_metadata(&metadata_path, &metadata)
+        .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+    prepared_entry_from_osm_path(project_root, &osm_path)
+}
+
+fn prepared_entry_from_osm_path(
+    project_root: &Path,
+    osm_path: &Path,
+) -> PrepareResult<PreparedAreaEntry> {
+    let cache_key = osm_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            PrepareAreaError::bad_request(anyhow::anyhow!("invalid prepared cache key"))
+        })?
+        .to_string();
+    let metadata = read_prepared_cache_metadata_struct(&prepared_metadata_path(osm_path))
+        .map_err(|message| PrepareAreaError::bad_request(anyhow::anyhow!(message)))?;
+    let bbox = metadata.bbox.ok_or_else(|| {
+        PrepareAreaError::bad_request(anyhow::anyhow!("prepared area metadata missing bbox"))
+    })?;
+    let filter = metadata.filter.clone().ok_or_else(|| {
+        PrepareAreaError::bad_request(anyhow::anyhow!(
+            "prepared area metadata missing feature filter"
+        ))
+    })?;
+    let launch_req = LaunchRendererRequest {
+        osm_path: path_string(osm_path),
+        srtm_dir: metadata.srtm_dir.clone(),
+        spawn_lat: metadata.spawn_lat,
+        spawn_lon: metadata.spawn_lon,
+    };
+    let launch_command = renderer_launch_command(project_root, &launch_req)?;
+
+    Ok(PreparedAreaEntry {
+        cache_key,
+        display_name: metadata.display_name,
+        favorite: metadata.favorite,
+        bbox,
+        filter,
+        use_elevation: metadata.use_elevation,
+        overture: metadata.overture,
+        overture_themes: metadata.overture_themes,
+        poi_source_mode: metadata.poi_source_mode,
+        overture_failure_mode: metadata.overture_failure_mode,
+        overture_timeout: metadata.overture_timeout,
+        source_status: metadata.source_status,
+        warnings: metadata.warnings,
+        osm_path: launch_req.osm_path,
+        srtm_dir: launch_req.srtm_dir,
+        spawn_lat: launch_req.spawn_lat,
+        spawn_lon: launch_req.spawn_lon,
+        command: launch_command.command,
+        command_cwd: launch_command.command_cwd,
+        command_program: launch_command.program,
+        command_args: launch_command.args,
+    })
+}
+
+fn validate_cache_key(cache_key: &str) -> PrepareResult<()> {
+    if cache_key.len() == 64 && cache_key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "invalid prepared area cache key"
+        )))
+    }
+}
+
+fn launch_renderer(
+    project_root: &Path,
+    req: &LaunchRendererRequest,
+) -> PrepareResult<LaunchRendererResponse> {
+    let command = renderer_launch_command(project_root, req)?;
+    let child = Command::new(&command.program)
+        .args(&command.args)
+        .current_dir(project_root)
+        .spawn()
+        .map_err(|err| {
+            PrepareAreaError::internal(
+                "failed to launch renderer",
+                anyhow::Error::new(err).context("spawning renderer process"),
+            )
+        })?;
+
+    Ok(LaunchRendererResponse {
+        status: "launched",
+        pid: child.id(),
+        command,
+    })
+}
+
+pub(crate) fn renderer_launch_command(
+    project_root: &Path,
+    req: &LaunchRendererRequest,
+) -> PrepareResult<RendererLaunchCommand> {
+    validate_spawn(req.spawn_lat, req.spawn_lon, (-90.0, -180.0, 90.0, 180.0))?;
+    let osm_path = Path::new(&req.osm_path);
+    if osm_path.extension().and_then(|ext| ext.to_str()) != Some("osm") {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "renderer launch requires a prepared .osm file"
+        )));
+    }
+
+    let mut args = vec![
+        "run".to_string(),
+        "--manifest-path".to_string(),
+        path_string(project_root.join("Cargo.toml")),
+        "--".to_string(),
+        "--input".to_string(),
+        req.osm_path.clone(),
+    ];
+    if let Some((lat, lon)) = req.spawn_lat.zip(req.spawn_lon) {
+        args.push("--spawn-lat".to_string());
+        args.push(lat.to_string());
+        args.push("--spawn-lon".to_string());
+        args.push(lon.to_string());
+    }
+    if let Some(srtm_dir) = &req.srtm_dir {
+        if !srtm_dir.trim().is_empty() {
+            args.push("--srtm-dir".to_string());
+            args.push(srtm_dir.clone());
+        }
+    }
+    let program = "cargo".to_string();
+    let command = shell_command(&program, &args);
+    Ok(RendererLaunchCommand {
+        program,
+        args,
         command,
         command_cwd: path_string(project_root),
-        command_program,
-        command_args,
     })
+}
+
+fn prepared_area_dir() -> PathBuf {
+    par_osm_rust::cache::shared_cache_root().join("prepared")
 }
 
 fn source_status_string(status: par_osm_rust::sources::SourceStatus) -> String {
@@ -450,45 +786,39 @@ fn prepared_metadata_path(osm_path: &Path) -> PathBuf {
 }
 
 fn read_prepared_cache_metadata(metadata_path: &Path) -> (String, Vec<String>) {
+    match read_prepared_cache_metadata_struct(metadata_path) {
+        Ok(metadata) => (metadata.source_status, metadata.warnings),
+        Err(message) => ("cached_unknown".to_string(), vec![message]),
+    }
+}
+
+fn read_prepared_cache_metadata_struct(
+    metadata_path: &Path,
+) -> Result<PreparedCacheMetadata, String> {
     match std::fs::read_to_string(metadata_path) {
-        Ok(contents) => match serde_json::from_str::<PreparedCacheMetadata>(&contents) {
-            Ok(metadata) => (metadata.source_status, metadata.warnings),
-            Err(err) => (
-                "cached_unknown".to_string(),
-                vec![format!(
-                    "prepared cache metadata unreadable at {}; source status unknown: {err}",
-                    metadata_path.display()
-                )],
-            ),
-        },
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (
-            "cached_unknown".to_string(),
-            vec![format!(
-                "prepared cache metadata missing at {}; source status unknown",
-                metadata_path.display()
-            )],
-        ),
-        Err(err) => (
-            "cached_unknown".to_string(),
-            vec![format!(
+        Ok(contents) => serde_json::from_str::<PreparedCacheMetadata>(&contents).map_err(|err| {
+            format!(
                 "prepared cache metadata unreadable at {}; source status unknown: {err}",
                 metadata_path.display()
-            )],
-        ),
+            )
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(format!(
+            "prepared cache metadata missing at {}; source status unknown",
+            metadata_path.display()
+        )),
+        Err(err) => Err(format!(
+            "prepared cache metadata unreadable at {}; source status unknown: {err}",
+            metadata_path.display()
+        )),
     }
 }
 
 fn write_prepared_cache_metadata(
     metadata_path: &Path,
-    source_status: &str,
-    warnings: &[String],
+    metadata: &PreparedCacheMetadata,
 ) -> anyhow::Result<()> {
-    let metadata = PreparedCacheMetadata {
-        source_status: source_status.to_string(),
-        warnings: warnings.to_vec(),
-    };
     let contents =
-        serde_json::to_string_pretty(&metadata).context("serializing prepared cache metadata")?;
+        serde_json::to_string_pretty(metadata).context("serializing prepared cache metadata")?;
     write_atomic(metadata_path, &(contents + "\n")).with_context(|| {
         format!(
             "writing prepared cache metadata {}",
@@ -924,6 +1254,136 @@ mod tests {
         assert_eq!(response.command_args[input_index + 5], "-120.9995");
         assert!(response.command.contains("--spawn-lat 38.0005"));
         assert!(response.command.contains("--spawn-lon -120.9995"));
+    }
+
+    #[test]
+    fn prepare_area_writes_prepared_history_metadata_for_reopen() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter {
+            roads: true,
+            buildings: false,
+            water: true,
+            landuse: false,
+            railways: true,
+        };
+        cache_xml_for_bbox(bbox, &filter);
+        let mut req = cached_prepare_request(bbox, filter.clone());
+        req.spawn_lat = Some(38.0005);
+        req.spawn_lon = Some(-120.9995);
+
+        let response = prepare_area(req, tmp.path()).unwrap();
+        let entries = list_prepared_areas(tmp.path()).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.cache_key, response.cache_key);
+        assert_eq!(entry.bbox, bbox);
+        assert_eq!(entry.filter, filter);
+        assert_eq!(entry.spawn_lat, Some(38.0005));
+        assert_eq!(entry.spawn_lon, Some(-120.9995));
+        assert_eq!(entry.source_status, "osm_only");
+        assert_eq!(entry.osm_path, response.osm_path);
+        assert_eq!(entry.command, response.command);
+        assert_eq!(entry.display_name, None);
+        assert!(!entry.favorite);
+    }
+
+    #[test]
+    fn update_prepared_area_details_persists_name_and_favorite() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+        let response = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
+
+        let updated = update_prepared_area_details(
+            &response.cache_key,
+            PreparedAreaUpdate {
+                display_name: Some("Downtown smoke test".to_string()),
+                favorite: Some(true),
+            },
+            tmp.path(),
+        )
+        .unwrap();
+        let listed = list_prepared_areas(tmp.path()).unwrap();
+
+        assert_eq!(updated.display_name.as_deref(), Some("Downtown smoke test"));
+        assert!(updated.favorite);
+        assert_eq!(
+            listed[0].display_name.as_deref(),
+            Some("Downtown smoke test")
+        );
+        assert!(listed[0].favorite);
+    }
+
+    #[test]
+    fn renderer_launch_command_uses_prepared_file_and_optional_runtime_flags() {
+        let project_root = Path::new("/tmp/osm world");
+        let req = LaunchRendererRequest {
+            osm_path: "/tmp/prepared/city.osm".to_string(),
+            srtm_dir: Some("/tmp/srtm cache".to_string()),
+            spawn_lat: Some(38.0005),
+            spawn_lon: Some(-120.9995),
+        };
+
+        let command = renderer_launch_command(project_root, &req).unwrap();
+
+        assert_eq!(command.program, "cargo");
+        assert_eq!(command.args[0], "run");
+        assert_eq!(command.args[1], "--manifest-path");
+        assert_eq!(command.args[2], "/tmp/osm world/Cargo.toml");
+        assert!(
+            command
+                .args
+                .windows(2)
+                .any(|window| window == ["--input", "/tmp/prepared/city.osm"])
+        );
+        assert!(
+            command
+                .args
+                .windows(2)
+                .any(|window| window == ["--srtm-dir", "/tmp/srtm cache"])
+        );
+        assert!(
+            command
+                .args
+                .windows(2)
+                .any(|window| window == ["--spawn-lat", "38.0005"])
+        );
+        assert!(
+            command
+                .args
+                .windows(2)
+                .any(|window| window == ["--spawn-lon", "-120.9995"])
+        );
+        assert!(command.command.contains("'/tmp/osm world/Cargo.toml'"));
     }
 
     #[test]

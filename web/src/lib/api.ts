@@ -16,6 +16,23 @@ export const defaultFilter: FeatureFilter = {
   railways: true,
 };
 
+export type PoiSourceMode = 'osm_only' | 'overture_only' | 'both' | 'overture_preferred';
+export type OvertureFailureMode = 'fallback_to_osm' | 'fail';
+
+export interface SourceControls {
+  poi_source_mode: PoiSourceMode;
+  overture_themes: string[];
+  overture_failure_mode: OvertureFailureMode;
+  overture_timeout: number;
+}
+
+export const defaultSourceControls: SourceControls = {
+  poi_source_mode: 'osm_only',
+  overture_themes: ['address', 'base', 'building', 'place', 'transportation'],
+  overture_failure_mode: 'fallback_to_osm',
+  overture_timeout: 120,
+};
+
 export interface CacheEntry {
   key: string;
   bbox: [number, number, number, number];
@@ -27,6 +44,8 @@ export interface PrepareAreaResponse {
   bbox: [number, number, number, number];
   cache_key: string;
   cache_status: string;
+  source_status: string;
+  warnings: string[];
   osm_path: string;
   srtm_dir: string | null;
   spawn_lat: number | null;
@@ -35,6 +54,27 @@ export interface PrepareAreaResponse {
   command_cwd: string;
   command_program: string;
   command_args: string[];
+}
+
+export interface PreparedAreaEntry extends Omit<PrepareAreaResponse, 'cache_status'> {
+  display_name: string | null;
+  favorite: boolean;
+  filter: FeatureFilter;
+  use_elevation: boolean;
+  overture: boolean;
+  overture_themes: string[];
+  poi_source_mode: PoiSourceMode | null;
+  overture_failure_mode: OvertureFailureMode | null;
+  overture_timeout: number | null;
+}
+
+export interface LaunchRendererResponse {
+  status: string;
+  pid: number;
+  program: string;
+  args: string[];
+  command: string;
+  command_cwd: string;
 }
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,6 +96,21 @@ export function fetchCacheAreas(): Promise<CacheEntry[]> {
   return apiJson('/cache/areas');
 }
 
+export function fetchPreparedAreas(): Promise<PreparedAreaEntry[]> {
+  return apiJson('/areas/prepared');
+}
+
+export function updatePreparedArea(
+  cacheKey: string,
+  body: { display_name?: string; favorite?: boolean },
+): Promise<PreparedAreaEntry> {
+  return apiJson(`/areas/prepared/${cacheKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 export function prepareArea(body: {
   bbox: [number, number, number, number];
   filter: FeatureFilter;
@@ -63,8 +118,26 @@ export function prepareArea(body: {
   force_refresh: boolean;
   spawn_lat?: number;
   spawn_lon?: number;
+  overture: boolean;
+  overture_themes: string[];
+  poi_source_mode: PoiSourceMode;
+  overture_failure_mode: OvertureFailureMode;
+  overture_timeout: number;
 }): Promise<PrepareAreaResponse> {
   return apiJson('/areas/prepare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function launchRenderer(body: {
+  osm_path: string;
+  srtm_dir?: string | null;
+  spawn_lat?: number | null;
+  spawn_lon?: number | null;
+}): Promise<LaunchRendererResponse> {
+  return apiJson('/renderer/launch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

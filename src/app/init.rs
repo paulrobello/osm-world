@@ -12,6 +12,13 @@ use crate::render::shadow_bind_group::ShadowBindGroup;
 use crate::render::shadow_pipeline::ShadowPipeline;
 use crate::render::sky_pipeline::SkyPipeline;
 
+pub struct LoadedScene {
+    pub scene: SceneBuffers,
+    pub coord_converter: Option<crate::geo::CoordConverter>,
+    pub poi_labels: Vec<crate::ui::poi_labels::PoiLabel>,
+    pub street_sign_labels: Vec<crate::ui::poi_labels::StreetSignLabel>,
+}
+
 pub struct AppState {
     pub window: Arc<winit::window::Window>,
     pub device: Device,
@@ -122,29 +129,23 @@ pub fn init_wgpu(
     let occlusion = OcclusionQueries::new(&device, 256);
     let minimap_target = MinimapTarget::new(&device, surface_format);
 
-    let (scene, coord_converter, poi_labels, street_sign_labels) = match input_path {
+    let loaded_scene = match input_path {
         Some(path) => {
             let srtm = srtm_dir.map(std::path::Path::new);
             let source = crate::world::loader::load_world_source(std::path::Path::new(path), srtm)?;
-            let coord_converter = source.conv;
-            let poi_labels =
-                crate::ui::poi_labels::labels_from_point_features(&source.point_features);
-            let street_sign_labels =
-                crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
-            let world = crate::world::loader::generate_world_mesh(&source);
             apply_default_input_camera(&mut camera);
             apply_persisted_camera_if_allowed(&mut camera, persisted_camera, cam_override);
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
             }
-            (
-                SceneBuffers::from_mesh(&device, world.vertices, world.indices),
-                Some(coord_converter),
-                poi_labels,
-                street_sign_labels,
-            )
+            loaded_scene_from_source(&device, source)
         }
-        None => (SceneBuffers::new(&device), None, Vec::new(), Vec::new()),
+        None => LoadedScene {
+            scene: SceneBuffers::new(&device),
+            coord_converter: None,
+            poi_labels: Vec::new(),
+            street_sign_labels: Vec::new(),
+        },
     };
 
     if let Some(ov) = cam_override {
@@ -175,21 +176,46 @@ pub fn init_wgpu(
             depth_texture,
             depth_view,
             camera,
-            coord_converter,
-            poi_labels,
-            street_sign_labels,
+            coord_converter: loaded_scene.coord_converter,
+            poi_labels: loaded_scene.poi_labels,
+            street_sign_labels: loaded_scene.street_sign_labels,
             camera_bg,
             pipeline,
             sky_pipeline,
             shadow_bg,
             shadow_pipeline,
             contact_shadow,
-            scene,
+            scene: loaded_scene.scene,
             occlusion,
             minimap_target,
         },
         egui,
     ))
+}
+
+pub fn load_scene_resources(
+    device: &Device,
+    input_path: &std::path::Path,
+    srtm_dir: Option<&std::path::Path>,
+) -> anyhow::Result<LoadedScene> {
+    let source = crate::world::loader::load_world_source(input_path, srtm_dir)?;
+    Ok(loaded_scene_from_source(device, source))
+}
+
+fn loaded_scene_from_source(
+    device: &Device,
+    source: crate::world::loader::WorldSource,
+) -> LoadedScene {
+    let coord_converter = source.conv;
+    let poi_labels = crate::ui::poi_labels::labels_from_point_features(&source.point_features);
+    let street_sign_labels = crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
+    let world = crate::world::loader::generate_world_mesh(&source);
+    LoadedScene {
+        scene: SceneBuffers::from_mesh(device, world.vertices, world.indices),
+        coord_converter: Some(coord_converter),
+        poi_labels,
+        street_sign_labels,
+    }
 }
 
 fn apply_default_input_camera(camera: &mut Flycam) {

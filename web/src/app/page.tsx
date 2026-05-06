@@ -5,12 +5,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   API_URL,
   defaultFilter,
+  defaultSourceControls,
   fetchCacheAreas,
   fetchHealth,
+  fetchPreparedAreas,
+  launchRenderer,
   prepareArea,
+  updatePreparedArea,
   type CacheEntry,
   type FeatureFilter,
+  type PoiSourceMode,
   type PrepareAreaResponse,
+  type PreparedAreaEntry,
+  type SourceControls,
 } from '@/lib/api';
 import type { BBox, SpawnPoint } from '@/components/MapPicker';
 
@@ -25,6 +32,21 @@ const FEATURE_LABELS: Array<[keyof FeatureFilter, string]> = [
   ['water', 'Water'],
   ['landuse', 'Land use'],
   ['railways', 'Railways'],
+];
+
+const SOURCE_MODE_LABELS: Array<[PoiSourceMode, string]> = [
+  ['osm_only', 'OSM only'],
+  ['overture_only', 'Overture only'],
+  ['both', 'OSM + Overture'],
+  ['overture_preferred', 'Overture preferred'],
+];
+
+const OVERTURE_THEME_LABELS: Array<[string, string]> = [
+  ['address', 'Addresses'],
+  ['base', 'Base / land + water'],
+  ['building', 'Buildings'],
+  ['place', 'Places / POIs'],
+  ['transportation', 'Transportation'],
 ];
 
 type HealthState = Awaited<ReturnType<typeof fetchHealth>>;
@@ -60,9 +82,32 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** power).toFixed(power === 0 ? 0 : 1)} ${units[power]}`;
 }
 
+function sourceStatusLabel(status: string): string {
+  return status.replaceAll('_', ' ');
+}
+
+function preparedEntryToResult(entry: PreparedAreaEntry): PrepareAreaResponse {
+  return {
+    bbox: entry.bbox,
+    cache_key: entry.cache_key,
+    cache_status: 'prepared_history',
+    source_status: entry.source_status,
+    warnings: entry.warnings,
+    osm_path: entry.osm_path,
+    srtm_dir: entry.srtm_dir,
+    spawn_lat: entry.spawn_lat,
+    spawn_lon: entry.spawn_lon,
+    command: entry.command,
+    command_cwd: entry.command_cwd,
+    command_program: entry.command_program,
+    command_args: entry.command_args,
+  };
+}
+
 export default function Home() {
   const [health, setHealth] = useState<HealthState | null>(null);
   const [cacheAreas, setCacheAreas] = useState<CacheEntry[]>([]);
+  const [preparedAreas, setPreparedAreas] = useState<PreparedAreaEntry[]>([]);
   const [selectedBbox, setSelectedBbox] = useState<BBox | null>(null);
   const [manualBbox, setManualBbox] = useState({
     south: '',
@@ -77,6 +122,7 @@ export default function Home() {
   });
   const [spawnMode, setSpawnMode] = useState(false);
   const [filter, setFilter] = useState<FeatureFilter>(defaultFilter);
+  const [sourceControls, setSourceControls] = useState<SourceControls>(defaultSourceControls);
   const [useElevation, setUseElevation] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
@@ -85,6 +131,8 @@ export default function Home() {
   const [isPreparing, setIsPreparing] = useState(false);
   const [preparedArea, setPreparedArea] = useState<PrepareAreaResponse | null>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [launchStatus, setLaunchStatus] = useState<'idle' | 'launching' | 'launched' | 'failed'>('idle');
+  const [launchMessage, setLaunchMessage] = useState<string | null>(null);
 
   const selectedFeatureCount = useMemo(
     () => Object.values(filter).filter(Boolean).length,
@@ -94,6 +142,11 @@ export default function Home() {
   const cacheTotalSize = useMemo(
     () => cacheAreas.reduce((sum, area) => sum + area.size_bytes, 0),
     [cacheAreas],
+  );
+
+  const favoritePreparedCount = useMemo(
+    () => preparedAreas.filter((area) => area.favorite).length,
+    [preparedAreas],
   );
 
   const spawnBboxError = useMemo(() => {
@@ -107,13 +160,19 @@ export default function Home() {
   const clearPreparedOutput = useCallback(() => {
     setPreparedArea(null);
     setCopyStatus('idle');
+    setLaunchStatus('idle');
+    setLaunchMessage(null);
   }, []);
 
   const loadMeta = useCallback(async () => {
     setLoadingMeta(true);
     setMetaError(null);
 
-    const [healthResult, cacheResult] = await Promise.allSettled([fetchHealth(), fetchCacheAreas()]);
+    const [healthResult, cacheResult, preparedResult] = await Promise.allSettled([
+      fetchHealth(),
+      fetchCacheAreas(),
+      fetchPreparedAreas(),
+    ]);
 
     if (healthResult.status === 'fulfilled') {
       setHealth(healthResult.value);
@@ -129,6 +188,16 @@ export default function Home() {
       setMetaError((previous) => {
         const cacheMessage = cacheResult.reason instanceof Error ? cacheResult.reason.message : 'Unable to read cache areas';
         return previous ? `${previous}; ${cacheMessage}` : cacheMessage;
+      });
+    }
+
+    if (preparedResult.status === 'fulfilled') {
+      setPreparedAreas(preparedResult.value);
+    } else {
+      setPreparedAreas([]);
+      setMetaError((previous) => {
+        const preparedMessage = preparedResult.reason instanceof Error ? preparedResult.reason.message : 'Unable to read prepared history';
+        return previous ? `${previous}; ${preparedMessage}` : preparedMessage;
       });
     }
 
@@ -168,6 +237,77 @@ export default function Home() {
     }
     clearPreparedOutput();
     setFilter((current) => ({ ...current, [name]: !current[name] }));
+  };
+
+  const setSourceControl = <K extends keyof SourceControls>(name: K, value: SourceControls[K]) => {
+    if (isPreparing) {
+      return;
+    }
+    clearPreparedOutput();
+    setSourceControls((current) => ({ ...current, [name]: value }));
+  };
+
+  const toggleOvertureTheme = (theme: string) => {
+    if (isPreparing) {
+      return;
+    }
+    clearPreparedOutput();
+    setSourceControls((current) => {
+      const themes = current.overture_themes.includes(theme)
+        ? current.overture_themes.filter((value) => value !== theme)
+        : [...current.overture_themes, theme];
+      return { ...current, overture_themes: themes };
+    });
+  };
+
+  const loadPreparedEntry = (entry: PreparedAreaEntry) => {
+    if (isPreparing) {
+      return;
+    }
+    setSelectedBbox(entry.bbox);
+    setFilter(entry.filter);
+    setUseElevation(entry.use_elevation);
+    setSpawnPoint(
+      entry.spawn_lat !== null && entry.spawn_lon !== null
+        ? { lat: entry.spawn_lat, lon: entry.spawn_lon }
+        : null,
+    );
+    setSourceControls({
+      poi_source_mode: entry.overture ? (entry.poi_source_mode ?? 'overture_preferred') : 'osm_only',
+      overture_themes: entry.overture_themes.length > 0 ? entry.overture_themes : defaultSourceControls.overture_themes,
+      overture_failure_mode: entry.overture_failure_mode ?? defaultSourceControls.overture_failure_mode,
+      overture_timeout: entry.overture_timeout ?? defaultSourceControls.overture_timeout,
+    });
+    setPreparedArea(preparedEntryToResult(entry));
+    setPrepareError(null);
+    setCopyStatus('idle');
+    setLaunchStatus('idle');
+    setLaunchMessage(null);
+  };
+
+  const renamePreparedEntry = async (entry: PreparedAreaEntry) => {
+    const displayName = window.prompt('Name this prepared area', entry.display_name ?? '');
+    if (displayName === null) {
+      return;
+    }
+    try {
+      const updated = await updatePreparedArea(entry.cache_key, { display_name: displayName });
+      setPreparedAreas((current) => current.map((area) => (area.cache_key === updated.cache_key ? updated : area)));
+      if (preparedArea?.cache_key === updated.cache_key) {
+        setPreparedArea(preparedEntryToResult(updated));
+      }
+    } catch (error) {
+      setMetaError(error instanceof Error ? error.message : 'Unable to rename prepared area');
+    }
+  };
+
+  const togglePreparedFavorite = async (entry: PreparedAreaEntry) => {
+    try {
+      const updated = await updatePreparedArea(entry.cache_key, { favorite: !entry.favorite });
+      setPreparedAreas((current) => current.map((area) => (area.cache_key === updated.cache_key ? updated : area)));
+    } catch (error) {
+      setMetaError(error instanceof Error ? error.message : 'Unable to update favorite');
+    }
   };
 
   const handleBboxChange = (bbox: BBox) => {
@@ -254,12 +394,23 @@ export default function Home() {
         filter,
         use_elevation: useElevation,
         force_refresh: forceRefresh,
+        overture: sourceControls.poi_source_mode !== 'osm_only',
+        overture_themes: sourceControls.overture_themes,
+        poi_source_mode: sourceControls.poi_source_mode,
+        overture_failure_mode: sourceControls.overture_failure_mode,
+        overture_timeout: sourceControls.overture_timeout,
         ...(spawnPoint ? { spawn_lat: spawnPoint.lat, spawn_lon: spawnPoint.lon } : {}),
       });
       setPreparedArea(prepared);
-      const refreshedAreas = await fetchCacheAreas().catch(() => null);
+      const [refreshedAreas, refreshedPreparedAreas] = await Promise.all([
+        fetchCacheAreas().catch(() => null),
+        fetchPreparedAreas().catch(() => null),
+      ]);
       if (refreshedAreas) {
         setCacheAreas(refreshedAreas);
+      }
+      if (refreshedPreparedAreas) {
+        setPreparedAreas(refreshedPreparedAreas);
       }
     } catch (error) {
       setPrepareError(error instanceof Error ? error.message : 'Prepare request failed');
@@ -278,6 +429,27 @@ export default function Home() {
       setCopyStatus('copied');
     } catch {
       setCopyStatus('failed');
+    }
+  };
+
+  const handleLaunchRenderer = async () => {
+    if (!preparedArea) {
+      return;
+    }
+    setLaunchStatus('launching');
+    setLaunchMessage(null);
+    try {
+      const result = await launchRenderer({
+        osm_path: preparedArea.osm_path,
+        srtm_dir: preparedArea.srtm_dir,
+        spawn_lat: preparedArea.spawn_lat,
+        spawn_lon: preparedArea.spawn_lon,
+      });
+      setLaunchStatus('launched');
+      setLaunchMessage(`Renderer launched as pid ${result.pid}.`);
+    } catch (error) {
+      setLaunchStatus('failed');
+      setLaunchMessage(error instanceof Error ? error.message : 'Renderer launch failed');
     }
   };
 
@@ -317,6 +489,10 @@ export default function Home() {
               <strong>areas</strong>
               <span>{cacheAreas.length} cached · {formatBytes(cacheTotalSize)}</span>
             </div>
+            <div className="console-line">
+              <strong>prepared</strong>
+              <span>{preparedAreas.length} saved · {favoritePreparedCount} pinned</span>
+            </div>
             {metaError ? <p className="status-line error">{metaError}</p> : null}
             <button className="ghost-button" type="button" onClick={() => void loadMeta()} disabled={loadingMeta}>
               Refresh telemetry
@@ -329,6 +505,35 @@ export default function Home() {
             <output>{formatBbox(selectedBbox)}</output>
             <code>[spawn lat, spawn lon]</code>
             <output>{formatSpawnPoint(spawnPoint)}</output>
+          </section>
+
+          <section className="control-group" aria-labelledby="history-title">
+            <div className="section-heading">
+              <h2 id="history-title">Prepared history</h2>
+              <span>{preparedAreas.length} cached</span>
+            </div>
+            {preparedAreas.length === 0 ? (
+              <p className="microcopy">Prepared areas will appear here after the first successful prepare request.</p>
+            ) : (
+              <div className="history-list">
+                {preparedAreas.map((entry) => (
+                  <article className="history-entry" key={entry.cache_key}>
+                    <button className="history-main" type="button" onClick={() => loadPreparedEntry(entry)} disabled={isPreparing}>
+                      <strong>{entry.display_name || entry.cache_key.slice(0, 10)}</strong>
+                      <span>{sourceStatusLabel(entry.source_status)} · {formatBbox(entry.bbox)}</span>
+                    </button>
+                    <div className="history-actions">
+                      <button className="mini-button" type="button" onClick={() => void togglePreparedFavorite(entry)}>
+                        {entry.favorite ? '★' : '☆'}
+                      </button>
+                      <button className="mini-button" type="button" onClick={() => void renamePreparedEntry(entry)}>
+                        Name
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="control-group" aria-labelledby="features-title">
@@ -349,6 +554,63 @@ export default function Home() {
                 </label>
               ))}
             </div>
+          </section>
+
+          <section className="control-group" aria-labelledby="sources-title">
+            <div className="section-heading">
+              <h2 id="sources-title">Source controls</h2>
+              <span>{SOURCE_MODE_LABELS.find(([mode]) => mode === sourceControls.poi_source_mode)?.[1]}</span>
+            </div>
+            <label className="coordinate-field full-width-field">
+              <span>POI source mode</span>
+              <select
+                value={sourceControls.poi_source_mode}
+                disabled={isPreparing}
+                onChange={(event) => setSourceControl('poi_source_mode', event.target.value as PoiSourceMode)}
+              >
+                {SOURCE_MODE_LABELS.map(([mode, label]) => (
+                  <option key={mode} value={mode}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="form-grid source-theme-grid">
+              {OVERTURE_THEME_LABELS.map(([theme, label]) => (
+                <label className="field" key={theme}>
+                  <span>{label}</span>
+                  <input
+                    type="checkbox"
+                    checked={sourceControls.overture_themes.includes(theme)}
+                    disabled={isPreparing || sourceControls.poi_source_mode === 'osm_only'}
+                    onChange={() => toggleOvertureTheme(theme)}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="coordinate-grid source-options-grid">
+              <label className="coordinate-field">
+                <span>Fallback</span>
+                <select
+                  value={sourceControls.overture_failure_mode}
+                  disabled={isPreparing || sourceControls.poi_source_mode === 'osm_only'}
+                  onChange={(event) => setSourceControl('overture_failure_mode', event.target.value as SourceControls['overture_failure_mode'])}
+                >
+                  <option value="fallback_to_osm">Fallback to OSM</option>
+                  <option value="fail">Fail request</option>
+                </select>
+              </label>
+              <label className="coordinate-field">
+                <span>Timeout sec</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={sourceControls.overture_timeout}
+                  disabled={isPreparing || sourceControls.poi_source_mode === 'osm_only'}
+                  onChange={(event) => setSourceControl('overture_timeout', Math.max(1, Number(event.target.value) || 1))}
+                />
+              </label>
+            </div>
+            <p className="microcopy">Overture settings are sent only when the mode is not OSM-only.</p>
           </section>
 
           <section className="control-group" aria-labelledby="manual-bbox-title">
@@ -481,6 +743,10 @@ export default function Home() {
                   <dt>Cache key</dt>
                   <dd>{preparedArea.cache_key}</dd>
                 </div>
+                <div>
+                  <dt>Source status</dt>
+                  <dd>{sourceStatusLabel(preparedArea.source_status)}</dd>
+                </div>
                 {preparedArea.spawn_lat !== null && preparedArea.spawn_lon !== null ? (
                   <div>
                     <dt>Spawn point</dt>
@@ -488,14 +754,29 @@ export default function Home() {
                   </div>
                 ) : null}
               </dl>
+              {preparedArea.warnings.length > 0 ? (
+                <div className="warning-stack" role="status">
+                  {preparedArea.warnings.map((warning) => (
+                    <p className="status-line pending" key={warning}>{warning}</p>
+                  ))}
+                </div>
+              ) : null}
               <label className="command-box">
                 <span>Launch command</span>
                 <textarea readOnly value={preparedArea.command} rows={4} />
               </label>
-              <button className="ghost-button copy-button" type="button" onClick={() => void copyCommand()}>
-                {copyStatus === 'copied' ? 'Copied command' : 'Copy command'}
-              </button>
+              <div className="button-row result-actions">
+                <button className="ghost-button copy-button" type="button" onClick={() => void copyCommand()}>
+                  {copyStatus === 'copied' ? 'Copied command' : 'Copy command'}
+                </button>
+                <button className="ghost-button copy-button" type="button" onClick={() => void handleLaunchRenderer()} disabled={launchStatus === 'launching'}>
+                  {launchStatus === 'launching' ? 'Launching…' : 'Launch renderer'}
+                </button>
+              </div>
               {copyStatus === 'failed' ? <p className="status-line error">Clipboard permission denied. Select the command manually.</p> : null}
+              {launchMessage ? (
+                <p className={`status-line ${launchStatus === 'failed' ? 'error' : 'success'}`}>{launchMessage}</p>
+              ) : null}
             </section>
           ) : null}
         </div>

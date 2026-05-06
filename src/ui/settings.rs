@@ -5,28 +5,31 @@ pub struct LabelSettingsMut<'a> {
     pub street_signs: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
 }
 
-pub fn draw(
-    ctx: &egui::Context,
-    atm: &mut crate::atmosphere::AtmosphereSettings,
-    day: &mut crate::atmosphere::DayCycleState,
-    performance: &mut crate::app::PerformanceState,
-    minimap: &mut crate::ui::minimap::MinimapState,
-    label_settings: LabelSettingsMut<'_>,
-    show: &mut bool,
-) {
+pub struct SettingsDrawState<'a> {
+    pub atmosphere: &'a mut crate::atmosphere::AtmosphereSettings,
+    pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
+    pub performance: &'a mut crate::app::PerformanceState,
+    pub minimap: &'a mut crate::ui::minimap::MinimapState,
+    pub label_settings: LabelSettingsMut<'a>,
+    pub area_switch: &'a mut crate::app::AreaSwitchState,
+    pub show: &'a mut bool,
+}
+
+pub fn draw(ctx: &egui::Context, state: SettingsDrawState<'_>) {
     egui::Window::new("Settings")
-        .open(show)
+        .open(state.show)
         .default_width(320.0)
         .show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
-                day_cycle_section(ui, day, atm);
-                performance_section(ui, performance);
-                minimap_section(ui, minimap);
-                poi_labels_section(ui, label_settings.poi);
-                street_sign_labels_section(ui, label_settings.street_signs);
-                clouds_section(ui, atm);
-                fog_section(ui, atm);
-                sky_colors_section(ui, atm);
+                day_cycle_section(ui, state.day_cycle, state.atmosphere);
+                performance_section(ui, state.performance);
+                minimap_section(ui, state.minimap);
+                area_switch_section(ui, state.area_switch);
+                poi_labels_section(ui, state.label_settings.poi);
+                street_sign_labels_section(ui, state.label_settings.street_signs);
+                clouds_section(ui, state.atmosphere);
+                fog_section(ui, state.atmosphere);
+                sky_colors_section(ui, state.atmosphere);
             });
         });
 }
@@ -79,6 +82,28 @@ fn minimap_section(ui: &mut egui::Ui, minimap: &mut crate::ui::minimap::MinimapS
         .show(ui, |ui| {
             ui.checkbox(&mut minimap.visible, "Visible");
             ui.checkbox(&mut minimap.rotate_with_camera, "Rotate map with camera");
+        });
+}
+
+fn area_switch_section(ui: &mut egui::Ui, area_switch: &mut crate::app::AreaSwitchState) {
+    CollapsingHeader::new(RichText::new("Area Switching").strong())
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.label("Load a prepared .osm file without restarting. Camera height, yaw, pitch, labels, lighting, and minimap settings are preserved.");
+            ui.horizontal(|ui| {
+                ui.label("OSM path");
+                ui.text_edit_singleline(&mut area_switch.input_path);
+            });
+            ui.horizontal(|ui| {
+                ui.label("SRTM dir");
+                ui.text_edit_singleline(&mut area_switch.srtm_dir);
+            });
+            if ui.button("Load prepared area").clicked() {
+                area_switch.request_load = true;
+            }
+            if !area_switch.status.is_empty() {
+                ui.label(&area_switch.status);
+            }
         });
 }
 

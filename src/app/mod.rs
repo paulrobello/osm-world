@@ -33,6 +33,42 @@ impl Default for StreamingOptions {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct AreaSwitchState {
+    pub input_path: String,
+    pub srtm_dir: String,
+    pub status: String,
+    pub request_load: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AreaSwitchRequest {
+    pub input_path: String,
+    pub srtm_dir: Option<String>,
+}
+
+impl AreaSwitchState {
+    pub fn take_request(&mut self) -> Option<AreaSwitchRequest> {
+        if !self.request_load {
+            return None;
+        }
+        self.request_load = false;
+        let input_path = self.input_path.trim();
+        if input_path.is_empty() {
+            self.status = "Enter a prepared .osm path before loading.".to_string();
+            return None;
+        }
+        let srtm_dir = match self.srtm_dir.trim() {
+            "" => None,
+            value => Some(value.to_string()),
+        };
+        Some(AreaSwitchRequest {
+            input_path: input_path.to_string(),
+            srtm_dir,
+        })
+    }
+}
+
 pub struct AppOptions {
     pub window_width: f64,
     pub window_height: f64,
@@ -98,6 +134,7 @@ pub struct App {
     pub last_prefs_save: std::time::Instant,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
+    pub area_switch: AreaSwitchState,
 }
 
 impl App {
@@ -115,6 +152,12 @@ impl App {
         let prefs = crate::app::prefs::load_user_prefs();
         let mut minimap = crate::ui::minimap::MinimapState::default();
         prefs.minimap.apply_to_minimap_state(&mut minimap);
+        let area_switch = AreaSwitchState {
+            input_path: opts.input_path.clone().unwrap_or_default(),
+            srtm_dir: opts.srtm_dir.clone().unwrap_or_default(),
+            status: String::new(),
+            request_load: false,
+        };
 
         Self {
             state: None,
@@ -134,6 +177,43 @@ impl App {
             last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
             street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
+            area_switch,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn area_switch_state_trims_paths_and_ignores_empty_input() {
+        let mut empty = AreaSwitchState {
+            input_path: "   ".to_string(),
+            srtm_dir: " /tmp/srtm ".to_string(),
+            status: String::new(),
+            request_load: true,
+        };
+        assert!(empty.take_request().is_none());
+        assert!(!empty.request_load);
+
+        let mut with_srtm = AreaSwitchState {
+            input_path: " /tmp/city.osm ".to_string(),
+            srtm_dir: " /tmp/srtm ".to_string(),
+            status: String::new(),
+            request_load: true,
+        };
+        let request = with_srtm.take_request().unwrap();
+        assert_eq!(request.input_path, "/tmp/city.osm");
+        assert_eq!(request.srtm_dir.as_deref(), Some("/tmp/srtm"));
+
+        let mut without_srtm = AreaSwitchState {
+            input_path: "/tmp/city.osm".to_string(),
+            srtm_dir: "  ".to_string(),
+            status: String::new(),
+            request_load: true,
+        };
+        let request = without_srtm.take_request().unwrap();
+        assert_eq!(request.srtm_dir, None);
     }
 }

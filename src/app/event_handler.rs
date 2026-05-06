@@ -164,6 +164,7 @@ impl ApplicationHandler for App {
                             poi_labels: &mut self.poi_labels,
                             street_sign_labels: &mut self.street_sign_labels,
                             performance: &mut self.performance,
+                            area_switch: &mut self.area_switch,
                         },
                     );
                     self.persist_preferences_if_changed(false);

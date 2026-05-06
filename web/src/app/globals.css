@@ -498,7 +498,8 @@ h1 .accent,
   text-transform: uppercase;
 }
 
-.coordinate-field input {
+.coordinate-field input,
+.coordinate-field select {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -506,6 +507,15 @@ h1 .accent,
   color: var(--green);
   background: rgba(255, 255, 255, 0.04);
   font: 0.82rem / 1 var(--mono);
+}
+
+.full-width-field {
+  margin-bottom: 0.7rem;
+}
+
+.source-theme-grid,
+.source-options-grid {
+  margin-top: 0.7rem;
 }
 
 .field,
@@ -587,6 +597,74 @@ h1 .accent,
   background: var(--amber-soft);
 }
 
+.status-line.success {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.history-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.history-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.history-main {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  padding: 0.72rem 0.8rem;
+  text-align: left;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.history-main strong,
+.history-main span {
+  overflow-wrap: anywhere;
+}
+
+.history-main strong {
+  color: var(--green);
+  font: 700 0.8rem / 1.2 var(--mono);
+}
+
+.history-main span {
+  color: var(--ink-muted);
+  font: 0.72rem / 1.35 var(--mono);
+}
+
+.history-actions {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.mini-button {
+  border: 1px solid var(--line-bright);
+  border-radius: 12px;
+  padding: 0.45rem 0.55rem;
+  color: var(--amber);
+  background: rgba(255, 178, 62, 0.08);
+  font: 800 0.7rem / 1 var(--mono);
+  text-transform: uppercase;
+}
+
+.warning-stack {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.warning-stack .status-line {
+  margin-top: 0;
+}
+
 .result-list {
   display: grid;
   gap: 0.7rem;
@@ -630,6 +708,10 @@ h1 .accent,
 
 .copy-button {
   margin-top: 0.75rem;
+}
+
+.result-actions .copy-button {
+  margin-top: 0;
 }
 
 .spawn-controls {

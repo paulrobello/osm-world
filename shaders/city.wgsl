@@ -223,6 +223,22 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return out;
 }
 
+fn apply_building_facade_variation(color: vec3<f32>, feature: f32, normal: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    if (feature < 0.5 || feature >= 1.5 || abs(normal.y) > 0.35) {
+        return color;
+    }
+
+    let intensity = clamp(scene.visual_params.x, 0.0, 1.0);
+    if (intensity <= 0.0) {
+        return color;
+    }
+
+    let horizontal_band = sin(uv.y * 56.548667) * 0.5 + 0.5;
+    let floor_hint = smoothstep(0.48, 0.52, fract(uv.y * 9.0));
+    let modulation = mix(1.0, mix(0.90, 1.08, horizontal_band) * mix(0.96, 1.03, floor_hint), intensity * 0.35);
+    return clamp(color * modulation, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 fn shadow_cascade_debug_color(distance_to_camera: f32) -> vec3<f32> {
     let blend = shadow_cascade_blend(distance_to_camera);
     let colors = array<vec3<f32>, 5>(
@@ -259,7 +275,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let specular = mat.specular_strength * spec;
 
     let lighting = ambient + (diffuse + specular) * scene.light_intensity * (1.0 - scene.ambient_light);
-    let lit_color = in.color * lighting;
+    let surface_color = apply_building_facade_variation(in.color, in.feature_type, normal, in.uv);
+    let lit_color = surface_color * lighting;
 
     // Fog
     let fog_factor = get_fog_factor(dist);

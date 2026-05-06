@@ -720,9 +720,19 @@ fn point_in_polygon(point: (f32, f32), polygon: &[(f32, f32)]) -> bool {
 }
 
 pub fn generate_world_mesh(source: &WorldSource) -> WorldMesh {
+    generate_world_mesh_with_visual_detail(
+        source,
+        &crate::visual_detail::VisualDetailSettings::default(),
+    )
+}
+
+pub fn generate_world_mesh_with_visual_detail(
+    source: &WorldSource,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+) -> WorldMesh {
     let mut verts = Vec::new();
     let mut idxs = Vec::new();
-    append_world_mesh(source, &mut verts, &mut idxs);
+    append_world_mesh(source, visual_detail, &mut verts, &mut idxs);
 
     let (cx, cz) = source.conv.bbox_centre(
         source.min_lat,
@@ -797,7 +807,12 @@ fn append_road_feature_mesh(
     (cap_elevations, width, color)
 }
 
-fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+fn append_world_mesh(
+    source: &WorldSource,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     // Generate meshes in order: terrain, landuse, water, roads, railways, point features, street signs, buildings
 
     // Terrain
@@ -930,8 +945,13 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
     }
 
     // Buildings
-    for b in &source.buildings {
-        let color = super::color::building_color(&b.tags);
+    for (feature_idx, b) in source.buildings.iter().enumerate() {
+        let style = super::color::building_style(
+            &b.tags,
+            feature_idx as u64,
+            visual_detail.facade_variation,
+            visual_detail.roof_variation,
+        );
         let base_y = source.elevation_at(b.rep_lat, b.rep_lon);
         let height = super::building::parse_building_height(&b.tags);
         // Remove trailing duplicate point if present for the footprint
@@ -939,7 +959,9 @@ fn append_world_mesh(source: &WorldSource, verts: &mut Vec<Vertex>, idxs: &mut V
         if footprint.len() > 3 && footprint.first() == footprint.last() {
             footprint.pop();
         }
-        super::building::generate_building(&footprint, base_y, height, color, verts, idxs);
+        super::building::generate_building_with_style(
+            &footprint, base_y, height, style, verts, idxs,
+        );
     }
 
     log::info!(
@@ -962,10 +984,47 @@ pub fn generate_tile_mesh_set(
     refs: &crate::stream::tile::TileFeatureRefs,
     tile_size: f32,
 ) -> TileMeshSet {
+    generate_tile_mesh_set_with_visual_detail(
+        source,
+        coord,
+        refs,
+        tile_size,
+        &crate::visual_detail::VisualDetailSettings::default(),
+    )
+}
+
+pub fn generate_tile_mesh_set_with_visual_detail(
+    source: &WorldSource,
+    coord: crate::stream::TileCoord,
+    refs: &crate::stream::tile::TileFeatureRefs,
+    tile_size: f32,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+) -> TileMeshSet {
     let lods = [
-        generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Near),
-        generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Mid),
-        generate_tile_lod_mesh(source, coord, refs, tile_size, crate::stream::TileLod::Far),
+        generate_tile_lod_mesh(
+            source,
+            coord,
+            refs,
+            tile_size,
+            crate::stream::TileLod::Near,
+            visual_detail,
+        ),
+        generate_tile_lod_mesh(
+            source,
+            coord,
+            refs,
+            tile_size,
+            crate::stream::TileLod::Mid,
+            visual_detail,
+        ),
+        generate_tile_lod_mesh(
+            source,
+            coord,
+            refs,
+            tile_size,
+            crate::stream::TileLod::Far,
+            visual_detail,
+        ),
     ];
     let aabb = aabb_for_lods(coord, tile_size, &lods);
     TileMeshSet { coord, aabb, lods }
@@ -1004,6 +1063,7 @@ fn generate_tile_lod_mesh(
     refs: &crate::stream::tile::TileFeatureRefs,
     tile_size: f32,
     lod: crate::stream::TileLod,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
 ) -> CpuMesh {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -1021,7 +1081,14 @@ fn generate_tile_lod_mesh(
         &mut indices,
     );
 
-    append_tile_features_mesh(source, refs, lod, &mut vertices, &mut indices);
+    append_tile_features_mesh(
+        source,
+        refs,
+        lod,
+        visual_detail,
+        &mut vertices,
+        &mut indices,
+    );
 
     CpuMesh { vertices, indices }
 }
@@ -1030,6 +1097,7 @@ fn append_tile_features_mesh(
     source: &WorldSource,
     refs: &crate::stream::tile::TileFeatureRefs,
     lod: crate::stream::TileLod,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
@@ -1098,14 +1166,21 @@ fn append_tile_features_mesh(
         let Some(b) = source.buildings.get(feature_idx) else {
             continue;
         };
-        let color = super::color::building_color(&b.tags);
+        let style = super::color::building_style(
+            &b.tags,
+            feature_idx as u64,
+            visual_detail.facade_variation,
+            visual_detail.roof_variation,
+        );
         let base_y = source.elevation_at(b.rep_lat, b.rep_lon);
         let height = super::building::parse_building_height(&b.tags);
         let mut footprint = b.points.clone();
         if footprint.len() > 3 && footprint.first() == footprint.last() {
             footprint.pop();
         }
-        super::building::generate_building(&footprint, base_y, height, color, verts, idxs);
+        super::building::generate_building_with_style(
+            &footprint, base_y, height, style, verts, idxs,
+        );
     }
 }
 
@@ -1848,6 +1923,71 @@ mod tests {
             point_features: Vec::new(),
             street_signs: Vec::new(),
         }
+    }
+
+    #[test]
+    fn world_mesh_with_visual_detail_uses_building_style_roof_color() {
+        let mut source = empty_source();
+        let mut building = feature(
+            "building",
+            "yes",
+            vec![(0.0, 0.0), (8.0, 0.0), (8.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+        );
+        building
+            .tags
+            .insert("roof:material".to_string(), "metal".to_string());
+        source.buildings.push(building);
+        let visual = crate::visual_detail::VisualDetailSettings {
+            facade_variation: 1.0,
+            roof_variation: 1.0,
+            ..Default::default()
+        };
+
+        let mesh = generate_world_mesh_with_visual_detail(&source, &visual);
+
+        assert!(mesh.vertices.iter().any(|vertex| {
+            vertex.feature_type == crate::render::vertex::feature::BUILDING
+                && vertex.normal == [0.0, 1.0, 0.0]
+                && vertex.color == [0.42, 0.43, 0.46]
+        }));
+    }
+
+    #[test]
+    fn tile_mesh_with_visual_detail_uses_building_style_roof_color() {
+        let mut source = empty_source();
+        let mut building = feature(
+            "building",
+            "yes",
+            vec![(0.0, 0.0), (8.0, 0.0), (8.0, 8.0), (0.0, 8.0), (0.0, 0.0)],
+        );
+        building
+            .tags
+            .insert("roof:material".to_string(), "metal".to_string());
+        source.buildings.push(building);
+        let refs = crate::stream::tile::TileFeatureRefs {
+            buildings: vec![0],
+            ..Default::default()
+        };
+        let visual = crate::visual_detail::VisualDetailSettings {
+            facade_variation: 1.0,
+            roof_variation: 1.0,
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set_with_visual_detail(
+            &source,
+            crate::stream::TileCoord { x: 0, z: 0 },
+            &refs,
+            100.0,
+            &visual,
+        );
+
+        let near_vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
+        assert!(near_vertices.iter().any(|vertex| {
+            vertex.feature_type == crate::render::vertex::feature::BUILDING
+                && vertex.normal == [0.0, 1.0, 0.0]
+                && vertex.color == [0.42, 0.43, 0.46]
+        }));
     }
 
     #[test]

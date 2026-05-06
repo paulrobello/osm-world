@@ -154,7 +154,7 @@ pub fn init_wgpu(
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
             }
-            loaded_scene_from_source(&device, source)
+            loaded_scene_from_source(&device, source, options.visual_detail)
         }
         None => LoadedScene {
             scene: SceneBuffers::new(&device),
@@ -220,17 +220,19 @@ pub fn load_scene_resources(
         srtm_dir,
         visual_detail,
     )?;
-    Ok(loaded_scene_from_source(device, source))
+    Ok(loaded_scene_from_source(device, source, visual_detail))
 }
 
 fn loaded_scene_from_source(
     device: &Device,
     source: crate::world::loader::WorldSource,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
 ) -> LoadedScene {
     let coord_converter = source.conv;
     let poi_labels = crate::ui::poi_labels::labels_from_point_features(&source.point_features);
     let street_sign_labels = crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
-    let world = crate::world::loader::generate_world_mesh(&source);
+    let world =
+        crate::world::loader::generate_world_mesh_with_visual_detail(&source, visual_detail);
     LoadedScene {
         scene: SceneBuffers::from_mesh(device, world.vertices, world.indices),
         coord_converter: Some(coord_converter),

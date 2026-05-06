@@ -41,6 +41,30 @@ pub fn generate_building(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
+    generate_building_with_style(
+        footprint,
+        base_y,
+        height,
+        super::color::BuildingStyle {
+            wall_color: color,
+            roof_color: color,
+            band_color: color,
+            facade_intensity: 0.0,
+            roof_intensity: 0.0,
+        },
+        verts,
+        idxs,
+    );
+}
+
+pub fn generate_building_with_style(
+    footprint: &[(f32, f32)],
+    base_y: f32,
+    height: f32,
+    style: super::color::BuildingStyle,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     if footprint.len() < 3 {
         return;
     }
@@ -69,33 +93,33 @@ pub fn generate_building(
 
         let base_idx = verts.len() as u32;
 
-        // Four corners of the wall quad: bottom-left, bottom-right, top-left, top-right
+        // Four corners of the wall quad: bottom-left, bottom-right, top-left, top-right.
         verts.push(Vertex {
             position: [x0, base_y, z0],
             normal,
-            color,
+            color: style.wall_color,
             uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
         verts.push(Vertex {
             position: [x1, base_y, z1],
             normal,
-            color,
-            uv: [0.0, 0.0],
+            color: style.wall_color,
+            uv: [1.0, 0.0],
             feature_type: feature::BUILDING,
         });
         verts.push(Vertex {
             position: [x0, top_y, z0],
             normal,
-            color,
-            uv: [0.0, 0.0],
+            color: style.band_color,
+            uv: [0.0, 1.0],
             feature_type: feature::BUILDING,
         });
         verts.push(Vertex {
             position: [x1, top_y, z1],
             normal,
-            color,
-            uv: [0.0, 0.0],
+            color: style.band_color,
+            uv: [1.0, 1.0],
             feature_type: feature::BUILDING,
         });
 
@@ -116,7 +140,7 @@ pub fn generate_building(
         verts.push(Vertex {
             position: [x, top_y, z],
             normal: roof_normal,
-            color,
+            color: style.roof_color,
             uv: [0.0, 0.0],
             feature_type: feature::BUILDING,
         });
@@ -164,6 +188,50 @@ mod tests {
         let vx = c.position[0] - a.position[0];
         let vz = c.position[2] - a.position[2];
         uz * vx - ux * vz
+    }
+
+    #[test]
+    fn styled_building_uses_roof_color_for_roof_vertices() {
+        let footprint = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let style = super::super::color::BuildingStyle {
+            wall_color: [0.1, 0.2, 0.3],
+            roof_color: [0.4, 0.5, 0.6],
+            band_color: [0.7, 0.8, 0.9],
+            facade_intensity: 1.0,
+            roof_intensity: 1.0,
+        };
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        generate_building_with_style(&footprint, 0.0, 5.0, style, &mut vertices, &mut indices);
+
+        assert!(
+            vertices[16..]
+                .iter()
+                .all(|vertex| vertex.color == style.roof_color)
+        );
+    }
+
+    #[test]
+    fn styled_building_wall_uvs_encode_edge_progress_and_height_ratio() {
+        let footprint = [(0.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)];
+        let style = super::super::color::BuildingStyle {
+            wall_color: [0.1, 0.2, 0.3],
+            roof_color: [0.4, 0.5, 0.6],
+            band_color: [0.7, 0.8, 0.9],
+            facade_intensity: 1.0,
+            roof_intensity: 1.0,
+        };
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        generate_building_with_style(&footprint, 0.0, 5.0, style, &mut vertices, &mut indices);
+
+        assert_eq!(vertices[0].uv, [0.0, 0.0]);
+        assert_eq!(vertices[1].uv, [1.0, 0.0]);
+        assert_eq!(vertices[2].uv, [0.0, 1.0]);
+        assert_eq!(vertices[3].uv, [1.0, 1.0]);
+        assert_eq!(vertices[2].color, style.band_color);
     }
 
     #[test]

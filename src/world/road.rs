@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use crate::render::vertex::{Vertex, feature};
 
-// Keep road/path overlays at curb-height scale while preserving a small
-// ordering gap above landuse/water overlays.
+// Keep road/path overlays at curb-height scale; the city shader adds a tiny
+// feature-specific depth bias so these close layers do not z-fight.
 pub const ROAD_Y_OFFSET: f32 = 0.04;
 const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.008;
 const ROAD_BRIDGE_LAYER_Y_OFFSET: f32 = 5.0;

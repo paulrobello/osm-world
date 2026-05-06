@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use crate::render::vertex::{Vertex, feature};
 
+// Centimeter-scale visual lift; stable overlay ordering comes from the city
+// shader's feature-specific depth bias.
 pub const LANDUSE_Y_OFFSET: f32 = 0.01;
 const LANDUSE_OVERLAY_Y_OFFSET: f32 = 0.02;
 

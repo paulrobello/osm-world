@@ -202,12 +202,12 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
                 ways_by_id.insert(w.id(), idx);
             }
             Element::Relation(r) => {
-                let rel_type = r.tags().find(|(k, _)| *k == "type").map(|(_, v)| v);
-                if rel_type == Some("multipolygon") {
-                    let tags: HashMap<String, String> = r
-                        .tags()
-                        .map(|(k, v)| (k.to_string(), v.to_string()))
-                        .collect();
+                let tags: HashMap<String, String> = r
+                    .tags()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let rel_type = tags.get("type").map(String::as_str);
+                if rel_type == Some("multipolygon") || is_transit_route_relation(&tags) {
                     let members: Vec<RelationMember> = r
                         .members()
                         .filter_map(|m| {
@@ -249,6 +249,14 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
         relations,
         bounds,
     })
+}
+
+fn is_transit_route_relation(tags: &HashMap<String, String>) -> bool {
+    tags.get("type").map(String::as_str) == Some("route")
+        && matches!(
+            tags.get("route").map(String::as_str),
+            Some("bus" | "trolleybus" | "tram" | "train" | "subway" | "light_rail")
+        )
 }
 
 fn parse_node_attrs(
@@ -505,7 +513,10 @@ pub fn parse_osm_xml_str(xml: &str) -> Result<OsmData> {
                 b"relation" if in_relation => {
                     in_relation = false;
                     let rel_type = current_tags.get("type").map(|s| s.as_str());
-                    if rel_type == Some("multipolygon") && !current_members.is_empty() {
+                    let is_transit_route = is_transit_route_relation(&current_tags);
+                    if (rel_type == Some("multipolygon") || is_transit_route)
+                        && !current_members.is_empty()
+                    {
                         relations.push(OsmRelation {
                             tags: current_tags.clone(),
                             members: current_members.clone(),

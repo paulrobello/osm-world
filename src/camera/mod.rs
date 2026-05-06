@@ -255,7 +255,12 @@ impl Flycam {
                 visual.vegetation_max_distance,
                 if visual.vegetation_visible { 1.0 } else { 0.0 },
             ],
-            visual_params2: [landmark_detail_value(visual.landmark_detail), 0.0, 0.0, 0.0],
+            visual_params2: [
+                landmark_detail_value(visual.landmark_detail),
+                if visual.bike_ped_overlay { 1.0 } else { 0.0 },
+                0.0,
+                0.0,
+            ],
         }
     }
 

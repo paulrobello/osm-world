@@ -16,7 +16,10 @@ pub struct LoadedScene {
     pub scene: SceneBuffers,
     pub coord_converter: Option<crate::geo::CoordConverter>,
     pub poi_labels: Vec<crate::ui::poi_labels::PoiLabel>,
+    pub address_labels: Vec<crate::ui::poi_labels::PoiLabel>,
     pub street_sign_labels: Vec<crate::ui::poi_labels::StreetSignLabel>,
+    pub search_entries: Vec<crate::ui::search::SearchEntry>,
+    pub identifiables: Vec<crate::ui::inspect::IdentifiableFeature>,
 }
 
 pub struct AppState {
@@ -30,7 +33,10 @@ pub struct AppState {
     pub camera: Flycam,
     pub coord_converter: Option<crate::geo::CoordConverter>,
     pub poi_labels: Vec<crate::ui::poi_labels::PoiLabel>,
+    pub address_labels: Vec<crate::ui::poi_labels::PoiLabel>,
     pub street_sign_labels: Vec<crate::ui::poi_labels::StreetSignLabel>,
+    pub search_entries: Vec<crate::ui::search::SearchEntry>,
+    pub identifiables: Vec<crate::ui::inspect::IdentifiableFeature>,
     pub camera_bg: SceneBindGroup,
     pub pipeline: CityPipeline,
     pub sky_pipeline: SkyPipeline,
@@ -160,7 +166,10 @@ pub fn init_wgpu(
             scene: SceneBuffers::new(&device),
             coord_converter: None,
             poi_labels: Vec::new(),
+            address_labels: Vec::new(),
             street_sign_labels: Vec::new(),
+            search_entries: Vec::new(),
+            identifiables: Vec::new(),
         },
     };
 
@@ -194,7 +203,10 @@ pub fn init_wgpu(
             camera,
             coord_converter: loaded_scene.coord_converter,
             poi_labels: loaded_scene.poi_labels,
+            address_labels: loaded_scene.address_labels,
             street_sign_labels: loaded_scene.street_sign_labels,
+            search_entries: loaded_scene.search_entries,
+            identifiables: loaded_scene.identifiables,
             camera_bg,
             pipeline,
             sky_pipeline,
@@ -230,14 +242,23 @@ fn loaded_scene_from_source(
 ) -> LoadedScene {
     let coord_converter = source.conv;
     let poi_labels = crate::ui::poi_labels::labels_from_point_features(&source.point_features);
+    let address_labels = crate::ui::poi_labels::labels_from_address_features(
+        &source.buildings,
+        &source.address_points,
+    );
     let street_sign_labels = crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
+    let search_entries = crate::ui::search::build_search_index(&source);
+    let identifiables = crate::ui::inspect::build_identifiables(&source);
     let world =
         crate::world::loader::generate_world_mesh_with_visual_detail(&source, visual_detail);
     LoadedScene {
         scene: SceneBuffers::from_mesh(device, world.vertices, world.indices),
         coord_converter: Some(coord_converter),
         poi_labels,
+        address_labels,
         street_sign_labels,
+        search_entries,
+        identifiables,
     }
 }
 

@@ -56,9 +56,11 @@ pub struct WorldSource {
     pub buildings: Vec<ResolvedFeature>,
     pub roads: Vec<ResolvedFeature>,
     pub railways: Vec<ResolvedFeature>,
+    pub transit_routes: Vec<ResolvedFeature>,
     pub waters: Vec<ResolvedFeature>,
     pub landuses: Vec<ResolvedFeature>,
     pub point_features: Vec<ResolvedPointFeature>,
+    pub address_points: Vec<ResolvedPointFeature>,
     pub street_signs: Vec<ResolvedStreetSign>,
 }
 
@@ -292,9 +294,11 @@ pub fn load_world_source_with_visual_detail(
     let mut buildings: Vec<ResolvedFeature> = Vec::new();
     let mut roads: Vec<ResolvedFeature> = Vec::new();
     let mut railways: Vec<ResolvedFeature> = Vec::new();
+    let mut transit_routes: Vec<ResolvedFeature> = Vec::new();
     let mut waters: Vec<ResolvedFeature> = Vec::new();
     let mut landuses: Vec<ResolvedFeature> = Vec::new();
     let mut point_features: Vec<ResolvedPointFeature> = Vec::new();
+    let mut address_points: Vec<ResolvedPointFeature> = Vec::new();
 
     // 5. Resolve ways to world coordinates and classify
     for way in &osm_data.ways {
@@ -402,8 +406,42 @@ pub fn load_world_source_with_visual_detail(
         }
     }
 
-    // Also process multipolygon relations as potential landuse/water features
+    // Also process relation geometry for transit routes and multipolygon landuse/water features.
     for rel in &osm_data.relations {
+        if super::transit::is_transit_route(&rel.tags) {
+            for member in &rel.members {
+                let Some(&way_idx) = osm_data.ways_by_id.get(&member.way_id) else {
+                    continue;
+                };
+                let way = &osm_data.ways[way_idx];
+                let mut points = Vec::new();
+                let mut elevations = Vec::new();
+                let mut sum_lat = 0.0f64;
+                let mut sum_lon = 0.0f64;
+                let mut count = 0usize;
+                for &node_id in &way.node_refs {
+                    if let Some(node) = osm_data.nodes.get(&node_id) {
+                        let (x, z) = conv.to_world_xz(node.lat, node.lon);
+                        points.push((x, z));
+                        elevations.push(elev(node.lat, node.lon));
+                        sum_lat += node.lat;
+                        sum_lon += node.lon;
+                        count += 1;
+                    }
+                }
+                if points.len() >= 2 && count > 0 {
+                    transit_routes.push(ResolvedFeature {
+                        tags: rel.tags.clone(),
+                        points,
+                        elevations,
+                        rep_lat: sum_lat / count as f64,
+                        rep_lon: sum_lon / count as f64,
+                    });
+                }
+            }
+            continue;
+        }
+
         let mut all_points: Vec<(f32, f32)> = Vec::new();
         let mut elevations: Vec<f32> = Vec::new();
         let mut sum_lat = 0.0f64;
@@ -428,13 +466,13 @@ pub fn load_world_source_with_visual_detail(
             }
         }
 
+        let tags = &rel.tags;
         if all_points.len() < 3 {
             continue;
         }
 
         let rep_lat = sum_lat / count as f64;
         let rep_lon = sum_lon / count as f64;
-        let tags = &rel.tags;
 
         let is_water = tags.get("natural").map(|s| s.as_str()) == Some("water")
             || tags.get("natural").map(|s| s.as_str()) == Some("wetland")
@@ -476,10 +514,25 @@ pub fn load_world_source_with_visual_detail(
     }
 
     for node in osm_data.nodes.values() {
+        let raw_point = conv.to_world_xz(node.lat, node.lon);
+        let point = move_point_outside_containing_building(raw_point, &buildings);
         if super::point_feature::point_feature_style(&node.tags).is_some() {
-            let raw_point = conv.to_world_xz(node.lat, node.lon);
-            let point = move_point_outside_containing_building(raw_point, &buildings);
+            let mut tags = node.tags.clone();
+            if !tags.contains_key("name") {
+                if let Some(name) = containing_building_name(raw_point, &buildings) {
+                    tags.insert("name".to_string(), name.to_string());
+                }
+            }
             point_features.push(ResolvedPointFeature {
+                tags,
+                point,
+                elevation: elev(node.lat, node.lon),
+                rep_lat: node.lat,
+                rep_lon: node.lon,
+            });
+        }
+        if super::address::address_label_text(&node.tags).is_some() {
+            address_points.push(ResolvedPointFeature {
                 tags: node.tags.clone(),
                 point,
                 elevation: elev(node.lat, node.lon),
@@ -512,9 +565,11 @@ pub fn load_world_source_with_visual_detail(
         buildings,
         roads,
         railways,
+        transit_routes,
         waters,
         landuses,
         point_features,
+        address_points,
         street_signs,
     })
 }
@@ -627,6 +682,17 @@ fn evenly_capped_points(candidates: &[(f32, f32)], max_points: usize) -> Vec<(f3
 }
 
 const POINT_FEATURE_BUILDING_CLEARANCE_METRES: f32 = 2.0;
+
+fn containing_building_name(point: (f32, f32), buildings: &[ResolvedFeature]) -> Option<&str> {
+    buildings
+        .iter()
+        .find(|building| point_in_polygon(point, &building.points))?
+        .tags
+        .get("name")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
 
 fn move_point_outside_containing_building(
     point: (f32, f32),
@@ -915,6 +981,18 @@ fn append_world_mesh(
             cap.width,
             cap.radius_scale,
             cap.color,
+            verts,
+            idxs,
+        );
+    }
+
+    for route in &source.transit_routes {
+        super::road::generate_road_with_elevations_and_feature_type(
+            &route.points,
+            &route.elevations,
+            2.8,
+            super::transit::transit_route_color(&route.tags),
+            crate::render::vertex::feature::ROAD_PATH,
             verts,
             idxs,
         );
@@ -1540,6 +1618,51 @@ mod tests {
     }
 
     #[test]
+    fn poi_node_inside_named_building_inherits_building_name_when_unnamed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("unnamed-poi-inside-named-building.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.999"/>
+  <node id="3" lat="38.001" lon="-120.999"/>
+  <node id="4" lat="38.001" lon="-121.0"/>
+  <node id="5" lat="38.0005" lon="-120.9995">
+    <tag k="amenity" v="library"/>
+  </node>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="building" v="yes"/>
+    <tag k="name" v="Woodland Public Library"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.point_features.len(), 1);
+        assert_eq!(
+            source.point_features[0]
+                .tags
+                .get("name")
+                .map(String::as_str),
+            Some("Woodland Public Library")
+        );
+        assert_eq!(
+            crate::world::point_feature::point_feature_label(&source.point_features[0].tags)
+                .as_deref(),
+            Some("Woodland Public Library")
+        );
+    }
+
+    #[test]
     fn load_world_source_synthesizes_trees_for_orchard_areas() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("orchard.osm");
@@ -1867,9 +1990,11 @@ mod tests {
             buildings: Vec::new(),
             roads: Vec::new(),
             railways: Vec::new(),
+            transit_routes: Vec::new(),
             waters: Vec::new(),
             landuses: Vec::new(),
             point_features: Vec::new(),
+            address_points: Vec::new(),
             street_signs: Vec::new(),
         };
 
@@ -1921,9 +2046,11 @@ mod tests {
             buildings: Vec::new(),
             roads: Vec::new(),
             railways: Vec::new(),
+            transit_routes: Vec::new(),
             waters: Vec::new(),
             landuses: Vec::new(),
             point_features: Vec::new(),
+            address_points: Vec::new(),
             street_signs: Vec::new(),
         }
     }

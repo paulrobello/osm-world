@@ -20,6 +20,7 @@ pub enum PointFeatureKind {
     Landmark,
     Nature,
     Poi,
+    Transit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -72,6 +73,13 @@ pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatur
     ) {
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Nature,
+            poi_category: None,
+            landmark_kind: None,
+        });
+    }
+    if crate::world::transit::transit_kind(tags).is_some() {
+        return Some(PointFeatureStyle {
+            kind: PointFeatureKind::Transit,
             poi_category: None,
             landmark_kind: None,
         });
@@ -139,6 +147,7 @@ pub fn point_feature_label(tags: &HashMap<String, String>) -> Option<String> {
             PoiCategory::Tourism => "Tourism".to_string(),
             PoiCategory::Leisure => "Park".to_string(),
         }),
+        PointFeatureKind::Transit => crate::world::transit::transit_label(tags),
         PointFeatureKind::Tree | PointFeatureKind::Nature => None,
     }
 }
@@ -152,7 +161,9 @@ fn poi_category(tags: &HashMap<String, String>) -> Option<PoiCategory> {
     }
     if matches!(
         tags.get("amenity").map(String::as_str),
-        Some("school" | "hospital" | "clinic" | "pharmacy" | "bank" | "fuel" | "parking")
+        Some(
+            "school" | "library" | "hospital" | "clinic" | "pharmacy" | "bank" | "fuel" | "parking"
+        )
     ) {
         return Some(PoiCategory::Service);
     }
@@ -228,11 +239,13 @@ pub fn generate_point_feature_with_visual_detail(
             verts,
             idxs,
         ),
+        PointFeatureKind::Transit => append_transit_marker(tags, point, elevation, verts, idxs),
     }
     let marker_uv_kind = match style.kind {
         PointFeatureKind::Tree => 1.0,
         PointFeatureKind::Landmark => 2.0,
         PointFeatureKind::Nature | PointFeatureKind::Poi => 0.0,
+        PointFeatureKind::Transit => 3.0,
     };
     for vertex in &mut verts[first_vertex..] {
         vertex.uv[0] = marker_uv_kind;
@@ -658,6 +671,49 @@ fn poi_color(category: PoiCategory) -> [f32; 3] {
         PoiCategory::Tourism => POI_TOURISM_COLOR,
         PoiCategory::Leisure => POI_LEISURE_COLOR,
     }
+}
+
+fn append_transit_marker(
+    tags: &HashMap<String, String>,
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let kind = crate::world::transit::transit_kind(tags)
+        .expect("Transit point styles carry a transit kind");
+    let color = crate::world::transit::transit_color(kind);
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.18, 0.18),
+            height: 3.2,
+            color: POI_POST_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation + 3.25,
+            half_extents: (0.95, 0.35),
+            height: 0.95,
+            color,
+        },
+        verts,
+        idxs,
+    );
+    append_pyramid(
+        point,
+        elevation + 4.25,
+        elevation + 5.1,
+        0.8,
+        color,
+        verts,
+        idxs,
+    );
 }
 
 struct BoxSpec {

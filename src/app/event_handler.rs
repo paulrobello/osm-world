@@ -144,15 +144,41 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::MouseInput { button, state, .. } => {
-                self.controller.process_mouse_button(button, state);
+            WindowEvent::CursorMoved { position, .. } => {
+                self.last_cursor_pos = Some(egui::pos2(position.x as f32, position.y as f32));
+            }
+            WindowEvent::MouseInput {
+                button,
+                state: button_state,
+                ..
+            } => {
+                self.controller.process_mouse_button(button, button_state);
+                if button == winit::event::MouseButton::Left
+                    && button_state == winit::event::ElementState::Pressed
+                {
+                    if let (Some(state), Some(cursor_pos)) = (&self.state, self.last_cursor_pos) {
+                        let scale = state.window.scale_factor() as f32;
+                        let viewport_size = egui::vec2(
+                            state.surface_config.width as f32 / scale,
+                            state.surface_config.height as f32 / scale,
+                        );
+                        let click = egui::pos2(cursor_pos.x / scale, cursor_pos.y / scale);
+                        self.inspect.selected = crate::ui::inspect::pick_identifiable(
+                            &state.identifiables,
+                            &state.camera,
+                            viewport_size,
+                            click,
+                            18.0,
+                        );
+                    }
+                }
             }
             WindowEvent::RedrawRequested => {
                 update::update(self);
 
                 let screenshot_path = self.check_screenshot_cloned();
 
-                if let (Some(state), Some(egui)) = (&self.state, &mut self.egui) {
+                if let (Some(state), Some(egui)) = (&mut self.state, &mut self.egui) {
                     render_loop::render(
                         state,
                         egui,
@@ -163,7 +189,10 @@ impl ApplicationHandler for App {
                             show_settings: &mut self.show_settings,
                             minimap: &mut self.minimap,
                             poi_labels: &mut self.poi_labels,
+                            address_labels: &mut self.address_labels,
                             street_sign_labels: &mut self.street_sign_labels,
+                            search: &mut self.search,
+                            inspect: &mut self.inspect,
                             performance: &mut self.performance,
                             area_switch: &mut self.area_switch,
                             visual_detail: &mut self.visual_detail,

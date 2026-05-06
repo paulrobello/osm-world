@@ -261,6 +261,26 @@ fn should_discard_vegetation(feature_type: f32, uv: vec2<f32>, distance_to_camer
         && (scene.visual_params.w < 0.5 || distance_to_camera > scene.visual_params.z);
 }
 
+fn apply_bike_ped_overlay(color: vec3<f32>, feature_type: f32) -> vec3<f32> {
+    if (scene.visual_params2.y < 0.5) {
+        return color;
+    }
+    if (feature_type > 2.20 && feature_type < 2.35) {
+        return mix(color, vec3<f32>(0.16, 0.95, 0.75), 0.70);
+    }
+    if (feature_type > 3.95 && feature_type < 4.50) {
+        return mix(color, vec3<f32>(0.35, 0.82, 0.30), 0.35);
+    }
+    if (feature_type > 6.50 && feature_type < 7.50) {
+        return mix(color, vec3<f32>(1.0, 0.92, 0.20), 0.45);
+    }
+    if ((feature_type > 1.95 && feature_type < 2.20) || (feature_type > 4.95 && feature_type < 5.20)) {
+        let grey = dot(color, vec3<f32>(0.299, 0.587, 0.114));
+        return mix(vec3<f32>(grey), color, 0.25) * 0.55;
+    }
+    return color;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(in.world_normal);
@@ -287,7 +307,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let specular = mat.specular_strength * spec;
 
     let lighting = ambient + (diffuse + specular) * scene.light_intensity * (1.0 - scene.ambient_light);
-    let surface_color = apply_building_facade_variation(in.color, in.feature_type, normal, in.uv);
+    let varied_color = apply_building_facade_variation(in.color, in.feature_type, normal, in.uv);
+    let surface_color = apply_bike_ped_overlay(varied_color, in.feature_type);
     let lit_color = surface_color * lighting;
 
     // Fog

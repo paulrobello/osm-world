@@ -38,7 +38,10 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
             state.scene = loaded.scene;
             state.coord_converter = loaded.coord_converter;
             state.poi_labels = loaded.poi_labels;
+            state.address_labels = loaded.address_labels;
             state.street_sign_labels = loaded.street_sign_labels;
+            state.search_entries = loaded.search_entries;
+            state.identifiables = loaded.identifiables;
             mark_area_load_success(app, request);
         }
         Err(err) => {

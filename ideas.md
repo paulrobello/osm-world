@@ -31,14 +31,6 @@ Remove completed items from this list.
 
 ## Interaction and navigation ideas
 
-9. **Click-to-identify features**
-    - Add GPU or CPU picking so users can click a building, road, POI, or sign and inspect tags/name/source in an egui panel.
-    - Value: turns the renderer into a debugging/exploration tool.
-
-10. **Search and fly-to location**
-    - Add a small in-app search box for loaded street names, POIs, and landmarks.
-    - Selecting a result moves the camera/spawn near that feature.
-
 11. **Route/path preview overlay**
     - Let users enter a start/end point or select two POIs, then draw a simple route overlay using loaded road geometry.
     - First version can be visual-only and operate on the loaded road graph.
@@ -52,18 +44,6 @@ Remove completed items from this list.
     - Value: useful for validating coordinate/elevation accuracy.
 
 ## Data and source ideas
-
-14. **Address and house-number labels**
-    - Parse/display address tags at close range, with independent label caps.
-    - Value: makes neighborhoods more recognizable.
-
-15. **Public transit layer**
-    - Render bus stops, train stations, platforms, and transit routes with distinctive markers and optional labels.
-    - Builds naturally on existing railway and point-feature infrastructure.
-
-16. **Bike/pedestrian overlay mode**
-    - Add a toggle that emphasizes footways, cycleways, crossings, paths, parks, and amenities while de-emphasizing car roads.
-    - Value: new exploration mode from existing OSM tags.
 
 17. **Map data diagnostics endpoint**
     - Add an API endpoint that summarizes feature counts, bbox size, source status, cache paths, and estimated renderer cost before launching.

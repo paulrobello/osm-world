@@ -22,6 +22,7 @@ pub struct VisualDetailSettings {
     pub vegetation_density: f32,
     pub synthetic_tree_cap: usize,
     pub vegetation_max_distance: f32,
+    pub bike_ped_overlay: bool,
     pub reload_required: bool,
 }
 
@@ -43,6 +44,7 @@ impl VisualDetailSettings {
                 vegetation_density: 0.35,
                 synthetic_tree_cap: 60,
                 vegetation_max_distance: 1200.0,
+                bike_ped_overlay: false,
                 reload_required: false,
             },
             VisualPreset::Balanced => Self {
@@ -54,6 +56,7 @@ impl VisualDetailSettings {
                 vegetation_density: 1.0,
                 synthetic_tree_cap: 120,
                 vegetation_max_distance: 2600.0,
+                bike_ped_overlay: false,
                 reload_required: false,
             },
             VisualPreset::Showcase => Self {
@@ -65,6 +68,7 @@ impl VisualDetailSettings {
                 vegetation_density: 1.8,
                 synthetic_tree_cap: 240,
                 vegetation_max_distance: 4200.0,
+                bike_ped_overlay: false,
                 reload_required: false,
             },
         }
@@ -152,6 +156,7 @@ mod tests {
             vegetation_density: 4.0,
             synthetic_tree_cap: 0,
             vegetation_max_distance: -10.0,
+            bike_ped_overlay: true,
             reload_required: false,
         };
 

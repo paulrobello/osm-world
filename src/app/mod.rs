@@ -134,7 +134,11 @@ pub struct App {
     pub persisted_camera: Option<crate::app::prefs::CameraPrefs>,
     pub last_prefs_save: std::time::Instant,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
+    pub address_labels: crate::ui::poi_labels::AddressLabelSettings,
     pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
+    pub search: crate::ui::search::SearchState,
+    pub inspect: crate::ui::inspect::InspectState,
+    pub last_cursor_pos: Option<egui::Pos2>,
     pub area_switch: AreaSwitchState,
     pub visual_detail: crate::visual_detail::VisualDetailSettings,
 }
@@ -179,7 +183,11 @@ impl App {
             persisted_camera: prefs.camera,
             last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
+            address_labels: crate::ui::poi_labels::AddressLabelSettings::default(),
             street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
+            search: crate::ui::search::SearchState::default(),
+            inspect: crate::ui::inspect::InspectState::default(),
+            last_cursor_pos: None,
             area_switch,
             visual_detail,
         }

@@ -2,6 +2,7 @@ use egui::{CollapsingHeader, ComboBox, RichText, ScrollArea, Slider};
 
 pub struct LabelSettingsMut<'a> {
     pub poi: &'a mut crate::ui::poi_labels::PoiLabelSettings,
+    pub addresses: &'a mut crate::ui::poi_labels::AddressLabelSettings,
     pub street_signs: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
 }
 
@@ -28,6 +29,7 @@ pub fn draw(ctx: &egui::Context, state: SettingsDrawState<'_>) {
                 minimap_section(ui, state.minimap);
                 area_switch_section(ui, state.area_switch);
                 poi_labels_section(ui, state.label_settings.poi);
+                address_labels_section(ui, state.label_settings.addresses);
                 street_sign_labels_section(ui, state.label_settings.street_signs);
                 clouds_section(ui, state.atmosphere);
                 fog_section(ui, state.atmosphere);
@@ -173,6 +175,7 @@ fn visual_detail_section(
                     .step_by(25.0)
                     .text("Vegetation max distance"),
             );
+            ui.checkbox(&mut settings.bike_ped_overlay, "Bike/ped overlay mode");
             settings.clamp();
             if settings.reload_required {
                 ui.colored_label(
@@ -246,6 +249,23 @@ fn poi_labels_section(ui: &mut egui::Ui, poi_labels: &mut crate::ui::poi_labels:
                     .step_by(25.0)
                     .text("Max distance (m)"),
             );
+        });
+}
+
+fn address_labels_section(
+    ui: &mut egui::Ui,
+    address_labels: &mut crate::ui::poi_labels::AddressLabelSettings,
+) {
+    CollapsingHeader::new(RichText::new("Address Labels").strong())
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.checkbox(&mut address_labels.visible, "Visible");
+            ui.add(
+                Slider::new(&mut address_labels.max_distance, 20.0..=500.0)
+                    .step_by(10.0)
+                    .text("Max distance (m)"),
+            );
+            ui.add(Slider::new(&mut address_labels.max_visible, 1..=200).text("Max labels"));
         });
 }
 

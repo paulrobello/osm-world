@@ -3,6 +3,7 @@ use crate::world::loader::ResolvedPointFeature;
 use crate::world::point_feature::{PointFeatureKind, point_feature_label, point_feature_style};
 
 const MAX_VISIBLE_LABELS: usize = 24;
+const DEFAULT_MAX_ADDRESS_LABELS: usize = 48;
 const STREET_SIGN_BOARD_LABEL_Y_OFFSET: f32 = 2.56;
 const STREET_SIGN_ON_SIGN_DISTANCE: f32 = 120.0;
 
@@ -17,6 +18,23 @@ impl Default for PoiLabelSettings {
         Self {
             visible: true,
             max_distance: 300.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AddressLabelSettings {
+    pub visible: bool,
+    pub max_distance: f32,
+    pub max_visible: usize,
+}
+
+impl Default for AddressLabelSettings {
+    fn default() -> Self {
+        Self {
+            visible: true,
+            max_distance: 90.0,
+            max_visible: DEFAULT_MAX_ADDRESS_LABELS,
         }
     }
 }
@@ -52,6 +70,7 @@ pub struct StreetSignLabel {
 struct LabelDrawStyle {
     id_prefix: &'static str,
     fill: egui::Color32,
+    max_visible: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,7 +99,7 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
             let style = point_feature_style(&feature.tags)?;
             if !matches!(
                 style.kind,
-                PointFeatureKind::Poi | PointFeatureKind::Landmark
+                PointFeatureKind::Poi | PointFeatureKind::Landmark | PointFeatureKind::Transit
             ) {
                 return None;
             }
@@ -88,6 +107,7 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
             let y_offset = match style.kind {
                 PointFeatureKind::Landmark => 5.8,
                 PointFeatureKind::Poi => 5.4,
+                PointFeatureKind::Transit => 5.2,
                 PointFeatureKind::Tree | PointFeatureKind::Nature => return None,
             };
             Some(PoiLabel {
@@ -100,6 +120,27 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
             })
         })
         .collect()
+}
+
+pub fn labels_from_address_features(
+    buildings: &[crate::world::loader::ResolvedFeature],
+    address_points: &[ResolvedPointFeature],
+) -> Vec<PoiLabel> {
+    let mut labels: Vec<PoiLabel> = buildings
+        .iter()
+        .filter_map(|building| {
+            let text = crate::world::address::address_label_text(&building.tags)?;
+            let position = feature_label_position(building, 3.2)?;
+            Some(PoiLabel { text, position })
+        })
+        .collect();
+    labels.extend(address_points.iter().filter_map(|point| {
+        Some(PoiLabel {
+            text: crate::world::address::address_label_text(&point.tags)?,
+            position: glam::vec3(point.point.0, point.elevation + 2.0, point.point.1),
+        })
+    }));
+    labels
 }
 
 pub fn labels_from_street_signs(
@@ -137,6 +178,29 @@ pub fn draw(
         LabelDrawStyle {
             id_prefix: "poi_label",
             fill: egui::Color32::from_black_alpha(185),
+            max_visible: MAX_VISIBLE_LABELS,
+        },
+    );
+}
+
+pub fn draw_addresses(
+    ctx: &egui::Context,
+    camera: &Flycam,
+    labels: &[PoiLabel],
+    settings: &AddressLabelSettings,
+    viewport_size: egui::Vec2,
+) {
+    draw_projected_labels(
+        ctx,
+        camera,
+        labels,
+        settings.visible,
+        settings.max_distance,
+        viewport_size,
+        LabelDrawStyle {
+            id_prefix: "address_label",
+            fill: egui::Color32::from_rgba_unmultiplied(30, 30, 35, 205),
+            max_visible: settings.max_visible,
         },
     );
 }
@@ -180,6 +244,7 @@ pub fn draw_street_signs(
                 &LabelDrawStyle {
                     id_prefix: "street_sign_label",
                     fill: egui::Color32::from_rgba_unmultiplied(8, 74, 38, 220),
+                    max_visible: MAX_VISIBLE_LABELS,
                 },
                 index,
                 &label.text,
@@ -216,7 +281,7 @@ fn draw_projected_labels(
         .collect();
     visible.sort_by(|a, b| a.0.total_cmp(&b.0));
 
-    for (_distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
+    for (_distance, index, label, screen_pos) in visible.into_iter().take(style.max_visible) {
         draw_floating_label(ctx, &style, index, &label.text, screen_pos);
     }
 }
@@ -493,7 +558,27 @@ fn project_world_quad_to_screen(
     ])
 }
 
-fn project_world_to_screen(
+fn feature_label_position(
+    feature: &crate::world::loader::ResolvedFeature,
+    y_offset: f32,
+) -> Option<glam::Vec3> {
+    if feature.points.is_empty() {
+        return None;
+    }
+    let len = feature.points.len() as f32;
+    let (x, z) = feature
+        .points
+        .iter()
+        .fold((0.0, 0.0), |acc, point| (acc.0 + point.0, acc.1 + point.1));
+    let elevation = if feature.elevations.is_empty() {
+        0.0
+    } else {
+        feature.elevations.iter().sum::<f32>() / feature.elevations.len() as f32
+    };
+    Some(glam::vec3(x / len, elevation + y_offset, z / len))
+}
+
+pub fn project_world_to_screen(
     camera: &Flycam,
     world_position: glam::Vec3,
     viewport_size: egui::Vec2,

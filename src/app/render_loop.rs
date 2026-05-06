@@ -14,14 +14,17 @@ pub struct RenderUiState<'a> {
     pub show_settings: &'a mut bool,
     pub minimap: &'a mut crate::ui::minimap::MinimapState,
     pub poi_labels: &'a mut crate::ui::poi_labels::PoiLabelSettings,
+    pub address_labels: &'a mut crate::ui::poi_labels::AddressLabelSettings,
     pub street_sign_labels: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
+    pub search: &'a mut crate::ui::search::SearchState,
+    pub inspect: &'a mut crate::ui::inspect::InspectState,
     pub performance: &'a mut crate::app::PerformanceState,
     pub area_switch: &'a mut crate::app::AreaSwitchState,
     pub visual_detail: &'a mut crate::visual_detail::VisualDetailSettings,
 }
 
 pub fn render(
-    state: &AppState,
+    state: &mut AppState,
     egui_state: &mut EguiState,
     screenshot_path: Option<&str>,
     ui_state: RenderUiState<'_>,
@@ -301,6 +304,13 @@ pub fn render(
             ui_state.poi_labels,
             viewport_size,
         );
+        crate::ui::poi_labels::draw_addresses(
+            ctx,
+            &state.camera,
+            &state.address_labels,
+            ui_state.address_labels,
+            viewport_size,
+        );
         crate::ui::poi_labels::draw_street_signs(
             ctx,
             &state.camera,
@@ -318,6 +328,7 @@ pub fn render(
                     minimap: ui_state.minimap,
                     label_settings: crate::ui::settings::LabelSettingsMut {
                         poi: ui_state.poi_labels,
+                        addresses: ui_state.address_labels,
                         street_signs: ui_state.street_sign_labels,
                     },
                     area_switch: ui_state.area_switch,
@@ -326,6 +337,13 @@ pub fn render(
                 },
             );
         }
+        crate::ui::search::draw(
+            ctx,
+            ui_state.search,
+            &state.search_entries,
+            &mut state.camera,
+        );
+        crate::ui::inspect::draw(ctx, ui_state.inspect);
         crate::ui::minimap::draw(ctx, &state.camera, ui_state.minimap);
     });
 

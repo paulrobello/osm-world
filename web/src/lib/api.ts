@@ -68,6 +68,11 @@ export interface PreparedAreaEntry extends Omit<PrepareAreaResponse, 'cache_stat
   overture_timeout: number | null;
 }
 
+export interface DeletePreparedAreaResponse {
+  status: string;
+  cache_key: string;
+}
+
 export interface LaunchRendererResponse {
   status: string;
   pid: number;
@@ -108,6 +113,12 @@ export function updatePreparedArea(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+export function deletePreparedArea(cacheKey: string): Promise<DeletePreparedAreaResponse> {
+  return apiJson(`/areas/prepared/${cacheKey}`, {
+    method: 'DELETE',
   });
 }
 

@@ -179,6 +179,26 @@ struct Args {
     #[arg(long, value_parser = hour_of_day)]
     time_of_day: Option<f32>,
 
+    /// Start with POI labels hidden
+    #[arg(long)]
+    hide_poi_labels: bool,
+
+    /// Start with address labels hidden
+    #[arg(long)]
+    hide_address_labels: bool,
+
+    /// Start with street sign labels hidden
+    #[arg(long)]
+    hide_street_sign_labels: bool,
+
+    /// Start with the minimap hidden
+    #[arg(long)]
+    hide_minimap: bool,
+
+    /// Start with the minimap rotating with the camera heading
+    #[arg(long)]
+    rotate_minimap: bool,
+
     /// Tint geometry by shadow cascade: blue near, orange mid, purple far fade
     #[arg(long)]
     debug_shadow_cascades: bool,
@@ -313,6 +333,11 @@ fn main() -> anyhow::Result<()> {
         cam_override,
         show_settings: args.show_settings,
         initial_time_of_day: args.time_of_day.map(|hours| hours / 24.0),
+        hide_poi_labels: args.hide_poi_labels,
+        hide_address_labels: args.hide_address_labels,
+        hide_street_sign_labels: args.hide_street_sign_labels,
+        hide_minimap: args.hide_minimap,
+        rotate_minimap: args.rotate_minimap,
         debug_shadow_cascades: args.debug_shadow_cascades,
         streaming: osm_world::app::StreamingOptions {
             enabled: !args.no_streaming,
@@ -408,6 +433,25 @@ mod tests {
         assert!(args.serve);
         assert_eq!(args.host, "0.0.0.0");
         assert_eq!(args.port, 3031);
+    }
+
+    #[test]
+    fn parses_label_and_minimap_startup_flags() {
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--hide-poi-labels",
+            "--hide-address-labels",
+            "--hide-street-sign-labels",
+            "--hide-minimap",
+            "--rotate-minimap",
+        ])
+        .unwrap();
+
+        assert!(args.hide_poi_labels);
+        assert!(args.hide_address_labels);
+        assert!(args.hide_street_sign_labels);
+        assert!(args.hide_minimap);
+        assert!(args.rotate_minimap);
     }
 
     #[test]

@@ -97,6 +97,12 @@ pub struct PreparedAreaUpdate {
     pub favorite: Option<bool>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DeletePreparedAreaResponse {
+    pub status: &'static str,
+    pub cache_key: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LaunchRendererRequest {
     pub osm_path: String,
@@ -277,7 +283,7 @@ pub fn build_router(project_root: PathBuf) -> Router {
         .route("/areas/prepared", get(prepared_areas_handler))
         .route(
             "/areas/prepared/{cache_key}",
-            post(update_prepared_area_handler),
+            post(update_prepared_area_handler).delete(delete_prepared_area_handler),
         )
         .route("/areas/prepare", post(prepare_area_handler))
         .route("/renderer/launch", post(launch_renderer_handler))
@@ -349,6 +355,16 @@ async fn update_prepared_area_handler(
     task::spawn_blocking(move || update_prepared_area_details(&cache_key, update, &project_root))
         .await
         .map_err(|err| ApiError::internal(format!("prepared area update task failed: {err}")))?
+        .map(Json)
+        .map_err(ApiError::from_prepare_error)
+}
+
+async fn delete_prepared_area_handler(
+    AxumPath(cache_key): AxumPath<String>,
+) -> Result<Json<DeletePreparedAreaResponse>, ApiError> {
+    task::spawn_blocking(move || delete_prepared_area(&cache_key))
+        .await
+        .map_err(|err| ApiError::internal(format!("prepared area delete task failed: {err}")))?
         .map(Json)
         .map_err(ApiError::from_prepare_error)
 }
@@ -615,6 +631,39 @@ pub(crate) fn update_prepared_area_details(
     write_prepared_cache_metadata(&metadata_path, &metadata)
         .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
     prepared_entry_from_osm_path(project_root, &osm_path)
+}
+
+pub(crate) fn delete_prepared_area(cache_key: &str) -> PrepareResult<DeletePreparedAreaResponse> {
+    validate_cache_key(cache_key)?;
+    let osm_path = prepared_area_dir().join(format!("{cache_key}.osm"));
+    if !osm_path.exists() {
+        return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
+            "unknown prepared area cache key"
+        )));
+    }
+    let metadata_path = prepared_metadata_path(&osm_path);
+
+    std::fs::remove_file(&osm_path).map_err(|err| {
+        PrepareAreaError::internal(
+            "failed to prepare area",
+            anyhow::Error::new(err).context(format!("removing {}", osm_path.display())),
+        )
+    })?;
+    match std::fs::remove_file(&metadata_path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(PrepareAreaError::internal(
+                "failed to prepare area",
+                anyhow::Error::new(err).context(format!("removing {}", metadata_path.display())),
+            ));
+        }
+    }
+
+    Ok(DeletePreparedAreaResponse {
+        status: "deleted",
+        cache_key: cache_key.to_string(),
+    })
 }
 
 fn prepared_entry_from_osm_path(
@@ -1341,6 +1390,39 @@ mod tests {
             Some("Downtown smoke test")
         );
         assert!(listed[0].favorite);
+    }
+
+    #[test]
+    fn delete_prepared_area_removes_osm_and_metadata() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+        let response = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
+        let osm_path = Path::new(&response.osm_path).to_path_buf();
+        let metadata_path = osm_path.with_extension("meta.json");
+
+        let deleted = delete_prepared_area(&response.cache_key).unwrap();
+        let listed = list_prepared_areas(tmp.path()).unwrap();
+
+        assert_eq!(deleted.cache_key, response.cache_key);
+        assert_eq!(deleted.status, "deleted");
+        assert!(!osm_path.exists());
+        assert!(!metadata_path.exists());
+        assert!(listed.is_empty());
     }
 
     #[test]

@@ -6,6 +6,7 @@ import {
   API_URL,
   defaultFilter,
   defaultSourceControls,
+  deletePreparedArea,
   fetchCacheAreas,
   fetchHealth,
   fetchPreparedAreas,
@@ -20,6 +21,16 @@ import {
   type SourceControls,
 } from '@/lib/api';
 import { BBOX_PRESETS, type BboxPreset } from '@/lib/bboxPresets';
+import { buildCommandVariants } from '@/lib/commandVariants';
+import { errorHintForMessage } from '@/lib/errorHints';
+import {
+  DEFAULT_RENDERER_OPTIONS,
+  createSettingsProfile,
+  exportSettingsProfile,
+  importSettingsProfile,
+  type RendererOptions,
+  type SettingsProfile,
+} from '@/lib/settingsProfiles';
 import type { BBox, SpawnPoint } from '@/components/MapPicker';
 
 const MapPicker = dynamic(() => import('@/components/MapPicker'), {
@@ -48,6 +59,14 @@ const OVERTURE_THEME_LABELS: Array<[string, string]> = [
   ['building', 'Buildings'],
   ['place', 'Places / POIs'],
   ['transportation', 'Transportation'],
+];
+
+const SETTINGS_PROFILE_STORAGE_KEY = 'osm-world-web-settings-profile';
+const HELP_OVERLAY_STORAGE_KEY = 'osm-world-web-help-seen';
+const VISUAL_PRESET_LABELS: Array<[RendererOptions['visualPreset'], string]> = [
+  ['performance', 'Performance'],
+  ['balanced', 'Balanced'],
+  ['showcase', 'Showcase'],
 ];
 
 type HealthState = Awaited<ReturnType<typeof fetchHealth>>;
@@ -126,11 +145,17 @@ export default function Home() {
   const [sourceControls, setSourceControls] = useState<SourceControls>(defaultSourceControls);
   const [useElevation, setUseElevation] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [rendererOptions, setRendererOptions] = useState<RendererOptions>(DEFAULT_RENDERER_OPTIONS);
+  const [profileName, setProfileName] = useState('Default renderer profile');
+  const [profileJson, setProfileJson] = useState('');
+  const [profileStatus, setProfileStatus] = useState<string | null>(null);
+  const [showHelpOverlay, setShowHelpOverlay] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
   const [preparedArea, setPreparedArea] = useState<PrepareAreaResponse | null>(null);
+  const [copiedCommandVariant, setCopiedCommandVariant] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [launchStatus, setLaunchStatus] = useState<'idle' | 'launching' | 'launched' | 'failed'>('idle');
   const [launchMessage, setLaunchMessage] = useState<string | null>(null);
@@ -158,8 +183,26 @@ export default function Home() {
     return 'Spawn point must be inside the selected bbox.';
   }, [selectedBbox, spawnPoint]);
 
+  const currentSettingsProfile = useMemo(
+    () => createSettingsProfile({
+      name: profileName.trim() || 'Unnamed renderer profile',
+      filter,
+      sourceControls,
+      useElevation,
+      forceRefresh,
+      renderer: rendererOptions,
+    }),
+    [filter, forceRefresh, profileName, rendererOptions, sourceControls, useElevation],
+  );
+
+  const commandVariants = useMemo(
+    () => (preparedArea ? buildCommandVariants(preparedArea, rendererOptions) : []),
+    [preparedArea, rendererOptions],
+  );
+
   const clearPreparedOutput = useCallback(() => {
     setPreparedArea(null);
+    setCopiedCommandVariant(null);
     setCopyStatus('idle');
     setLaunchStatus('idle');
     setLaunchMessage(null);
@@ -208,6 +251,12 @@ export default function Home() {
   useEffect(() => {
     void loadMeta();
   }, [loadMeta]);
+
+  useEffect(() => {
+    if (window.localStorage.getItem(HELP_OVERLAY_STORAGE_KEY) !== 'true') {
+      setShowHelpOverlay(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!selectedBbox) {
@@ -281,6 +330,7 @@ export default function Home() {
     });
     setPreparedArea(preparedEntryToResult(entry));
     setPrepareError(null);
+    setCopiedCommandVariant(null);
     setCopyStatus('idle');
     setLaunchStatus('idle');
     setLaunchMessage(null);
@@ -309,6 +359,88 @@ export default function Home() {
     } catch (error) {
       setMetaError(error instanceof Error ? error.message : 'Unable to update favorite');
     }
+  };
+
+  const deletePreparedEntry = async (entry: PreparedAreaEntry) => {
+    const label = entry.display_name || entry.cache_key.slice(0, 12);
+    if (!window.confirm(`Delete prepared area “${label}” from the shared cache?`)) {
+      return;
+    }
+
+    try {
+      await deletePreparedArea(entry.cache_key);
+      setPreparedAreas((current) => current.filter((area) => area.cache_key !== entry.cache_key));
+      if (preparedArea?.cache_key === entry.cache_key) {
+        clearPreparedOutput();
+      }
+    } catch (error) {
+      setMetaError(error instanceof Error ? error.message : 'Unable to delete prepared area');
+    }
+  };
+
+  const setRendererOption = <K extends keyof RendererOptions>(name: K, value: RendererOptions[K]) => {
+    clearPreparedOutput();
+    setRendererOptions((current) => ({ ...current, [name]: value }));
+  };
+
+  const applySettingsProfile = (profile: SettingsProfile) => {
+    clearPreparedOutput();
+    setProfileName(profile.name);
+    setFilter(profile.filter);
+    setSourceControls(profile.sourceControls);
+    setUseElevation(profile.useElevation);
+    setForceRefresh(profile.forceRefresh);
+    setRendererOptions(profile.renderer);
+  };
+
+  const exportProfile = async () => {
+    const json = exportSettingsProfile(currentSettingsProfile);
+    setProfileJson(json);
+    setProfileStatus('Profile exported below. Copy or save the JSON to reuse it later.');
+    try {
+      await navigator.clipboard.writeText(json);
+      setProfileStatus('Profile exported and copied to clipboard.');
+    } catch {
+      // Clipboard access is optional; the textarea still contains the export.
+    }
+  };
+
+  const importProfile = () => {
+    try {
+      const profile = importSettingsProfile(profileJson);
+      applySettingsProfile(profile);
+      setProfileStatus(`Imported “${profile.name}”.`);
+    } catch (error) {
+      setProfileStatus(error instanceof Error ? error.message : 'Unable to import settings profile');
+    }
+  };
+
+  const saveProfileToBrowser = () => {
+    const json = exportSettingsProfile(currentSettingsProfile);
+    window.localStorage.setItem(SETTINGS_PROFILE_STORAGE_KEY, json);
+    setProfileJson(json);
+    setProfileStatus(`Saved “${currentSettingsProfile.name}” in this browser.`);
+  };
+
+  const loadProfileFromBrowser = () => {
+    const json = window.localStorage.getItem(SETTINGS_PROFILE_STORAGE_KEY);
+    if (!json) {
+      setProfileStatus('No saved profile found in this browser.');
+      return;
+    }
+    try {
+      const profile = importSettingsProfile(json);
+      applySettingsProfile(profile);
+      setProfileJson(json);
+      setProfileStatus(`Loaded “${profile.name}”.`);
+    } catch (error) {
+      setProfileStatus(error instanceof Error ? error.message : 'Unable to load saved profile');
+    }
+  };
+
+  const dismissHelpOverlay = () => {
+    window.localStorage.setItem(HELP_OVERLAY_STORAGE_KEY, 'true');
+    setShowHelpOverlay(false);
   };
 
   const handleBboxChange = (bbox: BBox) => {
@@ -397,6 +529,7 @@ export default function Home() {
     setIsPreparing(true);
     setPrepareError(null);
     setPreparedArea(null);
+    setCopiedCommandVariant(null);
     setCopyStatus('idle');
 
     try {
@@ -430,15 +563,13 @@ export default function Home() {
     }
   };
 
-  const copyCommand = async () => {
-    if (!preparedArea?.command) {
-      return;
-    }
-
+  const copyCommand = async (variantId: string, command: string) => {
     try {
-      await navigator.clipboard.writeText(preparedArea.command);
+      await navigator.clipboard.writeText(command);
+      setCopiedCommandVariant(variantId);
       setCopyStatus('copied');
     } catch {
+      setCopiedCommandVariant(null);
       setCopyStatus('failed');
     }
   };
@@ -504,7 +635,12 @@ export default function Home() {
               <strong>prepared</strong>
               <span>{preparedAreas.length} saved · {favoritePreparedCount} pinned</span>
             </div>
-            {metaError ? <p className="status-line error">{metaError}</p> : null}
+            {metaError ? (
+              <div className="status-stack">
+                <p className="status-line error">{metaError}</p>
+                {errorHintForMessage(metaError) ? <p className="status-line hint">{errorHintForMessage(metaError)}</p> : null}
+              </div>
+            ) : null}
             <button className="ghost-button" type="button" onClick={() => void loadMeta()} disabled={loadingMeta}>
               Refresh telemetry
             </button>
@@ -539,6 +675,9 @@ export default function Home() {
                       </button>
                       <button className="mini-button" type="button" onClick={() => void renamePreparedEntry(entry)}>
                         Name
+                      </button>
+                      <button className="mini-button danger-mini-button" type="button" onClick={() => void deletePreparedEntry(entry)}>
+                        Delete
                       </button>
                     </div>
                   </article>
@@ -719,6 +858,179 @@ export default function Home() {
           </section>
 
 
+          <section className="control-group" aria-labelledby="renderer-profile-title">
+            <div className="section-heading">
+              <h2 id="renderer-profile-title">Renderer profile</h2>
+              <span>{rendererOptions.visualPreset}</span>
+            </div>
+            <p className="microcopy">
+              Save/load prep settings plus launch-time lighting and performance flags used by the command variants.
+            </p>
+            <label className="coordinate-field full-width-field">
+              <span>Profile name</span>
+              <input
+                type="text"
+                value={profileName}
+                disabled={isPreparing}
+                onChange={(event) => setProfileName(event.target.value)}
+              />
+            </label>
+            <div className="coordinate-grid source-options-grid">
+              <label className="coordinate-field">
+                <span>Time of day</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="24"
+                  step="0.25"
+                  value={rendererOptions.timeOfDay}
+                  disabled={isPreparing}
+                  onChange={(event) => setRendererOption('timeOfDay', Math.min(24, Math.max(0, Number(event.target.value) || 0)))}
+                />
+              </label>
+              <label className="coordinate-field">
+                <span>Visual preset</span>
+                <select
+                  value={rendererOptions.visualPreset}
+                  disabled={isPreparing}
+                  onChange={(event) => setRendererOption('visualPreset', event.target.value as RendererOptions['visualPreset'])}
+                >
+                  {VISUAL_PRESET_LABELS.map(([preset, label]) => (
+                    <option key={preset} value={preset}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="coordinate-field">
+                <span>Stream radius</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="500"
+                  value={rendererOptions.streamRadius}
+                  disabled={isPreparing}
+                  onChange={(event) => setRendererOption('streamRadius', Math.max(1, Number(event.target.value) || 1))}
+                />
+              </label>
+              <label className="coordinate-field">
+                <span>Upload MiB</span>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.5"
+                  value={rendererOptions.uploadBudgetMb}
+                  disabled={isPreparing}
+                  onChange={(event) => setRendererOption('uploadBudgetMb', Math.max(0.1, Number(event.target.value) || 0.1))}
+                />
+              </label>
+              <label className="coordinate-field">
+                <span>Max tiles</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={rendererOptions.maxUploadedTiles}
+                  disabled={isPreparing}
+                  onChange={(event) => setRendererOption('maxUploadedTiles', Math.max(1, Math.floor(Number(event.target.value) || 1)))}
+                />
+              </label>
+              <label className="toggle-row compact-toggle">
+                <span>Open settings</span>
+                <input
+                  type="checkbox"
+                  checked={rendererOptions.showSettings}
+                  disabled={isPreparing}
+                  onChange={() => setRendererOption('showSettings', !rendererOptions.showSettings)}
+                />
+              </label>
+            </div>
+            <div className="form-grid source-theme-grid">
+              <label className="field">
+                <span>POI labels profile</span>
+                <input
+                  type="checkbox"
+                  checked={rendererOptions.labels.poi}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setRendererOptions((current) => ({ ...current, labels: { ...current.labels, poi: !current.labels.poi } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Address labels profile</span>
+                <input
+                  type="checkbox"
+                  checked={rendererOptions.labels.addresses}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setRendererOptions((current) => ({ ...current, labels: { ...current.labels, addresses: !current.labels.addresses } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Street signs profile</span>
+                <input
+                  type="checkbox"
+                  checked={rendererOptions.labels.streetSigns}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setRendererOptions((current) => ({ ...current, labels: { ...current.labels, streetSigns: !current.labels.streetSigns } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Minimap visible profile</span>
+                <input
+                  type="checkbox"
+                  checked={rendererOptions.minimap.visible}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setRendererOptions((current) => ({ ...current, minimap: { ...current.minimap, visible: !current.minimap.visible } }));
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Minimap rotation profile</span>
+                <input
+                  type="checkbox"
+                  checked={rendererOptions.minimap.rotateWithCamera}
+                  disabled={isPreparing}
+                  onChange={() => {
+                    clearPreparedOutput();
+                    setRendererOptions((current) => ({ ...current, minimap: { ...current.minimap, rotateWithCamera: !current.minimap.rotateWithCamera } }));
+                  }}
+                />
+              </label>
+            </div>
+            <div className="button-row profile-actions">
+              <button className="ghost-button" type="button" onClick={() => void exportProfile()}>
+                Export JSON
+              </button>
+              <button className="ghost-button" type="button" onClick={importProfile} disabled={!profileJson.trim()}>
+                Import JSON
+              </button>
+              <button className="ghost-button" type="button" onClick={saveProfileToBrowser}>
+                Save profile
+              </button>
+              <button className="ghost-button" type="button" onClick={loadProfileFromBrowser}>
+                Load saved
+              </button>
+            </div>
+            <label className="command-box profile-json-box">
+              <span>Profile JSON</span>
+              <textarea
+                value={profileJson}
+                rows={6}
+                placeholder="Export a profile or paste one here to import it."
+                onChange={(event) => setProfileJson(event.target.value)}
+              />
+            </label>
+            {profileStatus ? <p className="status-line pending">{profileStatus}</p> : null}
+          </section>
+
           <section className="control-group" aria-labelledby="prepare-title">
             <div className="section-heading">
               <h2 id="prepare-title">Prepare request</h2>
@@ -753,7 +1065,12 @@ export default function Home() {
             <button className="primary-action" type="button" onClick={handlePrepare} disabled={!selectedBbox || Boolean(spawnBboxError) || isPreparing}>
               {isPreparing ? 'Preparing…' : 'Prepare area'}
             </button>
-            {prepareError ? <p className="status-line error">{prepareError}</p> : null}
+            {prepareError ? (
+              <div className="status-stack">
+                <p className="status-line error">{prepareError}</p>
+                {errorHintForMessage(prepareError) ? <p className="status-line hint">{errorHintForMessage(prepareError)}</p> : null}
+              </div>
+            ) : null}
             {isPreparing ? <p className="status-line pending">Request in flight. Large areas may take a moment.</p> : null}
           </section>
 
@@ -796,26 +1113,57 @@ export default function Home() {
                   ))}
                 </div>
               ) : null}
-              <label className="command-box">
-                <span>Launch command</span>
-                <textarea readOnly value={preparedArea.command} rows={4} />
-              </label>
+              <div className="command-variant-stack" aria-label="Launch command variants">
+                {commandVariants.map((variant) => (
+                  <article className="command-variant" key={variant.id}>
+                    <label className="command-box">
+                      <span>{variant.label} command</span>
+                      <textarea readOnly value={variant.command} rows={3} />
+                    </label>
+                    <p className="microcopy">{variant.description}</p>
+                    <button className="ghost-button copy-button" type="button" onClick={() => void copyCommand(variant.id, variant.command)}>
+                      {copiedCommandVariant === variant.id ? `Copied ${variant.label}` : `Copy ${variant.label}`}
+                    </button>
+                  </article>
+                ))}
+              </div>
               <div className="button-row result-actions">
-                <button className="ghost-button copy-button" type="button" onClick={() => void copyCommand()}>
-                  {copyStatus === 'copied' ? 'Copied command' : 'Copy command'}
-                </button>
                 <button className="ghost-button copy-button" type="button" onClick={() => void handleLaunchRenderer()} disabled={launchStatus === 'launching'}>
                   {launchStatus === 'launching' ? 'Launching…' : 'Launch renderer'}
                 </button>
               </div>
               {copyStatus === 'failed' ? <p className="status-line error">Clipboard permission denied. Select the command manually.</p> : null}
               {launchMessage ? (
-                <p className={`status-line ${launchStatus === 'failed' ? 'error' : 'success'}`}>{launchMessage}</p>
+                <div className="status-stack">
+                  <p className={`status-line ${launchStatus === 'failed' ? 'error' : 'success'}`}>{launchMessage}</p>
+                  {launchStatus === 'failed' && errorHintForMessage(launchMessage) ? (
+                    <p className="status-line hint">{errorHintForMessage(launchMessage)}</p>
+                  ) : null}
+                </div>
               ) : null}
             </section>
           ) : null}
         </div>
       </section>
+
+      {showHelpOverlay ? (
+        <section className="help-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title">
+          <div className="help-card">
+            <p className="eyebrow">first run checklist</p>
+            <h2 id="help-title">Fly the city without guessing</h2>
+            <ul>
+              <li><strong>Flycam:</strong> WASD moves, mouse looks, Shift accelerates, Space/Ctrl changes altitude.</li>
+              <li><strong>Minimap:</strong> press M in the renderer to toggle it; rotation follows the camera heading.</li>
+              <li><strong>Settings:</strong> F1 opens lighting, labels, shadows, minimap, and performance controls.</li>
+              <li><strong>Screenshots:</strong> use the screenshot command variant for repeatable PNG captures.</li>
+              <li><strong>Labels:</strong> POI, address, and street-sign labels can be tuned from renderer settings.</li>
+            </ul>
+            <button className="primary-action" type="button" onClick={dismissHelpOverlay}>
+              Got it
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <MapPicker
         cachedAreas={cacheAreas}

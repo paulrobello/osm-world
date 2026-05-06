@@ -84,6 +84,11 @@ mod tests {
             cam_override: None,
             show_settings: false,
             initial_time_of_day: None,
+            hide_poi_labels: false,
+            hide_address_labels: false,
+            hide_street_sign_labels: false,
+            hide_minimap: false,
+            rotate_minimap: false,
             debug_shadow_cascades: false,
             streaming: crate::app::StreamingOptions::default(),
             visual_detail: crate::visual_detail::VisualDetailSettings::default()

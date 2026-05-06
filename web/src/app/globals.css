@@ -597,9 +597,20 @@ h1 .accent,
   background: var(--amber-soft);
 }
 
-.status-line.success {
+.status-line.success,
+.status-line.hint {
   color: var(--green);
   background: var(--green-soft);
+}
+
+.status-stack {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.status-stack .status-line {
+  margin-top: 0;
 }
 
 .history-list {
@@ -653,6 +664,12 @@ h1 .accent,
   background: rgba(255, 178, 62, 0.08);
   font: 800 0.7rem / 1 var(--mono);
   text-transform: uppercase;
+}
+
+.danger-mini-button {
+  border-color: rgba(255, 107, 74, 0.45);
+  color: #ffd6ca;
+  background: rgba(255, 107, 74, 0.08);
 }
 
 .warning-stack {
@@ -710,8 +727,81 @@ h1 .accent,
   margin-top: 0.75rem;
 }
 
+.result-actions {
+  grid-template-columns: 1fr;
+}
+
 .result-actions .copy-button {
   margin-top: 0;
+}
+
+.command-variant-stack {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.command-variant {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0.78rem;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.command-variant .microcopy {
+  margin: 0.55rem 0 0;
+}
+
+.profile-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-json-box {
+  margin-top: 0.8rem;
+}
+
+.compact-toggle {
+  min-height: 100%;
+}
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(14px);
+}
+
+.help-card {
+  width: min(36rem, 100%);
+  border: 1px solid var(--line-bright);
+  border-radius: 28px;
+  padding: clamp(1.2rem, 4vw, 2rem);
+  background:
+    linear-gradient(145deg, rgba(255, 178, 62, 0.14), transparent 42%),
+    rgba(4, 11, 9, 0.95);
+  box-shadow: var(--shadow);
+}
+
+.help-card h2 {
+  margin: 1rem 0;
+  font-size: clamp(1.5rem, 4vw, 2.4rem);
+  text-transform: none;
+}
+
+.help-card ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.help-card strong {
+  color: var(--green);
 }
 
 .spawn-controls {

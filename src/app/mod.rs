@@ -80,6 +80,11 @@ pub struct AppOptions {
     pub cam_override: Option<crate::camera::CameraOverride>,
     pub show_settings: bool,
     pub initial_time_of_day: Option<f32>,
+    pub hide_poi_labels: bool,
+    pub hide_address_labels: bool,
+    pub hide_street_sign_labels: bool,
+    pub hide_minimap: bool,
+    pub rotate_minimap: bool,
     pub debug_shadow_cascades: bool,
     pub streaming: StreamingOptions,
     pub visual_detail: crate::visual_detail::VisualDetailSettings,
@@ -161,6 +166,24 @@ impl App {
         let prefs = crate::app::prefs::load_user_prefs();
         let mut minimap = crate::ui::minimap::MinimapState::default();
         prefs.minimap.apply_to_minimap_state(&mut minimap);
+        if opts.hide_minimap {
+            minimap.visible = false;
+        }
+        if opts.rotate_minimap {
+            minimap.rotate_with_camera = true;
+        }
+        let poi_labels = crate::ui::poi_labels::PoiLabelSettings {
+            visible: !opts.hide_poi_labels,
+            ..Default::default()
+        };
+        let address_labels = crate::ui::poi_labels::AddressLabelSettings {
+            visible: !opts.hide_address_labels,
+            ..Default::default()
+        };
+        let street_sign_labels = crate::ui::poi_labels::StreetSignLabelSettings {
+            visible: !opts.hide_street_sign_labels,
+            ..Default::default()
+        };
         let area_switch = AreaSwitchState {
             input_path: opts.input_path.clone().unwrap_or_default(),
             srtm_dir: opts.srtm_dir.clone().unwrap_or_default(),
@@ -186,9 +209,9 @@ impl App {
             settings_sections: prefs.settings_sections.clone(),
             persisted_settings_sections: prefs.settings_sections,
             last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
-            poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
-            address_labels: crate::ui::poi_labels::AddressLabelSettings::default(),
-            street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
+            poi_labels,
+            address_labels,
+            street_sign_labels,
             search: crate::ui::search::SearchState::default(),
             inspect: crate::ui::inspect::InspectState::default(),
             last_cursor_pos: None,
@@ -215,6 +238,11 @@ mod tests {
             cam_override: None,
             show_settings: false,
             initial_time_of_day: None,
+            hide_poi_labels: false,
+            hide_address_labels: false,
+            hide_street_sign_labels: false,
+            hide_minimap: false,
+            rotate_minimap: false,
             debug_shadow_cascades: false,
             streaming: StreamingOptions::default(),
             visual_detail: crate::visual_detail::VisualDetailSettings::default(),

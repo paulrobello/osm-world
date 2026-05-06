@@ -4,18 +4,9 @@ Grounded in the current project: a Rust/WGPU 3D OpenStreetMap renderer with tile
 
 Remove completed items from this list.
 
-## High-impact enhancements
-
-1. **City quality preset system**
-   - Add presets like `fast-preview`, `balanced`, and `cinematic` for stream radius, upload budget, tile cap, shadow quality, label distances, and LOD thresholds.
-   - Expose via CLI and settings UI.
-   - Value: easier tuning across laptops, screenshots, and large city runs.
-
 ## Visual and rendering ideas
-
-2. **Weather presets**
-   - Add foggy morning, golden hour, rainy dusk, and clear noon presets using existing atmosphere, fog, sky, and day-cycle controls.
-   - Optional follow-up: simple rain streaks or wet-road specular boost.
+3. **Real time of day**
+   - add option for game time to match real clock.
 
 3. **Improved water rendering**
    - Add subtle animated normal/wave distortion and stronger sun glints for rivers and lakes.
@@ -69,20 +60,3 @@ Remove completed items from this list.
 24. **Graphify-backed architecture docs**
     - Generate a short `docs/architecture.md` from the graphify community structure, linking core modules like `world::loader`, `stream`, `render`, `server`, and `web`.
     - Value: makes onboarding easier as the renderer grows.
-
-## Small polish ideas
-
-25. **Copy command variants**
-    - In the web UI, provide copy buttons for debug, release, screenshot, and no-streaming command variants.
-
-27. **Cache cleanup UI**
-    - Let users remove old prepared areas from the web picker.
-
-28. **Settings import/export**
-    - Save and load renderer settings profiles for lighting, labels, minimap, and performance.
-
-29. **First-run help overlay**
-    - Show controls for flycam, minimap rotation, settings, screenshots, and labels the first time the app opens.
-
-30. **Better error messages in the web UI**
-    - Show actionable hints for Overpass failure, bbox too large, missing Overture CLI, SRTM download issues, and spawn-outside-bbox problems.

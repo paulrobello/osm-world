@@ -7,4 +7,5 @@ pub mod render;
 pub mod server;
 pub mod stream;
 pub mod ui;
+pub mod visual_detail;
 pub mod world;

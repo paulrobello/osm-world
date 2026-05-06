@@ -1,4 +1,5 @@
 use clap::Parser;
+use osm_world::visual_detail::{LandmarkDetail, VisualDetailSettings, VisualPreset};
 
 fn positive_f32(s: &str) -> Result<f32, String> {
     let value = s
@@ -21,6 +22,42 @@ fn positive_usize(s: &str) -> Result<usize, String> {
         Ok(value)
     } else {
         Err("must be at least 1".to_string())
+    }
+}
+
+fn nonnegative_f32(s: &str) -> Result<f32, String> {
+    let value = s
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err("must be a finite nonnegative number".to_string())
+    }
+}
+
+fn normalized_f32(s: &str) -> Result<f32, String> {
+    let value = s
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err("must be a finite number in the range 0..=1".to_string())
+    }
+}
+
+fn density_multiplier(s: &str) -> Result<f32, String> {
+    let value = s
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+
+    if value.is_finite() && (0.0..=3.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err("must be a finite number in the range 0..=3".to_string())
     }
 }
 
@@ -146,6 +183,34 @@ struct Args {
     #[arg(long)]
     debug_shadow_cascades: bool,
 
+    /// Visual detail preset to use at startup
+    #[arg(long, value_enum, default_value = "balanced")]
+    visual_preset: VisualPreset,
+
+    /// Landmark rendering detail override
+    #[arg(long, value_enum)]
+    landmark_detail: Option<LandmarkDetail>,
+
+    /// Facade variation multiplier in the range 0.0..=1.0
+    #[arg(long, value_parser = normalized_f32)]
+    facade_variation: Option<f32>,
+
+    /// Roof variation multiplier in the range 0.0..=1.0
+    #[arg(long, value_parser = normalized_f32)]
+    roof_variation: Option<f32>,
+
+    /// Vegetation density multiplier in the range 0.0..=3.0
+    #[arg(long, value_parser = density_multiplier)]
+    vegetation_density: Option<f32>,
+
+    /// Maximum number of synthetic trees per tile
+    #[arg(long, value_parser = positive_usize)]
+    synthetic_tree_cap: Option<usize>,
+
+    /// Maximum vegetation draw distance in metres
+    #[arg(long = "vegetation-distance", value_parser = nonnegative_f32)]
+    vegetation_distance: Option<f32>,
+
     /// Disable tile streaming and use the legacy single-mesh renderer
     #[arg(long)]
     no_streaming: bool,
@@ -183,6 +248,27 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     log::info!("osm-world starting");
     validate_spawn_pair(&args)?;
+
+    let mut visual_detail = VisualDetailSettings::from_preset(args.visual_preset);
+    if let Some(landmark_detail) = args.landmark_detail {
+        visual_detail.landmark_detail = landmark_detail;
+    }
+    if let Some(facade_variation) = args.facade_variation {
+        visual_detail.facade_variation = facade_variation;
+    }
+    if let Some(roof_variation) = args.roof_variation {
+        visual_detail.roof_variation = roof_variation;
+    }
+    if let Some(vegetation_density) = args.vegetation_density {
+        visual_detail.vegetation_density = vegetation_density;
+    }
+    if let Some(synthetic_tree_cap) = args.synthetic_tree_cap {
+        visual_detail.synthetic_tree_cap = synthetic_tree_cap;
+    }
+    if let Some(vegetation_distance) = args.vegetation_distance {
+        visual_detail.vegetation_max_distance = vegetation_distance;
+    }
+    visual_detail.clamp();
 
     if args.serve {
         let rt = tokio::runtime::Runtime::new()?;
@@ -350,6 +436,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_visual_detail_flags() {
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--visual-preset",
+            "showcase",
+            "--landmark-detail",
+            "off",
+            "--facade-variation",
+            "0.4",
+            "--roof-variation",
+            "0.7",
+            "--vegetation-density",
+            "2.25",
+            "--synthetic-tree-cap",
+            "42",
+            "--vegetation-distance",
+            "1800",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            args.visual_preset,
+            osm_world::visual_detail::VisualPreset::Showcase
+        );
+        assert_eq!(
+            args.landmark_detail,
+            Some(osm_world::visual_detail::LandmarkDetail::Off)
+        );
+        assert_eq!(args.facade_variation, Some(0.4));
+        assert_eq!(args.roof_variation, Some(0.7));
+        assert_eq!(args.vegetation_density, Some(2.25));
+        assert_eq!(args.synthetic_tree_cap, Some(42));
+        assert_eq!(args.vegetation_distance, Some(1800.0));
+    }
+
+    #[test]
     fn rejects_invalid_streaming_numeric_flags() {
         for (flag, value) in [
             ("--tile-size", "0"),
@@ -358,6 +480,14 @@ mod tests {
             ("--max-uploaded-tiles", "0"),
             ("--max-uploaded-mb", "inf"),
             ("--time-of-day", "25"),
+            ("--facade-variation", "-0.1"),
+            ("--facade-variation", "1.1"),
+            ("--roof-variation", "NaN"),
+            ("--roof-variation", "2"),
+            ("--vegetation-density", "3.1"),
+            ("--vegetation-density", "inf"),
+            ("--vegetation-distance", "-1"),
+            ("--vegetation-distance", "NaN"),
         ] {
             let result = Args::try_parse_from(["osm-world", flag, value]);
             assert!(result.is_err(), "expected {flag} {value} to be rejected");

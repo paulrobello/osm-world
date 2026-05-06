@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use crate::render::vertex::{Vertex, feature};
 
-pub const LANDUSE_Y_OFFSET: f32 = 0.20;
-const LANDUSE_OVERLAY_Y_OFFSET: f32 = 0.35;
+pub const LANDUSE_Y_OFFSET: f32 = 0.01;
+const LANDUSE_OVERLAY_Y_OFFSET: f32 = 0.02;
 
 pub fn landuse_y_offset(tags: &HashMap<String, String>) -> f32 {
     let is_green_overlay = tags.contains_key("leisure")
@@ -134,15 +134,15 @@ mod tests {
     }
 
     #[test]
-    fn landuse_offsets_are_small_but_keep_green_overlays_above_base() {
+    fn landuse_offsets_are_centimeter_scale_but_keep_green_overlays_above_base() {
         let mut base_tags = std::collections::HashMap::new();
         base_tags.insert("landuse".to_string(), "residential".to_string());
         let mut overlay_tags = std::collections::HashMap::new();
         overlay_tags.insert("leisure".to_string(), "park".to_string());
 
-        assert!(landuse_y_offset(&base_tags) <= 0.25);
-        assert!(landuse_y_offset(&overlay_tags) >= landuse_y_offset(&base_tags) + 0.10);
-        assert!(landuse_y_offset(&overlay_tags) <= 0.40);
+        assert!(landuse_y_offset(&base_tags) <= 0.02);
+        assert!(landuse_y_offset(&overlay_tags) >= landuse_y_offset(&base_tags) + 0.005);
+        assert!(landuse_y_offset(&overlay_tags) <= 0.03);
     }
 
     #[test]

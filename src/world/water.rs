@@ -2,7 +2,7 @@
 
 use crate::render::vertex::{Vertex, feature};
 
-pub const WATER_Y_OFFSET: f32 = 0.45;
+pub const WATER_Y_OFFSET: f32 = 0.03;
 
 /// Generate a flat triangulated mesh for a water polygon.
 ///

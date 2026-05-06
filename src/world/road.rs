@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use crate::render::vertex::{Vertex, feature};
 
-// Keep road/path overlays close to terrain, but still above landuse/water
-// overlays to avoid z-fighting.
-pub const ROAD_Y_OFFSET: f32 = 0.55;
-const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.02;
+// Keep road/path overlays at curb-height scale while preserving a small
+// ordering gap above landuse/water overlays.
+pub const ROAD_Y_OFFSET: f32 = 0.04;
+const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.008;
 const ROAD_BRIDGE_LAYER_Y_OFFSET: f32 = 5.0;
 const ROAD_TUNNEL_LAYER_Y_OFFSET: f32 = -5.0;
 const ROAD_CAP_SEGMENTS: usize = 12;
@@ -28,7 +28,7 @@ const CENTERLINE_MIN_ROAD_WIDTH: f32 = 4.0;
 const CENTERLINE_WIDTH: f32 = 0.22;
 const CENTERLINE_DASH_LENGTH: f32 = 4.0;
 const CENTERLINE_GAP_LENGTH: f32 = 6.0;
-const CENTERLINE_Y_OFFSET: f32 = 0.02;
+const CENTERLINE_Y_OFFSET: f32 = 0.008;
 const CENTERLINE_COLOR: [f32; 3] = [1.0, 0.82, 0.05];
 const BRIDGE_STRUCTURE_COLOR: [f32; 3] = [0.50, 0.52, 0.54];
 const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
@@ -37,7 +37,8 @@ const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
 ///
 /// The ribbon generator already adds [`ROAD_Y_OFFSET`] above sampled terrain.
 /// This offset keeps road/path overlays just above landuse and water overlays
-/// while layered crossings still separate by several metres.
+/// without visibly floating at eye level; layered crossings still separate by
+/// several metres.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoadProfileKind {
     Surface,
@@ -214,11 +215,11 @@ fn render_elevations_for_factors(
 fn surface_road_y_offset(tags: &HashMap<String, String>) -> f32 {
     let width = super::color::road_width(tags);
     if width >= 5.0 {
-        0.15
+        0.03
     } else if width >= 3.5 {
-        0.12
+        0.025
     } else {
-        0.10
+        0.02
     }
 }
 
@@ -1152,7 +1153,7 @@ mod tests {
             ("layer".to_string(), "1".to_string()),
         ]);
 
-        assert!(road_layer_y_offset(&surface) >= 0.10);
+        assert!(road_layer_y_offset(&surface) >= 0.02);
         assert!(road_layer_y_offset(&bridge) >= road_layer_y_offset(&surface) + 4.0);
     }
 
@@ -1356,7 +1357,8 @@ mod tests {
         assert!(!vertices.is_empty());
         assert!(!indices.is_empty());
         assert!(vertices.iter().any(|v| v.position[1] < 4.0));
-        assert!(vertices.iter().any(|v| v.position[1] > 7.0));
+        let high_road_y = road_elevations[1] + ROAD_Y_OFFSET;
+        assert!(vertices.iter().any(|v| v.position[1] > high_road_y + 0.5));
         assert!(
             vertices
                 .iter()
@@ -1541,10 +1543,10 @@ mod tests {
             path.points,
             vec![(0.0, 0.0), (25.0, 0.0), (75.0, 0.0), (100.0, 0.0)]
         );
-        assert_eq!(path.road_elevations[0], surface_y);
-        assert_eq!(path.road_elevations[1], bridge_y);
-        assert_eq!(path.road_elevations[2], bridge_y);
-        assert_eq!(path.road_elevations[3], surface_y);
+        assert!((path.road_elevations[0] - surface_y).abs() < 1e-5);
+        assert!((path.road_elevations[1] - bridge_y).abs() < 1e-5);
+        assert!((path.road_elevations[2] - bridge_y).abs() < 1e-5);
+        assert!((path.road_elevations[3] - surface_y).abs() < 1e-5);
     }
 
     #[test]
@@ -1560,11 +1562,11 @@ mod tests {
         let surface_y = terrain_elevations[0] + surface_road_y_offset(&tags);
         let bridge_y = terrain_elevations[0] + road_layer_y_offset(&tags);
 
-        assert_eq!(elevations[0], surface_y);
+        assert!((elevations[0] - surface_y).abs() < 1e-5);
         assert!(elevations[1] > surface_y);
         assert!(elevations[1] < bridge_y);
-        assert_eq!(elevations[2], bridge_y);
-        assert_eq!(elevations[3], surface_y);
+        assert!((elevations[2] - bridge_y).abs() < 1e-5);
+        assert!((elevations[3] - surface_y).abs() < 1e-5);
     }
 
     #[test]

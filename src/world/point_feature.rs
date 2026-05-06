@@ -31,9 +31,21 @@ pub enum PoiCategory {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LandmarkKind {
+    Generic,
+    Tower,
+    WaterTower,
+    Chimney,
+    Monument,
+    Peak,
+    Viewpoint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PointFeatureStyle {
     pub kind: PointFeatureKind,
     pub poi_category: Option<PoiCategory>,
+    pub landmark_kind: Option<LandmarkKind>,
 }
 
 pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatureStyle> {
@@ -41,37 +53,70 @@ pub fn point_feature_style(tags: &HashMap<String, String>) -> Option<PointFeatur
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Tree,
             poi_category: None,
+            landmark_kind: None,
         });
     }
+
+    if let Some(landmark_kind) = landmark_kind(tags) {
+        return Some(PointFeatureStyle {
+            kind: PointFeatureKind::Landmark,
+            poi_category: None,
+            landmark_kind: Some(landmark_kind),
+        });
+    }
+
     if matches!(
         tags.get("natural").map(String::as_str),
-        Some("peak" | "rock" | "spring")
+        Some("rock" | "spring")
     ) {
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Nature,
             poi_category: None,
-        });
-    }
-    if matches!(
-        tags.get("tourism").map(String::as_str),
-        Some("attraction" | "viewpoint" | "artwork")
-    ) || tags.contains_key("historic")
-        || matches!(
-            tags.get("man_made").map(String::as_str),
-            Some("tower" | "water_tower" | "chimney")
-        )
-    {
-        return Some(PointFeatureStyle {
-            kind: PointFeatureKind::Landmark,
-            poi_category: None,
+            landmark_kind: None,
         });
     }
     if let Some(category) = poi_category(tags) {
         return Some(PointFeatureStyle {
             kind: PointFeatureKind::Poi,
             poi_category: Some(category),
+            landmark_kind: None,
         });
     }
+    None
+}
+
+fn landmark_kind(tags: &HashMap<String, String>) -> Option<LandmarkKind> {
+    match tags.get("man_made").map(String::as_str) {
+        Some("tower") => return Some(LandmarkKind::Tower),
+        Some("water_tower") => return Some(LandmarkKind::WaterTower),
+        Some("chimney") => return Some(LandmarkKind::Chimney),
+        _ => {}
+    }
+
+    if matches!(
+        tags.get("historic").map(String::as_str),
+        Some("monument" | "memorial")
+    ) || tags.contains_key("memorial")
+    {
+        return Some(LandmarkKind::Monument);
+    }
+
+    if tags.get("natural").map(String::as_str) == Some("peak") {
+        return Some(LandmarkKind::Peak);
+    }
+
+    if tags.get("tourism").map(String::as_str) == Some("viewpoint") {
+        return Some(LandmarkKind::Viewpoint);
+    }
+
+    if matches!(
+        tags.get("tourism").map(String::as_str),
+        Some("attraction" | "artwork")
+    ) || tags.contains_key("historic")
+    {
+        return Some(LandmarkKind::Generic);
+    }
+
     None
 }
 
@@ -138,9 +183,16 @@ pub fn generate_point_feature(
     let Some(style) = point_feature_style(tags) else {
         return;
     };
+    let first_vertex = verts.len();
     match style.kind {
         PointFeatureKind::Tree => append_tree(point, elevation, verts, idxs),
-        PointFeatureKind::Landmark => append_landmark(point, elevation, verts, idxs),
+        PointFeatureKind::Landmark => append_landmark(
+            point,
+            elevation,
+            style.landmark_kind.expect("Landmark styles carry a kind"),
+            verts,
+            idxs,
+        ),
         PointFeatureKind::Nature => append_nature_marker(point, elevation, verts, idxs),
         PointFeatureKind::Poi => append_poi_marker(
             point,
@@ -149,6 +201,14 @@ pub fn generate_point_feature(
             verts,
             idxs,
         ),
+    }
+    let marker_uv_kind = match style.kind {
+        PointFeatureKind::Tree => 1.0,
+        PointFeatureKind::Landmark => 2.0,
+        PointFeatureKind::Nature | PointFeatureKind::Poi => 0.0,
+    };
+    for vertex in &mut verts[first_vertex..] {
+        vertex.uv[0] = marker_uv_kind;
     }
 }
 
@@ -247,6 +307,24 @@ const OCTAHEDRON_FACES: [[usize; 3]; 8] = [
 fn append_landmark(
     point: (f32, f32),
     elevation: f32,
+    kind: LandmarkKind,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    match kind {
+        LandmarkKind::Generic => append_generic_landmark(point, elevation, verts, idxs),
+        LandmarkKind::Tower => append_tower_landmark(point, elevation, verts, idxs),
+        LandmarkKind::WaterTower => append_water_tower_landmark(point, elevation, verts, idxs),
+        LandmarkKind::Chimney => append_chimney_landmark(point, elevation, verts, idxs),
+        LandmarkKind::Monument => append_monument_landmark(point, elevation, verts, idxs),
+        LandmarkKind::Peak => append_peak_landmark(point, elevation, verts, idxs),
+        LandmarkKind::Viewpoint => append_viewpoint_landmark(point, elevation, verts, idxs),
+    }
+}
+
+fn append_generic_landmark(
+    point: (f32, f32),
+    elevation: f32,
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
@@ -266,6 +344,198 @@ fn append_landmark(
         elevation + 4.2,
         elevation + 5.1,
         0.62,
+        LANDMARK_COLOR,
+        verts,
+        idxs,
+    );
+}
+
+fn append_tower_landmark(
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.48, 0.48),
+            height: 4.2,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation + 4.2,
+            half_extents: (0.32, 0.32),
+            height: 2.0,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_pyramid(
+        point,
+        elevation + 6.2,
+        elevation + 8.0,
+        0.38,
+        LANDMARK_COLOR,
+        verts,
+        idxs,
+    );
+}
+
+fn append_water_tower_landmark(
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.18, 0.18),
+            height: 3.2,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation + 3.15,
+            half_extents: (0.95, 0.95),
+            height: 1.15,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_pyramid(
+        point,
+        elevation + 4.3,
+        elevation + 5.05,
+        0.82,
+        LANDMARK_COLOR,
+        verts,
+        idxs,
+    );
+}
+
+fn append_chimney_landmark(
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.28, 0.28),
+            height: 6.0,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation + 6.0,
+            half_extents: (0.36, 0.36),
+            height: 0.35,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+}
+
+fn append_monument_landmark(
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.62, 0.62),
+            height: 0.55,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_pyramid(
+        point,
+        elevation + 0.55,
+        elevation + 4.45,
+        0.76,
+        LANDMARK_COLOR,
+        verts,
+        idxs,
+    );
+}
+
+fn append_peak_landmark(
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_pyramid(
+        point,
+        elevation + 0.05,
+        elevation + 2.05,
+        0.98,
+        LANDMARK_COLOR,
+        verts,
+        idxs,
+    );
+}
+
+fn append_viewpoint_landmark(
+    point: (f32, f32),
+    elevation: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation,
+            half_extents: (0.22, 0.22),
+            height: 2.5,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_box(
+        BoxSpec {
+            point,
+            base_y: elevation + 2.5,
+            half_extents: (1.0, 1.0),
+            height: 0.28,
+            color: LANDMARK_COLOR,
+        },
+        verts,
+        idxs,
+    );
+    append_pyramid(
+        point,
+        elevation + 2.9,
+        elevation + 4.15,
+        0.86,
         LANDMARK_COLOR,
         verts,
         idxs,
@@ -529,15 +799,35 @@ mod tests {
     }
 
     #[test]
-    fn classifies_natural_peak_as_nature() {
+    fn classifies_natural_peak_as_landmark_peak() {
         let style = point_feature_style(&tags(&[("natural", "peak")])).unwrap();
-        assert_eq!(style.kind, PointFeatureKind::Nature);
+        assert_eq!(style.kind, PointFeatureKind::Landmark);
+        assert_eq!(style.landmark_kind, Some(LandmarkKind::Peak));
+    }
+
+    #[test]
+    fn classifies_specific_landmark_kinds() {
+        for (pairs, expected) in [
+            (&[("man_made", "tower")][..], LandmarkKind::Tower),
+            (&[("man_made", "water_tower")][..], LandmarkKind::WaterTower),
+            (&[("man_made", "chimney")][..], LandmarkKind::Chimney),
+            (&[("historic", "monument")][..], LandmarkKind::Monument),
+            (&[("historic", "memorial")][..], LandmarkKind::Monument),
+            (&[("memorial", "statue")][..], LandmarkKind::Monument),
+            (&[("natural", "peak")][..], LandmarkKind::Peak),
+            (&[("tourism", "viewpoint")][..], LandmarkKind::Viewpoint),
+        ] {
+            let style = point_feature_style(&tags(pairs)).unwrap();
+            assert_eq!(style.kind, PointFeatureKind::Landmark);
+            assert_eq!(style.landmark_kind, Some(expected));
+        }
     }
 
     #[test]
     fn classifies_historic_monument_as_landmark() {
         let style = point_feature_style(&tags(&[("historic", "monument")])).unwrap();
         assert_eq!(style.kind, PointFeatureKind::Landmark);
+        assert_eq!(style.landmark_kind, Some(LandmarkKind::Monument));
     }
 
     #[test]
@@ -637,6 +927,49 @@ mod tests {
 
         assert!(!landmark_idxs.is_empty());
         assert!(landmark_top > trunk_top);
+    }
+
+    #[test]
+    fn landmark_kinds_emit_distinct_showcase_silhouettes() {
+        let tower = feature_height(&[("man_made", "tower")]);
+        let chimney = feature_height(&[("man_made", "chimney")]);
+        let monument = feature_height(&[("historic", "monument")]);
+        let peak = feature_height(&[("natural", "peak")]);
+        let viewpoint = feature_height(&[("tourism", "viewpoint")]);
+
+        assert!(tower.vertex_count > 0);
+        assert!(chimney.vertex_count > 0);
+        assert!(monument.vertex_count > 0);
+        assert!(peak.vertex_count > 0);
+        assert!(viewpoint.vertex_count > 0);
+        assert!(tower.max_y > peak.max_y);
+        assert!(chimney.max_y > monument.max_y);
+    }
+
+    #[test]
+    fn point_feature_marker_uv_kind_channels_identify_trees_and_landmarks() {
+        let mut tree_verts = Vec::new();
+        let mut tree_idxs = Vec::new();
+        generate_point_feature(
+            &tags(&[("natural", "tree")]),
+            (0.0, 0.0),
+            0.0,
+            &mut tree_verts,
+            &mut tree_idxs,
+        );
+
+        let mut landmark_verts = Vec::new();
+        let mut landmark_idxs = Vec::new();
+        generate_point_feature(
+            &tags(&[("man_made", "tower")]),
+            (0.0, 0.0),
+            0.0,
+            &mut landmark_verts,
+            &mut landmark_idxs,
+        );
+
+        assert!(tree_verts.iter().all(|v| (v.uv[0] - 1.0).abs() < 1e-4));
+        assert!(landmark_verts.iter().all(|v| (v.uv[0] - 2.0).abs() < 1e-4));
     }
 
     #[test]
@@ -800,6 +1133,25 @@ mod tests {
             .filter(|v| v.normal[1] < -0.99)
             .count();
         assert_eq!(canopy_downward_vertices, 0);
+    }
+
+    struct FeatureHeight {
+        vertex_count: usize,
+        max_y: f32,
+    }
+
+    fn feature_height(tag_pairs: &[(&str, &str)]) -> FeatureHeight {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        generate_point_feature(&tags(tag_pairs), (0.0, 0.0), 0.0, &mut verts, &mut idxs);
+
+        FeatureHeight {
+            vertex_count: verts.len(),
+            max_y: verts
+                .iter()
+                .map(|v| v.position[1])
+                .fold(f32::NEG_INFINITY, f32::max),
+        }
     }
 
     fn approx_color(actual: [f32; 3], expected: [f32; 3]) -> bool {

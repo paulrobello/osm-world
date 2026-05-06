@@ -562,7 +562,7 @@ fn append_tree_area_point_features_with_settings(
         return;
     }
     let density = visual_detail.vegetation_density;
-    if !visual_detail.vegetation_visible || !density.is_finite() || density <= 0.0 {
+    if !density.is_finite() || density <= 0.0 {
         return;
     }
 
@@ -931,10 +931,11 @@ fn append_world_mesh(
     }
 
     for point_feature in &source.point_features {
-        super::point_feature::generate_point_feature(
+        super::point_feature::generate_point_feature_with_visual_detail(
             &point_feature.tags,
             point_feature.point,
             point_feature.elevation,
+            visual_detail,
             verts,
             idxs,
         );
@@ -1146,10 +1147,11 @@ fn append_tile_features_mesh(
         let Some(point_feature) = source.point_features.get(feature_idx) else {
             continue;
         };
-        super::point_feature::generate_point_feature(
+        super::point_feature::generate_point_feature_with_visual_detail(
             &point_feature.tags,
             point_feature.point,
             point_feature.elevation,
+            visual_detail,
             verts,
             idxs,
         );
@@ -1671,7 +1673,7 @@ mod tests {
     }
 
     #[test]
-    fn visual_settings_can_disable_synthetic_tree_points() {
+    fn hidden_vegetation_still_generates_synthetic_tree_points() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("orchard-hidden.osm");
         std::fs::write(
@@ -1698,12 +1700,13 @@ mod tests {
             vegetation_visible: false,
             ..Default::default()
         };
-        assert_eq!(
-            load_world_source_with_visual_detail(&path, None, &hidden)
-                .unwrap()
-                .point_features
-                .len(),
-            0
+        let hidden_count = load_world_source_with_visual_detail(&path, None, &hidden)
+            .unwrap()
+            .point_features
+            .len();
+        assert!(
+            hidden_count > 0,
+            "hidden vegetation should still generate tree source points for live visibility toggles"
         );
 
         let zero_density = crate::visual_detail::VisualDetailSettings {
@@ -1949,6 +1952,61 @@ mod tests {
             vertex.feature_type == crate::render::vertex::feature::BUILDING
                 && vertex.normal == [0.0, 1.0, 0.0]
                 && vertex.color == [0.42, 0.43, 0.46]
+        }));
+    }
+
+    #[test]
+    fn world_mesh_with_landmark_detail_off_suppresses_landmark_geometry() {
+        let mut source = empty_source();
+        source.point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("man_made".to_string(), "tower".to_string())]),
+            point: (0.0, 0.0),
+            elevation: 0.0,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        let visual = crate::visual_detail::VisualDetailSettings {
+            landmark_detail: crate::visual_detail::LandmarkDetail::Off,
+            ..Default::default()
+        };
+
+        let mesh = generate_world_mesh_with_visual_detail(&source, &visual);
+
+        assert!(mesh.vertices.iter().all(|vertex| {
+            vertex.feature_type != crate::render::vertex::feature::POINT_FEATURE
+        }));
+    }
+
+    #[test]
+    fn tile_mesh_with_landmark_detail_off_suppresses_landmark_geometry() {
+        let mut source = empty_source();
+        source.point_features.push(ResolvedPointFeature {
+            tags: HashMap::from([("man_made".to_string(), "tower".to_string())]),
+            point: (0.0, 0.0),
+            elevation: 0.0,
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        let refs = crate::stream::tile::TileFeatureRefs {
+            point_features: vec![0],
+            ..Default::default()
+        };
+        let visual = crate::visual_detail::VisualDetailSettings {
+            landmark_detail: crate::visual_detail::LandmarkDetail::Off,
+            ..Default::default()
+        };
+
+        let mesh = generate_tile_mesh_set_with_visual_detail(
+            &source,
+            crate::stream::TileCoord { x: 0, z: 0 },
+            &refs,
+            100.0,
+            &visual,
+        );
+
+        let near_vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
+        assert!(near_vertices.iter().all(|vertex| {
+            vertex.feature_type != crate::render::vertex::feature::POINT_FEATURE
         }));
     }
 

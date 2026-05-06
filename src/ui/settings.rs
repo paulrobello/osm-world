@@ -1,4 +1,4 @@
-use egui::{CollapsingHeader, RichText, ScrollArea, Slider};
+use egui::{CollapsingHeader, ComboBox, RichText, ScrollArea, Slider};
 
 pub struct LabelSettingsMut<'a> {
     pub poi: &'a mut crate::ui::poi_labels::PoiLabelSettings,
@@ -86,18 +86,47 @@ fn visual_detail_section(
         .default_open(true)
         .show(ui, |ui| {
             ui.label(format!("Preset: {:?}", settings.preset));
-            ui.label(format!("Landmarks: {:?}", settings.landmark_detail));
+            let mut landmark_changed = false;
+            ComboBox::from_label("Landmark detail")
+                .selected_text(format!("{:?}", settings.landmark_detail))
+                .show_ui(ui, |ui| {
+                    landmark_changed |= ui
+                        .selectable_value(
+                            &mut settings.landmark_detail,
+                            crate::visual_detail::LandmarkDetail::Off,
+                            "Off",
+                        )
+                        .changed();
+                    landmark_changed |= ui
+                        .selectable_value(
+                            &mut settings.landmark_detail,
+                            crate::visual_detail::LandmarkDetail::Simple,
+                            "Simple",
+                        )
+                        .changed();
+                    landmark_changed |= ui
+                        .selectable_value(
+                            &mut settings.landmark_detail,
+                            crate::visual_detail::LandmarkDetail::Showcase,
+                            "Showcase",
+                        )
+                        .changed();
+                });
+            mark_reload_required_if_changed(settings, landmark_changed, true);
             ui.checkbox(&mut settings.vegetation_visible, "Vegetation visible");
             ui.add(
                 Slider::new(&mut settings.facade_variation, 0.0..=1.0)
                     .step_by(0.01)
                     .text("Facade variation"),
             );
-            ui.add(
-                Slider::new(&mut settings.roof_variation, 0.0..=1.0)
-                    .step_by(0.01)
-                    .text("Roof variation"),
-            );
+            let roof_changed = ui
+                .add(
+                    Slider::new(&mut settings.roof_variation, 0.0..=1.0)
+                        .step_by(0.01)
+                        .text("Roof variation"),
+                )
+                .changed();
+            mark_reload_required_if_changed(settings, roof_changed, true);
             if ui
                 .add(
                     Slider::new(&mut settings.vegetation_density, 0.0..=3.0)
@@ -126,10 +155,20 @@ fn visual_detail_section(
             if settings.reload_required {
                 ui.colored_label(
                     egui::Color32::YELLOW,
-                    "Reload area to apply density/cap placement changes.",
+                    "Reload area to apply placement or baked-detail changes.",
                 );
             }
         });
+}
+
+fn mark_reload_required_if_changed(
+    settings: &mut crate::visual_detail::VisualDetailSettings,
+    changed: bool,
+    requires_reload: bool,
+) {
+    if changed && requires_reload {
+        settings.reload_required = true;
+    }
 }
 
 fn minimap_section(ui: &mut egui::Ui, minimap: &mut crate::ui::minimap::MinimapState) {
@@ -254,4 +293,23 @@ fn color_edit_rgb(ui: &mut egui::Ui, label: &str, arr: &mut [f32; 3]) {
         ui.label(label);
         ui.color_edit_button_rgb(arr);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mark_reload_required_if_changed;
+
+    #[test]
+    fn reload_required_marker_sets_flag_only_for_changed_reload_required_controls() {
+        let mut settings = crate::visual_detail::VisualDetailSettings::default();
+
+        mark_reload_required_if_changed(&mut settings, false, true);
+        assert!(!settings.reload_required);
+
+        mark_reload_required_if_changed(&mut settings, true, false);
+        assert!(!settings.reload_required);
+
+        mark_reload_required_if_changed(&mut settings, true, true);
+        assert!(settings.reload_required);
+    }
 }

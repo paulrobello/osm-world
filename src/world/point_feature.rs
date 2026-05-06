@@ -180,19 +180,43 @@ pub fn generate_point_feature(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
+    generate_point_feature_with_visual_detail(
+        tags,
+        point,
+        elevation,
+        &crate::visual_detail::VisualDetailSettings::default(),
+        verts,
+        idxs,
+    );
+}
+
+pub fn generate_point_feature_with_visual_detail(
+    tags: &HashMap<String, String>,
+    point: (f32, f32),
+    elevation: f32,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     let Some(style) = point_feature_style(tags) else {
         return;
     };
     let first_vertex = verts.len();
     match style.kind {
         PointFeatureKind::Tree => append_tree(point, elevation, verts, idxs),
-        PointFeatureKind::Landmark => append_landmark(
-            point,
-            elevation,
-            style.landmark_kind.expect("Landmark styles carry a kind"),
-            verts,
-            idxs,
-        ),
+        PointFeatureKind::Landmark => match visual_detail.landmark_detail {
+            crate::visual_detail::LandmarkDetail::Off => return,
+            crate::visual_detail::LandmarkDetail::Simple => {
+                append_landmark(point, elevation, LandmarkKind::Generic, verts, idxs)
+            }
+            crate::visual_detail::LandmarkDetail::Showcase => append_landmark(
+                point,
+                elevation,
+                style.landmark_kind.expect("Landmark styles carry a kind"),
+                verts,
+                idxs,
+            ),
+        },
         PointFeatureKind::Nature => append_nature_marker(point, elevation, verts, idxs),
         PointFeatureKind::Poi => append_poi_marker(
             point,
@@ -930,6 +954,43 @@ mod tests {
     }
 
     #[test]
+    fn landmark_detail_off_suppresses_landmarks_but_not_trees_or_pois() {
+        let off = crate::visual_detail::VisualDetailSettings {
+            landmark_detail: crate::visual_detail::LandmarkDetail::Off,
+            ..Default::default()
+        };
+
+        let landmark = feature_signature_with_visual(&[("man_made", "tower")], &off);
+        let tree = feature_signature_with_visual(&[("natural", "tree")], &off);
+        let poi = feature_signature_with_visual(&[("amenity", "restaurant")], &off);
+
+        assert_eq!(landmark.vertex_count, 0);
+        assert_eq!(landmark.index_count, 0);
+        assert!(tree.vertex_count > 0);
+        assert!(poi.vertex_count > 0);
+    }
+
+    #[test]
+    fn landmark_detail_simple_uses_generic_landmark_shape_for_specific_landmarks() {
+        let simple = crate::visual_detail::VisualDetailSettings {
+            landmark_detail: crate::visual_detail::LandmarkDetail::Simple,
+            ..Default::default()
+        };
+        let showcase = crate::visual_detail::VisualDetailSettings {
+            landmark_detail: crate::visual_detail::LandmarkDetail::Showcase,
+            ..Default::default()
+        };
+
+        let simple_tower = feature_signature_with_visual(&[("man_made", "tower")], &simple);
+        let showcase_tower = feature_signature_with_visual(&[("man_made", "tower")], &showcase);
+        let simple_generic = feature_signature_with_visual(&[("tourism", "attraction")], &simple);
+
+        assert!(simple_tower.vertex_count > 0);
+        assert_ne!(simple_tower, showcase_tower);
+        assert_eq!(simple_tower, simple_generic);
+    }
+
+    #[test]
     fn landmark_kinds_emit_distinct_showcase_silhouettes() {
         let tower = feature_height(&[("man_made", "tower")]);
         let chimney = feature_height(&[("man_made", "chimney")]);
@@ -1135,8 +1196,10 @@ mod tests {
         assert_eq!(canopy_downward_vertices, 0);
     }
 
+    #[derive(Debug, PartialEq)]
     struct FeatureHeight {
         vertex_count: usize,
+        index_count: usize,
         max_y: f32,
     }
 
@@ -1147,6 +1210,32 @@ mod tests {
 
         FeatureHeight {
             vertex_count: verts.len(),
+            index_count: idxs.len(),
+            max_y: verts
+                .iter()
+                .map(|v| v.position[1])
+                .fold(f32::NEG_INFINITY, f32::max),
+        }
+    }
+
+    fn feature_signature_with_visual(
+        tag_pairs: &[(&str, &str)],
+        visual: &crate::visual_detail::VisualDetailSettings,
+    ) -> FeatureHeight {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        generate_point_feature_with_visual_detail(
+            &tags(tag_pairs),
+            (0.0, 0.0),
+            0.0,
+            visual,
+            &mut verts,
+            &mut idxs,
+        );
+
+        FeatureHeight {
+            vertex_count: verts.len(),
+            index_count: idxs.len(),
             max_y: verts
                 .iter()
                 .map(|v| v.position[1])

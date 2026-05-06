@@ -4,6 +4,7 @@ use crate::render::vertex::{Vertex, feature};
 
 const TREE_TRUNK_COLOR: [f32; 3] = [0.45, 0.24, 0.10];
 const TREE_CANOPY_COLOR: [f32; 3] = [0.16, 0.48, 0.18];
+const SHOWCASE_TREE_CANOPY_COLOR: [f32; 3] = [0.24, 0.68, 0.28];
 const LANDMARK_COLOR: [f32; 3] = [0.72, 0.64, 0.45];
 const NATURE_MARKER_COLOR: [f32; 3] = [0.24, 0.42, 0.58];
 const POI_FOOD_COLOR: [f32; 3] = [1.00, 0.30, 0.16];
@@ -203,7 +204,9 @@ pub fn generate_point_feature_with_visual_detail(
     };
     let first_vertex = verts.len();
     match style.kind {
-        PointFeatureKind::Tree => append_tree(point, elevation, verts, idxs),
+        PointFeatureKind::Tree => {
+            append_tree_with_visual_detail(point, elevation, visual_detail, verts, idxs)
+        }
         PointFeatureKind::Landmark => match visual_detail.landmark_detail {
             crate::visual_detail::LandmarkDetail::Off => return,
             crate::visual_detail::LandmarkDetail::Simple => {
@@ -236,9 +239,39 @@ pub fn generate_point_feature_with_visual_detail(
     }
 }
 
-fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
-    append_hex_trunk(point, elevation, 0.65, 3.0, verts, idxs);
-    append_octahedron_canopy(point, elevation + 4.2, 2.0, verts, idxs);
+fn append_tree_with_visual_detail(
+    point: (f32, f32),
+    elevation: f32,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let (scale, canopy_color) =
+        if visual_detail.preset == crate::visual_detail::VisualPreset::Showcase {
+            (1.35, SHOWCASE_TREE_CANOPY_COLOR)
+        } else {
+            (1.0, TREE_CANOPY_COLOR)
+        };
+    append_tree_with_style(point, elevation, scale, canopy_color, verts, idxs);
+}
+
+fn append_tree_with_style(
+    point: (f32, f32),
+    elevation: f32,
+    scale: f32,
+    canopy_color: [f32; 3],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    append_hex_trunk(point, elevation, 0.65 * scale, 3.0 * scale, verts, idxs);
+    append_octahedron_canopy(
+        point,
+        elevation + 4.2 * scale,
+        2.0 * scale,
+        canopy_color,
+        verts,
+        idxs,
+    );
 }
 
 fn append_hex_trunk(
@@ -291,6 +324,7 @@ fn append_octahedron_canopy(
     point: (f32, f32),
     center_y: f32,
     radius: f32,
+    color: [f32; 3],
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
@@ -305,15 +339,7 @@ fn append_octahedron_canopy(
     ];
     let points = raw.map(|p| (center + p * radius).to_array());
     for [a, b, c] in OCTAHEDRON_FACES {
-        append_outward_tri(
-            center,
-            points[a],
-            points[b],
-            points[c],
-            TREE_CANOPY_COLOR,
-            verts,
-            idxs,
-        );
+        append_outward_tri(center, points[a], points[b], points[c], color, verts, idxs);
     }
 }
 
@@ -885,6 +911,57 @@ mod tests {
     #[test]
     fn ignores_unrendered_tags() {
         assert!(point_feature_style(&tags(&[("amenity", "bench")])).is_none());
+    }
+
+    #[test]
+    fn showcase_tree_marker_is_larger_and_brighter_than_balanced_tree_marker() {
+        let tags = tags(&[("natural", "tree")]);
+        let balanced = crate::visual_detail::VisualDetailSettings::from_preset(
+            crate::visual_detail::VisualPreset::Balanced,
+        );
+        let showcase = crate::visual_detail::VisualDetailSettings::from_preset(
+            crate::visual_detail::VisualPreset::Showcase,
+        );
+        let mut balanced_verts = Vec::new();
+        let mut balanced_idxs = Vec::new();
+        generate_point_feature_with_visual_detail(
+            &tags,
+            (0.0, 0.0),
+            0.0,
+            &balanced,
+            &mut balanced_verts,
+            &mut balanced_idxs,
+        );
+        let mut showcase_verts = Vec::new();
+        let mut showcase_idxs = Vec::new();
+        generate_point_feature_with_visual_detail(
+            &tags,
+            (0.0, 0.0),
+            0.0,
+            &showcase,
+            &mut showcase_verts,
+            &mut showcase_idxs,
+        );
+
+        let balanced_top = balanced_verts
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let showcase_top = showcase_verts
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let balanced_green = balanced_verts
+            .iter()
+            .map(|v| v.color[1])
+            .fold(0.0, f32::max);
+        let showcase_green = showcase_verts
+            .iter()
+            .map(|v| v.color[1])
+            .fold(0.0, f32::max);
+
+        assert!(showcase_top > balanced_top + 0.5);
+        assert!(showcase_green > balanced_green + 0.1);
     }
 
     #[test]

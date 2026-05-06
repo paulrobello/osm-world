@@ -68,6 +68,11 @@ fn street_sign_label_mode(distance: f32) -> StreetSignLabelMode {
     }
 }
 
+fn label_overlay_order() -> egui::Order {
+    // Keep world-projected labels below normal egui windows such as Settings.
+    egui::Order::Background
+}
+
 pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Vec<PoiLabel> {
     point_features
         .iter()
@@ -162,7 +167,7 @@ pub fn draw_street_signs(
     visible.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let painter = ctx.layer_painter(egui::LayerId::new(
-        egui::Order::Foreground,
+        label_overlay_order(),
         egui::Id::new("street_sign_board_labels"),
     ));
     for (distance, index, label, screen_pos) in visible.into_iter().take(MAX_VISIBLE_LABELS) {
@@ -224,7 +229,7 @@ fn draw_floating_label(
     screen_pos: egui::Pos2,
 ) {
     egui::Area::new(egui::Id::new((style.id_prefix, index)))
-        .order(egui::Order::Foreground)
+        .order(label_overlay_order())
         .interactable(false)
         .fixed_pos(screen_pos + egui::vec2(8.0, -30.0))
         .show(ctx, |ui| {
@@ -520,6 +525,11 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn projected_labels_draw_below_settings_windows() {
+        assert_eq!(label_overlay_order(), egui::Order::Background);
     }
 
     #[test]

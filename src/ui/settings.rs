@@ -85,7 +85,29 @@ fn visual_detail_section(
     CollapsingHeader::new(RichText::new("Visual Detail").strong())
         .default_open(true)
         .show(ui, |ui| {
-            ui.label(format!("Preset: {:?}", settings.preset));
+            let mut selected_preset = settings.preset;
+            ComboBox::from_label("Preset")
+                .selected_text(format!("{:?}", selected_preset))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut selected_preset,
+                        crate::visual_detail::VisualPreset::Performance,
+                        "Performance",
+                    );
+                    ui.selectable_value(
+                        &mut selected_preset,
+                        crate::visual_detail::VisualPreset::Balanced,
+                        "Balanced",
+                    );
+                    ui.selectable_value(
+                        &mut selected_preset,
+                        crate::visual_detail::VisualPreset::Showcase,
+                        "Showcase",
+                    );
+                });
+            if selected_preset != settings.preset {
+                apply_visual_preset(settings, selected_preset);
+            }
             let mut landmark_changed = false;
             ComboBox::from_label("Landmark detail")
                 .selected_text(format!("{:?}", settings.landmark_detail))
@@ -159,6 +181,18 @@ fn visual_detail_section(
                 );
             }
         });
+}
+
+fn apply_visual_preset(
+    settings: &mut crate::visual_detail::VisualDetailSettings,
+    preset: crate::visual_detail::VisualPreset,
+) {
+    if settings.preset == preset {
+        return;
+    }
+    let mut next = crate::visual_detail::VisualDetailSettings::from_preset(preset);
+    next.reload_required = true;
+    *settings = next;
 }
 
 fn mark_reload_required_if_changed(
@@ -297,7 +331,28 @@ fn color_edit_rgb(ui: &mut egui::Ui, label: &str, arr: &mut [f32; 3]) {
 
 #[cfg(test)]
 mod tests {
-    use super::mark_reload_required_if_changed;
+    use super::{apply_visual_preset, mark_reload_required_if_changed};
+
+    #[test]
+    fn applying_showcase_preset_updates_visible_vegetation_controls_and_marks_reload() {
+        let mut settings = crate::visual_detail::VisualDetailSettings::from_preset(
+            crate::visual_detail::VisualPreset::Balanced,
+        );
+
+        apply_visual_preset(&mut settings, crate::visual_detail::VisualPreset::Showcase);
+
+        assert_eq!(
+            settings.preset,
+            crate::visual_detail::VisualPreset::Showcase
+        );
+        assert!(settings.vegetation_density > 1.0);
+        assert!(settings.synthetic_tree_cap > 120);
+        assert_eq!(
+            settings.landmark_detail,
+            crate::visual_detail::LandmarkDetail::Showcase
+        );
+        assert!(settings.reload_required);
+    }
 
     #[test]
     fn reload_required_marker_sets_flag_only_for_changed_reload_required_controls() {

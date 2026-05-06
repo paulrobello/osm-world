@@ -154,7 +154,7 @@ pub fn generate_point_feature(
 
 fn append_tree(point: (f32, f32), elevation: f32, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
     append_hex_trunk(point, elevation, 0.65, 3.0, verts, idxs);
-    append_icosphere_canopy(point, elevation + 4.2, 2.0, verts, idxs);
+    append_octahedron_canopy(point, elevation + 4.2, 2.0, verts, idxs);
 }
 
 fn append_hex_trunk(
@@ -203,7 +203,7 @@ fn hex_ring(point: (f32, f32), y: f32, radius: f32) -> [[f32; 3]; 6] {
     })
 }
 
-fn append_icosphere_canopy(
+fn append_octahedron_canopy(
     point: (f32, f32),
     center_y: f32,
     radius: f32,
@@ -211,23 +211,16 @@ fn append_icosphere_canopy(
     idxs: &mut Vec<u32>,
 ) {
     let center = glam::vec3(point.0, center_y, point.1);
-    let phi = (1.0 + 5.0_f32.sqrt()) * 0.5;
     let raw = [
-        glam::vec3(-1.0, phi, 0.0),
-        glam::vec3(1.0, phi, 0.0),
-        glam::vec3(-1.0, -phi, 0.0),
-        glam::vec3(1.0, -phi, 0.0),
-        glam::vec3(0.0, -1.0, phi),
-        glam::vec3(0.0, 1.0, phi),
-        glam::vec3(0.0, -1.0, -phi),
-        glam::vec3(0.0, 1.0, -phi),
-        glam::vec3(phi, 0.0, -1.0),
-        glam::vec3(phi, 0.0, 1.0),
-        glam::vec3(-phi, 0.0, -1.0),
-        glam::vec3(-phi, 0.0, 1.0),
+        glam::vec3(0.0, 1.0, 0.0),
+        glam::vec3(1.0, 0.0, 0.0),
+        glam::vec3(0.0, 0.0, 1.0),
+        glam::vec3(-1.0, 0.0, 0.0),
+        glam::vec3(0.0, 0.0, -1.0),
+        glam::vec3(0.0, -1.0, 0.0),
     ];
-    let points = raw.map(|p| (center + p.normalize() * radius).to_array());
-    for [a, b, c] in ICOSPHERE_FACES {
+    let points = raw.map(|p| (center + p * radius).to_array());
+    for [a, b, c] in OCTAHEDRON_FACES {
         append_outward_tri(
             center,
             points[a],
@@ -240,27 +233,15 @@ fn append_icosphere_canopy(
     }
 }
 
-const ICOSPHERE_FACES: [[usize; 3]; 20] = [
-    [0, 11, 5],
-    [0, 5, 1],
-    [0, 1, 7],
-    [0, 7, 10],
-    [0, 10, 11],
-    [1, 5, 9],
-    [5, 11, 4],
-    [11, 10, 2],
-    [10, 7, 6],
-    [7, 1, 8],
-    [3, 9, 4],
-    [3, 4, 2],
-    [3, 2, 6],
-    [3, 6, 8],
-    [3, 8, 9],
-    [4, 9, 5],
-    [2, 4, 11],
-    [6, 2, 10],
-    [8, 6, 7],
-    [9, 8, 1],
+const OCTAHEDRON_FACES: [[usize; 3]; 8] = [
+    [0, 1, 2],
+    [0, 2, 3],
+    [0, 3, 4],
+    [0, 4, 1],
+    [5, 2, 1],
+    [5, 3, 2],
+    [5, 4, 3],
+    [5, 1, 4],
 ];
 
 fn append_landmark(
@@ -781,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_canopy_is_low_poly_icosphere() {
+    fn tree_canopy_is_lightweight_polyhedron() {
         let mut verts = Vec::new();
         let mut idxs = Vec::new();
 
@@ -797,7 +778,7 @@ mod tests {
             .chunks_exact(3)
             .filter(|tri| approx_color(verts[tri[0] as usize].color, [0.16, 0.48, 0.18]))
             .count();
-        assert_eq!(canopy_triangles, 20);
+        assert_eq!(canopy_triangles, 8);
     }
 
     #[test]

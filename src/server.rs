@@ -260,9 +260,12 @@ pub(crate) fn prepare_area(
     } else {
         par_osm_rust::sources::PoiSourceMode::OsmOnly
     };
-    let failure_mode = req
-        .overture_failure_mode
-        .unwrap_or(par_osm_rust::sources::OvertureFailureMode::FallbackToOsm);
+    let failure_mode = if req.overture {
+        req.overture_failure_mode
+            .unwrap_or(par_osm_rust::sources::OvertureFailureMode::FallbackToOsm)
+    } else {
+        par_osm_rust::sources::OvertureFailureMode::FallbackToOsm
+    };
     let themes = if req.overture {
         parse_overture_themes_for_prepare(&req.overture_themes)?
     } else {
@@ -277,56 +280,65 @@ pub(crate) fn prepare_area(
         poi_source_mode,
         failure_mode,
     );
-    let cache_status = if req.force_refresh {
-        "force_refreshed".to_string()
-    } else {
-        "prepared".to_string()
-    };
-
-    let source_options = par_osm_rust::sources::SourceOptions {
-        filter: req.filter.clone(),
-        overpass_url: req.overpass_url.clone(),
-        use_overpass_cache: !req.force_refresh,
-        overture: par_osm_rust::overture::OvertureParams {
-            enabled: req.overture,
-            themes,
-            priority: std::collections::HashMap::new(),
-            timeout_secs: req.overture_timeout.unwrap_or(120),
-        },
-        poi_source_mode,
-        overture_failure_mode: failure_mode,
-    };
-    let mut progress_cb = |pct: f32, message: &str| {
-        log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);
-    };
-    let par_osm_rust::sources::SourceFetchResult {
-        data,
-        status,
-        warnings,
-    } = par_osm_rust::sources::fetch_map_data(bbox, &source_options, &mut progress_cb).map_err(
-        |err| {
-            PrepareAreaError::upstream(
-                "failed to fetch map data",
-                err.context("fetching map data from configured sources"),
-            )
-        },
-    )?;
-    let source_status = source_status_string(status);
-    let xml = par_osm_rust::osm::write_osm_xml_string(&data);
-
     let prepared_dir = par_osm_rust::cache::shared_cache_root().join("prepared");
-    std::fs::create_dir_all(&prepared_dir).map_err(|err| {
-        PrepareAreaError::internal(
-            "failed to prepare area",
-            anyhow::Error::new(err).context(format!(
-                "creating prepared cache dir {}",
-                prepared_dir.display()
-            )),
-        )
-    })?;
     let osm_path = prepared_dir.join(format!("{cache_key}.osm"));
-    write_atomic(&osm_path, &xml)
-        .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+
+    let (cache_status, source_status, warnings) = if !req.force_refresh && osm_path.exists() {
+        (
+            "prepared_cache_hit".to_string(),
+            effective_source_status_string(req.overture, poi_source_mode),
+            Vec::new(),
+        )
+    } else {
+        let source_options = par_osm_rust::sources::SourceOptions {
+            filter: req.filter.clone(),
+            overpass_url: req.overpass_url.clone(),
+            use_overpass_cache: !req.force_refresh,
+            overture: par_osm_rust::overture::OvertureParams {
+                enabled: req.overture,
+                themes,
+                priority: std::collections::HashMap::new(),
+                timeout_secs: req.overture_timeout.unwrap_or(120),
+            },
+            poi_source_mode,
+            overture_failure_mode: failure_mode,
+        };
+        let mut progress_cb = |pct: f32, message: &str| {
+            log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);
+        };
+        let par_osm_rust::sources::SourceFetchResult {
+            data,
+            status,
+            warnings,
+        } = par_osm_rust::sources::fetch_map_data(bbox, &source_options, &mut progress_cb)
+            .map_err(|err| {
+                PrepareAreaError::upstream(
+                    "failed to fetch map data",
+                    err.context("fetching map data from configured sources"),
+                )
+            })?;
+        let source_status = source_status_string(status);
+        let xml = par_osm_rust::osm::write_osm_xml_string(&data);
+
+        std::fs::create_dir_all(&prepared_dir).map_err(|err| {
+            PrepareAreaError::internal(
+                "failed to prepare area",
+                anyhow::Error::new(err).context(format!(
+                    "creating prepared cache dir {}",
+                    prepared_dir.display()
+                )),
+            )
+        })?;
+        write_atomic(&osm_path, &xml)
+            .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+
+        let cache_status = if req.force_refresh {
+            "force_refreshed".to_string()
+        } else {
+            "prepared".to_string()
+        };
+        (cache_status, source_status, warnings)
+    };
 
     let srtm_dir = if req.use_elevation {
         validate_srtm_tile_limit(bbox)?;
@@ -397,6 +409,23 @@ fn source_status_string(status: par_osm_rust::sources::SourceStatus) -> String {
     .to_string()
 }
 
+fn effective_source_status_string(
+    overture: bool,
+    poi_source_mode: par_osm_rust::sources::PoiSourceMode,
+) -> String {
+    if !overture {
+        return "osm_only".to_string();
+    }
+
+    match poi_source_mode {
+        par_osm_rust::sources::PoiSourceMode::OsmOnly => "osm_only",
+        par_osm_rust::sources::PoiSourceMode::OvertureOnly => "overture_only",
+        par_osm_rust::sources::PoiSourceMode::Both => "both",
+        par_osm_rust::sources::PoiSourceMode::OverturePreferred => "overture_preferred",
+    }
+    .to_string()
+}
+
 fn validate_filter(filter: &par_osm_rust::filter::FeatureFilter) -> PrepareResult<()> {
     if !(filter.roads || filter.buildings || filter.water || filter.landuse || filter.railways) {
         return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
@@ -409,16 +438,45 @@ fn validate_filter(filter: &par_osm_rust::filter::FeatureFilter) -> PrepareResul
 fn parse_overture_themes_for_prepare(
     values: &[String],
 ) -> PrepareResult<Vec<par_osm_rust::overture::OvertureTheme>> {
-    if values.is_empty() {
-        return Ok(par_osm_rust::overture::OvertureTheme::all());
-    }
-    values
-        .iter()
-        .map(|value| {
-            par_osm_rust::overture::OvertureTheme::from_str_loose(value).ok_or_else(|| {
-                PrepareAreaError::bad_request(anyhow::anyhow!("unknown Overture theme '{value}'"))
+    let themes = if values.is_empty() {
+        par_osm_rust::overture::OvertureTheme::all()
+    } else {
+        values
+            .iter()
+            .map(|value| {
+                par_osm_rust::overture::OvertureTheme::from_str_loose(value).ok_or_else(|| {
+                    PrepareAreaError::bad_request(anyhow::anyhow!(
+                        "unknown Overture theme '{value}'"
+                    ))
+                })
             })
-        })
+            .collect::<PrepareResult<Vec<_>>>()?
+    };
+    Ok(canonicalize_overture_themes(themes))
+}
+
+fn canonicalize_overture_themes(
+    themes: Vec<par_osm_rust::overture::OvertureTheme>,
+) -> Vec<par_osm_rust::overture::OvertureTheme> {
+    let mut themes_by_name = std::collections::BTreeMap::new();
+    for theme in themes {
+        themes_by_name.entry(theme.to_string()).or_insert(theme);
+    }
+    themes_by_name.into_values().collect()
+}
+
+fn canonical_overture_theme_names_for_key(values: &[String]) -> Vec<String> {
+    let themes = if values.is_empty() {
+        par_osm_rust::overture::OvertureTheme::all()
+    } else {
+        values
+            .iter()
+            .filter_map(|value| par_osm_rust::overture::OvertureTheme::from_str_loose(value))
+            .collect()
+    };
+    canonicalize_overture_themes(themes)
+        .into_iter()
+        .map(|theme| theme.to_string())
         .collect()
 }
 
@@ -547,14 +605,27 @@ fn prepared_cache_key(
     failure_mode: par_osm_rust::sources::OvertureFailureMode,
 ) -> String {
     use sha2::{Digest, Sha256};
+    let (effective_themes, effective_poi_source_mode, effective_failure_mode) = if overture {
+        (
+            canonical_overture_theme_names_for_key(themes),
+            poi_source_mode,
+            failure_mode,
+        )
+    } else {
+        (
+            Vec::new(),
+            par_osm_rust::sources::PoiSourceMode::OsmOnly,
+            par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+        )
+    };
     let payload = serde_json::json!({
         "schema": 2,
         "bbox": [bbox.0, bbox.1, bbox.2, bbox.3],
         "filter": filter,
         "overture": overture,
-        "themes": themes,
-        "poi_source_mode": poi_source_mode,
-        "failure_mode": failure_mode,
+        "themes": effective_themes,
+        "poi_source_mode": effective_poi_source_mode,
+        "failure_mode": effective_failure_mode,
     });
     let hash = Sha256::digest(payload.to_string().as_bytes());
     format!("{hash:x}")
@@ -753,6 +824,180 @@ mod tests {
         assert_eq!(response.command_args[input_index + 5], "-120.9995");
         assert!(response.command.contains("--spawn-lat 38.0005"));
         assert!(response.command.contains("--spawn-lon -120.9995"));
+    }
+
+    #[test]
+    fn prepared_cache_key_ignores_overture_options_when_overture_disabled() {
+        let bbox = (38.0, -121.0, 38.001, -120.999);
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+
+        let default_key = prepared_cache_key(
+            bbox,
+            &filter,
+            false,
+            &[],
+            par_osm_rust::sources::PoiSourceMode::OsmOnly,
+            par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+        );
+        let noisy_key = prepared_cache_key(
+            bbox,
+            &filter,
+            false,
+            &["not-a-theme".to_string(), "places".to_string()],
+            par_osm_rust::sources::PoiSourceMode::OverturePreferred,
+            par_osm_rust::sources::OvertureFailureMode::Fail,
+        );
+
+        assert_eq!(noisy_key, default_key);
+    }
+
+    #[test]
+    fn prepared_cache_key_canonicalizes_overture_theme_aliases_order_and_all_default() {
+        let bbox = (38.0, -121.0, 38.001, -120.999);
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        let mode = par_osm_rust::sources::PoiSourceMode::OverturePreferred;
+        let failure = par_osm_rust::sources::OvertureFailureMode::FallbackToOsm;
+
+        let alias_key = prepared_cache_key(
+            bbox,
+            &filter,
+            true,
+            &[
+                "places".to_string(),
+                "BUILDING".to_string(),
+                "place".to_string(),
+            ],
+            mode,
+            failure,
+        );
+        let canonical_key = prepared_cache_key(
+            bbox,
+            &filter,
+            true,
+            &["building".to_string(), "place".to_string()],
+            mode,
+            failure,
+        );
+        assert_eq!(alias_key, canonical_key);
+
+        let default_all_key = prepared_cache_key(bbox, &filter, true, &[], mode, failure);
+        let explicit_all_key = prepared_cache_key(
+            bbox,
+            &filter,
+            true,
+            &[
+                "address".to_string(),
+                "base".to_string(),
+                "building".to_string(),
+                "place".to_string(),
+                "transportation".to_string(),
+            ],
+            mode,
+            failure,
+        );
+        assert_eq!(default_all_key, explicit_all_key);
+    }
+
+    #[test]
+    fn prepare_area_reuses_existing_prepared_file_on_second_call() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        let source_cache_key = cache_xml_for_bbox(bbox, &filter);
+
+        let first = prepare_area(cached_prepare_request(bbox, filter.clone()), tmp.path()).unwrap();
+        std::fs::write(
+            par_osm_rust::cache::overpass_cache_dir().join(format!("{source_cache_key}.xml")),
+            "not valid osm xml",
+        )
+        .unwrap();
+        let second = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
+
+        assert_eq!(first.cache_status, "prepared");
+        assert_eq!(second.cache_status, "prepared_cache_hit");
+        assert_eq!(second.cache_key, first.cache_key);
+        assert_eq!(second.osm_path, first.osm_path);
+        assert_eq!(second.source_status, "osm_only");
+        assert!(second.warnings.is_empty());
+    }
+
+    #[test]
+    fn prepare_area_rejects_invalid_overture_theme_only_when_overture_enabled() {
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        let mut req = cached_prepare_request(bbox, filter);
+        req.overture = true;
+        req.overture_themes = vec!["definitely-not-a-theme".to_string()];
+
+        let err = prepare_area(req, Path::new(".")).unwrap_err();
+
+        assert!(matches!(err, PrepareAreaError::BadRequest { .. }));
+    }
+
+    #[test]
+    fn prepare_area_ignores_invalid_overture_theme_when_overture_disabled() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+        let expected_key = prepared_cache_key(
+            (bbox[0], bbox[1], bbox[2], bbox[3]),
+            &filter,
+            false,
+            &[],
+            par_osm_rust::sources::PoiSourceMode::OsmOnly,
+            par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+        );
+        let mut req = cached_prepare_request(bbox, filter);
+        req.overture_themes = vec!["definitely-not-a-theme".to_string()];
+        req.poi_source_mode = Some(par_osm_rust::sources::PoiSourceMode::OvertureOnly);
+        req.overture_failure_mode = Some(par_osm_rust::sources::OvertureFailureMode::Fail);
+
+        let response = prepare_area(req, tmp.path()).unwrap();
+
+        assert_eq!(response.cache_key, expected_key);
+        assert_eq!(response.source_status, "osm_only");
+    }
+
+    #[test]
+    fn prepare_area_request_rejects_invalid_source_mode_enums() {
+        let invalid_poi_mode = serde_json::json!({
+            "bbox": [38.0, -121.0, 38.001, -120.999],
+            "poi_source_mode": "not_a_mode"
+        });
+        let invalid_failure_mode = serde_json::json!({
+            "bbox": [38.0, -121.0, 38.001, -120.999],
+            "overture_failure_mode": "not_a_mode"
+        });
+
+        assert!(serde_json::from_value::<PrepareAreaRequest>(invalid_poi_mode).is_err());
+        assert!(serde_json::from_value::<PrepareAreaRequest>(invalid_failure_mode).is_err());
     }
 
     #[test]

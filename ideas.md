@@ -5,10 +5,6 @@ Grounded in the current project: a Rust/WGPU 3D OpenStreetMap renderer with tile
 Remove completed items from this list.
 
 ## Visual and rendering ideas
-7. **Terrain tunnel cuts and bridge abutments**
-    - Follow up the current bridge/tunnel visuals with terrain carving around tunnel portals and stronger bridge approach structures.
-    - Value: removes the main visual mismatch in layered roads.
-
 8. **Screenshot tour mode**
     - Accept a list of camera positions/times of day and render a screenshot sequence.
     - Value: repeatable visual regression captures and showcase videos.

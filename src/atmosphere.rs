@@ -73,12 +73,17 @@ impl DayCycleState {
 
 pub fn local_clock_time_of_day() -> f32 {
     let now = chrono::Local::now();
-    time_of_day_from_hms(now.hour(), now.minute(), now.second())
+    time_of_day_from_hms_nanos(now.hour(), now.minute(), now.second(), now.nanosecond())
 }
 
 pub fn time_of_day_from_hms(hour: u32, minute: u32, second: u32) -> f32 {
+    time_of_day_from_hms_nanos(hour, minute, second, 0)
+}
+
+pub fn time_of_day_from_hms_nanos(hour: u32, minute: u32, second: u32, nanosecond: u32) -> f32 {
     let seconds = (hour % 24) * 3600 + (minute % 60) * 60 + (second % 60);
-    seconds as f32 / 86_400.0
+    let fractional_second = (nanosecond % 1_000_000_000) as f32 / 1_000_000_000.0;
+    (seconds as f32 + fractional_second) / 86_400.0
 }
 
 pub fn sun_direction(time_of_day: f32) -> [f32; 3] {
@@ -139,6 +144,15 @@ mod tests {
         let fraction = time_of_day_from_hms(6, 30, 0);
 
         assert!((fraction - 6.5 / 24.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn real_clock_fraction_includes_subsecond_progress() {
+        let whole_second = time_of_day_from_hms(6, 30, 0);
+        let half_second = time_of_day_from_hms_nanos(6, 30, 0, 500_000_000);
+
+        assert!(half_second > whole_second);
+        assert!((half_second - whole_second - 0.5 / 86_400.0).abs() < 1e-8);
     }
 
     #[test]

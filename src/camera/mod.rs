@@ -265,11 +265,23 @@ impl Flycam {
     }
 
     pub fn shadow_cascades(&self, light_direction: [f32; 3]) -> ShadowCascadeSet {
+        self.shadow_cascades_with_snap(light_direction, true)
+    }
+
+    pub fn shadow_cascades_for_dynamic_light(&self, light_direction: [f32; 3]) -> ShadowCascadeSet {
+        self.shadow_cascades_with_snap(light_direction, false)
+    }
+
+    fn shadow_cascades_with_snap(
+        &self,
+        light_direction: [f32; 3],
+        snap_to_texels: bool,
+    ) -> ShadowCascadeSet {
         let light_dir = glam::Vec3::from(light_direction).normalize();
 
         ShadowCascadeSet {
             cascades: SHADOW_CASCADE_RADII.map(|radius| ShadowCascade {
-                light_view_proj: self.shadow_light_view_proj(light_dir, radius),
+                light_view_proj: self.shadow_light_view_proj(light_dir, radius, snap_to_texels),
                 radius,
             }),
         }
@@ -280,21 +292,30 @@ impl Flycam {
         self.shadow_cascades(light_direction).cascades[1].light_view_proj
     }
 
-    fn shadow_light_view_proj(&self, light_dir: glam::Vec3, half_extent: f32) -> glam::Mat4 {
-        let light_view_rotation =
-            glam::Mat4::look_to_rh(glam::Vec3::ZERO, -light_dir, glam::Vec3::Y);
-        let camera_light_space = light_view_rotation.transform_point3(self.position);
-        let texel_size = (half_extent * 2.0) / SHADOW_MAP_SIZE_F32;
-        let snapped_camera_light_space = glam::Vec3::new(
-            (camera_light_space.x / texel_size).round() * texel_size,
-            (camera_light_space.y / texel_size).round() * texel_size,
-            camera_light_space.z,
-        );
-        let snapped_camera_world = light_view_rotation
-            .inverse()
-            .transform_point3(snapped_camera_light_space);
+    fn shadow_light_view_proj(
+        &self,
+        light_dir: glam::Vec3,
+        half_extent: f32,
+        snap_to_texels: bool,
+    ) -> glam::Mat4 {
+        let shadow_center = if snap_to_texels {
+            let light_view_rotation =
+                glam::Mat4::look_to_rh(glam::Vec3::ZERO, -light_dir, glam::Vec3::Y);
+            let camera_light_space = light_view_rotation.transform_point3(self.position);
+            let texel_size = (half_extent * 2.0) / SHADOW_MAP_SIZE_F32;
+            let snapped_camera_light_space = glam::Vec3::new(
+                (camera_light_space.x / texel_size).round() * texel_size,
+                (camera_light_space.y / texel_size).round() * texel_size,
+                camera_light_space.z,
+            );
+            light_view_rotation
+                .inverse()
+                .transform_point3(snapped_camera_light_space)
+        } else {
+            self.position
+        };
 
-        let light_pos = snapped_camera_world + light_dir * half_extent;
+        let light_pos = shadow_center + light_dir * half_extent;
         let light_view = glam::Mat4::look_to_rh(light_pos, -light_dir, glam::Vec3::Y);
         let light_proj = glam::Mat4::orthographic_rh(
             -half_extent,

@@ -5,6 +5,50 @@ use crate::render::vertex::{Vertex, feature};
 
 const GRID_SPACING: f32 = 10.0; // metres between grid vertices
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainCut {
+    pub start: (f32, f32),
+    pub end: (f32, f32),
+    pub half_width: f32,
+    pub floor_y: f32,
+    pub blend_width: f32,
+}
+
+impl TerrainCut {
+    fn apply(self, x: f32, z: f32, height: f32) -> f32 {
+        if self.half_width <= 0.0 || self.blend_width < 0.0 {
+            return height;
+        }
+
+        let dx = self.end.0 - self.start.0;
+        let dz = self.end.1 - self.start.1;
+        let len_sq = dx * dx + dz * dz;
+        if len_sq < 1e-6 {
+            return height;
+        }
+
+        let t = (((x - self.start.0) * dx + (z - self.start.1) * dz) / len_sq).clamp(0.0, 1.0);
+        let closest_x = self.start.0 + dx * t;
+        let closest_z = self.start.1 + dz * t;
+        let distance = ((x - closest_x).powi(2) + (z - closest_z).powi(2)).sqrt();
+        let blend_limit = self.half_width + self.blend_width;
+        if distance > blend_limit || height <= self.floor_y {
+            return height;
+        }
+
+        if distance <= self.half_width || self.blend_width <= 1e-6 {
+            return self.floor_y;
+        }
+
+        let blend_t = ((distance - self.half_width) / self.blend_width).clamp(0.0, 1.0);
+        self.floor_y + (height - self.floor_y) * smoothstep(blend_t)
+    }
+}
+
+fn smoothstep(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Generate a terrain heightfield mesh for the given bounding box.
 ///
 /// Creates a regular grid, samples elevation at each vertex, and computes
@@ -17,6 +61,31 @@ pub fn generate_terrain(
     max_lon: f64,
     conv: &CoordConverter,
     elevation: Option<&ElevationData>,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    generate_terrain_with_cuts(
+        min_lat,
+        min_lon,
+        max_lat,
+        max_lon,
+        conv,
+        elevation,
+        &[],
+        verts,
+        idxs,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn generate_terrain_with_cuts(
+    min_lat: f64,
+    min_lon: f64,
+    max_lat: f64,
+    max_lon: f64,
+    conv: &CoordConverter,
+    elevation: Option<&ElevationData>,
+    cuts: &[TerrainCut],
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
@@ -42,6 +111,7 @@ pub fn generate_terrain(
         GRID_SPACING,
         conv,
         elevation,
+        cuts,
         verts,
         idxs,
     );
@@ -64,6 +134,33 @@ pub fn generate_terrain_for_world_rect(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
+    generate_terrain_for_world_rect_with_cuts(
+        min_x,
+        min_z,
+        max_x,
+        max_z,
+        grid_spacing,
+        conv,
+        elevation,
+        &[],
+        verts,
+        idxs,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn generate_terrain_for_world_rect_with_cuts(
+    min_x: f32,
+    min_z: f32,
+    max_x: f32,
+    max_z: f32,
+    grid_spacing: f32,
+    conv: &CoordConverter,
+    elevation: Option<&ElevationData>,
+    cuts: &[TerrainCut],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     let cols = ((max_x - min_x) / grid_spacing).ceil() as usize + 1;
     let rows = ((max_z - min_z) / grid_spacing).abs().ceil() as usize + 1;
 
@@ -79,6 +176,7 @@ pub fn generate_terrain_for_world_rect(
         grid_spacing,
         conv,
         elevation,
+        cuts,
         verts,
         idxs,
     );
@@ -93,6 +191,7 @@ fn append_terrain_grid(
     grid_spacing: f32,
     conv: &CoordConverter,
     elevation: Option<&ElevationData>,
+    cuts: &[TerrainCut],
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
@@ -111,9 +210,12 @@ fn append_terrain_grid(
             let metres_per_deg_lon = 111_320.0 * conv.origin_lat.to_radians().cos();
             let lon = conv.origin_lon + (x as f64) / metres_per_deg_lon;
 
-            let h = elevation
+            let mut h = elevation
                 .and_then(|e| e.elevation_at(lat, lon))
                 .unwrap_or(0.0) as f32;
+            for cut in cuts {
+                h = cut.apply(x, z, h);
+            }
 
             heights[r * cols + c] = h;
         }
@@ -208,5 +310,35 @@ mod tests {
         );
         assert_eq!(verts.len(), 9);
         assert_eq!(idxs.len(), 24);
+    }
+
+    #[test]
+    fn tunnel_cut_lowers_only_vertices_inside_portal_cut() {
+        let conv = CoordConverter::new(38.0, -122.0);
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        let cuts = [TerrainCut {
+            start: (0.0, 0.0),
+            end: (30.0, 0.0),
+            half_width: 8.0,
+            floor_y: -4.8,
+            blend_width: 8.0,
+        }];
+
+        generate_terrain_for_world_rect_with_cuts(
+            0.0, -40.0, 80.0, 40.0, 10.0, &conv, None, &cuts, &mut verts, &mut idxs,
+        );
+
+        let centre = verts
+            .iter()
+            .find(|v| (v.position[0] - 10.0).abs() < 1e-4 && v.position[2].abs() < 1e-4)
+            .expect("grid contains centre cut sample");
+        assert!(centre.position[1] <= -4.7);
+
+        let outside = verts
+            .iter()
+            .find(|v| (v.position[0] - 10.0).abs() < 1e-4 && (v.position[2] - 30.0).abs() < 1e-4)
+            .expect("grid contains outside sample");
+        assert_eq!(outside.position[1], 0.0);
     }
 }

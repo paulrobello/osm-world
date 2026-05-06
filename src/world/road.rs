@@ -19,6 +19,8 @@ const BRIDGE_RAIL_BASE_CLEARANCE: f32 = 0.25;
 const BRIDGE_RAIL_HEIGHT: f32 = 0.9;
 const BRIDGE_RAIL_WIDTH: f32 = 0.25;
 const BRIDGE_SUPPORT_WIDTH: f32 = 0.8;
+const BRIDGE_ABUTMENT_THICKNESS: f32 = 0.7;
+const BRIDGE_ABUTMENT_SIDE_OVERHANG: f32 = 0.7;
 pub const BRIDGE_APPROACH_RAMP_LENGTH: f32 = 25.0;
 const TUNNEL_PORTAL_DEPTH: f32 = 1.0;
 const TUNNEL_PORTAL_THICKNESS: f32 = 0.5;
@@ -861,6 +863,15 @@ fn append_bridge_structure(
         return;
     }
 
+    append_bridge_abutments(
+        points,
+        terrain_elevations,
+        road_elevations,
+        width,
+        verts,
+        idxs,
+    );
+
     let half_width = (width * 0.5).max(0.0);
     let rail_half_width = (BRIDGE_RAIL_WIDTH * 0.5).max(0.05);
     let rail_offset = (half_width - rail_half_width).max(rail_half_width);
@@ -947,6 +958,89 @@ fn append_bridge_structure(
             );
         }
     }
+}
+
+fn append_bridge_abutments(
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+    road_elevations: &[f32],
+    width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    if points.len() < 3 {
+        return;
+    }
+
+    let first_high = (1..points.len() - 1)
+        .find(|&i| bridge_clearance_at(i, terrain_elevations, road_elevations) > 2.0);
+    let last_high = (1..points.len() - 1)
+        .rev()
+        .find(|&i| bridge_clearance_at(i, terrain_elevations, road_elevations) > 2.0);
+
+    if let Some(i) = first_high {
+        append_bridge_abutment_at(
+            points[i],
+            points[i + 1],
+            terrain_elevations[i],
+            road_elevations[i],
+            width,
+            verts,
+            idxs,
+        );
+    }
+    if let Some(i) = last_high.filter(|&i| Some(i) != first_high) {
+        append_bridge_abutment_at(
+            points[i],
+            points[i - 1],
+            terrain_elevations[i],
+            road_elevations[i],
+            width,
+            verts,
+            idxs,
+        );
+    }
+}
+
+fn bridge_clearance_at(index: usize, terrain_elevations: &[f32], road_elevations: &[f32]) -> f32 {
+    road_elevations[index] + ROAD_Y_OFFSET - terrain_elevations[index]
+}
+
+fn append_bridge_abutment_at(
+    point: Point2,
+    along: Point2,
+    terrain_y: f32,
+    road_elevation: f32,
+    width: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let Some(frame) = segment_frame(point, along) else {
+        return;
+    };
+    let road_y = road_elevation + ROAD_Y_OFFSET;
+    let top_y = road_y - BRIDGE_BEAM_TOP_CLEARANCE - BRIDGE_BEAM_THICKNESS;
+    if top_y - terrain_y <= 0.5 {
+        return;
+    }
+
+    let half_span = width * 0.5 + BRIDGE_ABUTMENT_SIDE_OVERHANG;
+    let (px, pz) = frame.perpendicular;
+    let a = (point.0 - px * half_span, point.1 - pz * half_span);
+    let b = (point.0 + px * half_span, point.1 + pz * half_span);
+    append_segment_strip_box(
+        SegmentStripBox {
+            a,
+            b,
+            lateral_offset: 0.0,
+            half_width: BRIDGE_ABUTMENT_THICKNESS * 0.5,
+            min_y: terrain_y,
+            max_y: top_y,
+            color: BRIDGE_STRUCTURE_COLOR,
+        },
+        verts,
+        idxs,
+    );
 }
 
 fn append_tunnel_structure(
@@ -1428,6 +1522,35 @@ mod tests {
                 .iter()
                 .all(|v| v.position[1] > terrain_elevations[0])
         );
+    }
+
+    #[test]
+    fn bridge_structure_adds_abutment_walls_at_approach_transitions() {
+        let points = [(0.0, 0.0), (25.0, 0.0), (75.0, 0.0), (100.0, 0.0)];
+        let terrain_elevations = [0.0, 0.0, 0.0, 0.0];
+        let road_elevations = [0.7, 5.7, 5.7, 0.7];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        append_bridge_structure(
+            &points,
+            &terrain_elevations,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(vertices.iter().any(|v| {
+            (v.position[0] - 25.0).abs() <= 0.4
+                && v.position[1] <= terrain_elevations[1] + 0.1
+                && v.position[2].abs() >= 3.0
+        }));
+        assert!(vertices.iter().any(|v| {
+            (v.position[0] - 75.0).abs() <= 0.4
+                && v.position[1] <= terrain_elevations[2] + 0.1
+                && v.position[2].abs() >= 3.0
+        }));
     }
 
     #[test]

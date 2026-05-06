@@ -18,9 +18,14 @@ pub struct SettingsDrawState<'a> {
     pub show: &'a mut bool,
 }
 
+pub fn settings_window_default_open() -> bool {
+    false
+}
+
 pub fn draw(ctx: &egui::Context, state: SettingsDrawState<'_>) {
     egui::Window::new("Settings")
         .open(state.show)
+        .default_open(settings_window_default_open())
         .default_width(320.0)
         .show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
@@ -437,7 +442,14 @@ fn color_edit_rgb(ui: &mut egui::Ui, label: &str, arr: &mut [f32; 3]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_visual_preset, mark_reload_required_if_changed};
+    use super::{
+        apply_visual_preset, mark_reload_required_if_changed, settings_window_default_open,
+    };
+
+    #[test]
+    fn settings_window_defaults_to_collapsed() {
+        assert!(!settings_window_default_open());
+    }
 
     #[test]
     fn applying_showcase_preset_updates_visible_vegetation_controls_and_marks_reload() {

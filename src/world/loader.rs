@@ -873,6 +873,79 @@ fn append_road_feature_mesh(
     (cap_elevations, width, color)
 }
 
+fn terrain_cuts_for_roads(roads: &[ResolvedFeature]) -> Vec<super::terrain::TerrainCut> {
+    roads.iter().flat_map(terrain_cuts_for_road).collect()
+}
+
+fn terrain_cuts_for_road_refs(
+    source: &WorldSource,
+    road_refs: &[usize],
+) -> Vec<super::terrain::TerrainCut> {
+    road_refs
+        .iter()
+        .filter_map(|&feature_idx| source.roads.get(feature_idx))
+        .flat_map(terrain_cuts_for_road)
+        .collect()
+}
+
+fn terrain_cuts_for_road(road: &ResolvedFeature) -> Vec<super::terrain::TerrainCut> {
+    if super::road::road_profile(&road.tags).kind != super::road::RoadProfileKind::Tunnel
+        || road.points.len() < 2
+        || road.points.len() != road.elevations.len()
+    {
+        return Vec::new();
+    }
+
+    let road_elevations =
+        super::road::road_render_elevations(&road.tags, &road.points, &road.elevations);
+    if road_elevations.len() != road.points.len() {
+        return Vec::new();
+    }
+
+    let width = super::color::road_width(&road.tags);
+    let mut cuts = Vec::with_capacity(2);
+    if let Some(cut) =
+        tunnel_portal_terrain_cut(road.points[0], road.points[1], road_elevations[0], width)
+    {
+        cuts.push(cut);
+    }
+    let last = road.points.len() - 1;
+    if let Some(cut) = tunnel_portal_terrain_cut(
+        road.points[last],
+        road.points[last - 1],
+        road_elevations[last],
+        width,
+    ) {
+        cuts.push(cut);
+    }
+    cuts
+}
+
+fn tunnel_portal_terrain_cut(
+    point: (f32, f32),
+    next: (f32, f32),
+    road_elevation: f32,
+    width: f32,
+) -> Option<super::terrain::TerrainCut> {
+    let dx = next.0 - point.0;
+    let dz = next.1 - point.1;
+    let len = (dx * dx + dz * dz).sqrt();
+    if len < 1e-6 {
+        return None;
+    }
+
+    let dir_x = dx / len;
+    let dir_z = dz / len;
+    let cut_length = 18.0_f32.min(len.max(8.0));
+    Some(super::terrain::TerrainCut {
+        start: point,
+        end: (point.0 + dir_x * cut_length, point.1 + dir_z * cut_length),
+        half_width: width * 0.5 + 4.0,
+        floor_y: road_elevation + super::road::ROAD_Y_OFFSET + 0.25,
+        blend_width: 12.0,
+    })
+}
+
 fn append_world_mesh(
     source: &WorldSource,
     visual_detail: &crate::visual_detail::VisualDetailSettings,
@@ -882,13 +955,15 @@ fn append_world_mesh(
     // Generate meshes in order: terrain, landuse, water, roads, railways, point features, street signs, buildings
 
     // Terrain
-    super::terrain::generate_terrain(
+    let terrain_cuts = terrain_cuts_for_roads(&source.roads);
+    super::terrain::generate_terrain_with_cuts(
         source.min_lat,
         source.min_lon,
         source.max_lat,
         source.max_lon,
         &source.conv,
         source.elevation.as_ref(),
+        &terrain_cuts,
         verts,
         idxs,
     );
@@ -1148,7 +1223,8 @@ fn generate_tile_lod_mesh(
     let mut indices = Vec::new();
     let rect = coord.rect(tile_size);
 
-    super::terrain::generate_terrain_for_world_rect(
+    let terrain_cuts = terrain_cuts_for_road_refs(source, &refs.roads);
+    super::terrain::generate_terrain_for_world_rect_with_cuts(
         rect.min_x,
         rect.min_z,
         rect.max_x,
@@ -1156,6 +1232,7 @@ fn generate_tile_lod_mesh(
         crate::stream::LodConfig::terrain_spacing(lod),
         &source.conv,
         source.elevation.as_ref(),
+        &terrain_cuts,
         &mut vertices,
         &mut indices,
     );

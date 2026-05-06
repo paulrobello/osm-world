@@ -138,6 +138,34 @@ fn light_view_projection_is_stable_for_sub_texel_camera_motion() {
 }
 
 #[test]
+fn shadow_projection_changes_smoothly_for_moving_real_clock_light() {
+    let mut cam = build_camera();
+    cam.position = glam::vec3(15_729.4, 122.8, -9_676.2);
+    let world_point = glam::vec3(15_760.0, 25.0, -9_710.0);
+    let start_time = 16.0 / 24.0;
+    let frame_step = 1.0 / 60.0 / 86_400.0;
+
+    let mut previous_clip: Option<glam::Vec4> = None;
+    let mut largest_delta = 0.0_f32;
+    for frame in 0..180 {
+        let time_of_day = start_time + frame as f32 * frame_step;
+        let light_direction = osm_world::atmosphere::dominant_light_direction(time_of_day);
+        let cascades = cam.shadow_cascades_for_dynamic_light(light_direction);
+        let clip = cascades.cascades[0].light_view_proj * world_point.extend(1.0);
+        if let Some(previous) = previous_clip {
+            let delta = (clip.x - previous.x).abs().max((clip.y - previous.y).abs());
+            largest_delta = largest_delta.max(delta);
+        }
+        previous_clip = Some(clip);
+    }
+
+    assert!(
+        largest_delta < 0.00035,
+        "moving light projection should not sawtooth by shadow texels; largest delta {largest_delta}"
+    );
+}
+
+#[test]
 fn shadow_cascade_blend_transitions_across_four_cascades() {
     use osm_world::camera::{
         SHADOW_CASCADE_BLEND_DISTANCE, SHADOW_CASCADE_RADII, SHADOW_FAR_FADE_DISTANCE,

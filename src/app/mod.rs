@@ -228,7 +228,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_starts_with_settings_panel_visible_and_sections_collapsed() {
+    fn app_starts_with_settings_panel_visible_by_default() {
         let app = App::new(AppOptions {
             window_width: 800.0,
             window_height: 600.0,
@@ -252,7 +252,6 @@ mod tests {
         });
 
         assert!(app.show_settings);
-        assert!(app.settings_sections.all_collapsed());
     }
 
     #[test]

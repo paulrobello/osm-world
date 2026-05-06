@@ -1,3 +1,7 @@
+pub const HUD_LEFT: f32 = 8.0;
+pub const HUD_TOP: f32 = 8.0;
+pub const HUD_MIN_WIDTH: f32 = 280.0;
+
 pub fn draw(
     ctx: &egui::Context,
     camera: &crate::camera::Flycam,
@@ -6,7 +10,7 @@ pub fn draw(
     performance: &crate::app::PerformanceState,
 ) {
     egui::Area::new(egui::Id::new("camera_hud"))
-        .anchor(egui::Align2::LEFT_TOP, [8.0, 8.0])
+        .anchor(egui::Align2::LEFT_TOP, [HUD_LEFT, HUD_TOP])
         .show(ctx, |ui| {
             egui::Frame::default()
                 .fill(egui::Color32::from_black_alpha(160))
@@ -14,7 +18,7 @@ pub fn draw(
                 .inner_margin(8.0)
                 .show(ui, |ui| {
                     ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                    ui.set_min_width(280.0);
+                    ui.set_min_width(HUD_MIN_WIDTH);
 
                     if performance.show_fps {
                         ui.label(format!("FPS:  {:.0}", performance.fps));

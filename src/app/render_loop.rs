@@ -56,7 +56,11 @@ pub fn render(
     state.camera_bg.update(&state.queue, &camera_uniforms);
 
     let light_dir = crate::atmosphere::dominant_light_direction(ui_state.day_cycle.time_of_day);
-    let cascades = state.camera.shadow_cascades(light_dir);
+    let cascades = if ui_state.day_cycle.real_clock || !ui_state.day_cycle.paused {
+        state.camera.shadow_cascades_for_dynamic_light(light_dir)
+    } else {
+        state.camera.shadow_cascades(light_dir)
+    };
     let light_uniforms = LightUniforms {
         light_view_proj: cascades
             .cascades

@@ -29,6 +29,13 @@ pub struct SearchState {
     pub query: String,
 }
 
+pub fn search_window_default_pos() -> egui::Pos2 {
+    egui::pos2(
+        crate::ui::hud::HUD_LEFT + crate::ui::hud::HUD_MIN_WIDTH + 16.0,
+        crate::ui::hud::HUD_TOP,
+    )
+}
+
 pub fn search_entries(entries: &[SearchEntry], query: &str, limit: usize) -> Vec<SearchEntry> {
     let query = query.trim().to_ascii_lowercase();
     if query.is_empty() || limit == 0 {
@@ -124,6 +131,7 @@ pub fn draw(
     camera: &mut crate::camera::Flycam,
 ) {
     egui::Window::new("Search / Fly To")
+        .default_pos(search_window_default_pos())
         .default_width(280.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -198,5 +206,16 @@ mod tests {
         assert_eq!(camera.position.x, 10.0);
         assert!(camera.position.y > 40.0);
         assert!(camera.position.z > -20.0);
+    }
+
+    #[test]
+    fn search_window_starts_to_the_right_of_debug_hud() {
+        let pos = search_window_default_pos();
+
+        assert_eq!(
+            pos.x,
+            crate::ui::hud::HUD_LEFT + crate::ui::hud::HUD_MIN_WIDTH + 16.0
+        );
+        assert_eq!(pos.y, crate::ui::hud::HUD_TOP);
     }
 }

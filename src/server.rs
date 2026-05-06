@@ -62,6 +62,12 @@ pub struct PrepareAreaResponse {
     pub command_args: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct PreparedCacheMetadata {
+    source_status: String,
+    warnings: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
@@ -247,10 +253,7 @@ pub(crate) fn prepare_area(
     let bbox = validate_bbox(req.bbox)?;
     let spawn = validate_spawn(req.spawn_lat, req.spawn_lon, bbox)?;
     validate_filter(&req.filter)?;
-    if let Some(url) = req.overpass_url.as_deref() {
-        par_osm_rust::overpass::validate_overpass_url(url)
-            .map_err(|err| PrepareAreaError::bad_request(err.context("validating Overpass URL")))?;
-    }
+    let effective_overpass_url = effective_overpass_url_for_prepare(req.overpass_url.as_deref())?;
 
     let requested_poi_source_mode = req
         .poi_source_mode
@@ -279,16 +282,15 @@ pub(crate) fn prepare_area(
         &req.overture_themes,
         poi_source_mode,
         failure_mode,
+        &effective_overpass_url,
     );
     let prepared_dir = par_osm_rust::cache::shared_cache_root().join("prepared");
     let osm_path = prepared_dir.join(format!("{cache_key}.osm"));
+    let metadata_path = prepared_metadata_path(&osm_path);
 
     let (cache_status, source_status, warnings) = if !req.force_refresh && osm_path.exists() {
-        (
-            "prepared_cache_hit".to_string(),
-            effective_source_status_string(req.overture, poi_source_mode),
-            Vec::new(),
-        )
+        let (source_status, warnings) = read_prepared_cache_metadata(&metadata_path);
+        ("prepared_cache_hit".to_string(), source_status, warnings)
     } else {
         let source_options = par_osm_rust::sources::SourceOptions {
             filter: req.filter.clone(),
@@ -330,6 +332,8 @@ pub(crate) fn prepare_area(
             )
         })?;
         write_atomic(&osm_path, &xml)
+            .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+        write_prepared_cache_metadata(&metadata_path, &source_status, &warnings)
             .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
 
         let cache_status = if req.force_refresh {
@@ -409,21 +413,70 @@ fn source_status_string(status: par_osm_rust::sources::SourceStatus) -> String {
     .to_string()
 }
 
-fn effective_source_status_string(
-    overture: bool,
-    poi_source_mode: par_osm_rust::sources::PoiSourceMode,
-) -> String {
-    if !overture {
-        return "osm_only".to_string();
-    }
+fn effective_overpass_url_for_prepare(overpass_url: Option<&str>) -> PrepareResult<String> {
+    let url = match overpass_url {
+        Some(url) => url,
+        None => par_osm_rust::overpass::default_overpass_url(),
+    };
+    par_osm_rust::overpass::validate_overpass_url(url)
+        .map_err(|err| PrepareAreaError::bad_request(err.context("validating Overpass URL")))?;
+    reqwest::Url::parse(url)
+        .map(|parsed| parsed.to_string())
+        .map_err(|err| {
+            PrepareAreaError::bad_request(anyhow::Error::new(err).context("parsing Overpass URL"))
+        })
+}
 
-    match poi_source_mode {
-        par_osm_rust::sources::PoiSourceMode::OsmOnly => "osm_only",
-        par_osm_rust::sources::PoiSourceMode::OvertureOnly => "overture_only",
-        par_osm_rust::sources::PoiSourceMode::Both => "both",
-        par_osm_rust::sources::PoiSourceMode::OverturePreferred => "overture_preferred",
+fn prepared_metadata_path(osm_path: &Path) -> PathBuf {
+    osm_path.with_extension("meta.json")
+}
+
+fn read_prepared_cache_metadata(metadata_path: &Path) -> (String, Vec<String>) {
+    match std::fs::read_to_string(metadata_path) {
+        Ok(contents) => match serde_json::from_str::<PreparedCacheMetadata>(&contents) {
+            Ok(metadata) => (metadata.source_status, metadata.warnings),
+            Err(err) => (
+                "cached_unknown".to_string(),
+                vec![format!(
+                    "prepared cache metadata unreadable at {}; source status unknown: {err}",
+                    metadata_path.display()
+                )],
+            ),
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => (
+            "cached_unknown".to_string(),
+            vec![format!(
+                "prepared cache metadata missing at {}; source status unknown",
+                metadata_path.display()
+            )],
+        ),
+        Err(err) => (
+            "cached_unknown".to_string(),
+            vec![format!(
+                "prepared cache metadata unreadable at {}; source status unknown: {err}",
+                metadata_path.display()
+            )],
+        ),
     }
-    .to_string()
+}
+
+fn write_prepared_cache_metadata(
+    metadata_path: &Path,
+    source_status: &str,
+    warnings: &[String],
+) -> anyhow::Result<()> {
+    let metadata = PreparedCacheMetadata {
+        source_status: source_status.to_string(),
+        warnings: warnings.to_vec(),
+    };
+    let contents =
+        serde_json::to_string_pretty(&metadata).context("serializing prepared cache metadata")?;
+    write_atomic(metadata_path, &(contents + "\n")).with_context(|| {
+        format!(
+            "writing prepared cache metadata {}",
+            metadata_path.display()
+        )
+    })
 }
 
 fn validate_filter(filter: &par_osm_rust::filter::FeatureFilter) -> PrepareResult<()> {
@@ -603,6 +656,7 @@ fn prepared_cache_key(
     themes: &[String],
     poi_source_mode: par_osm_rust::sources::PoiSourceMode,
     failure_mode: par_osm_rust::sources::OvertureFailureMode,
+    overpass_url: &str,
 ) -> String {
     use sha2::{Digest, Sha256};
     let (effective_themes, effective_poi_source_mode, effective_failure_mode) = if overture {
@@ -619,13 +673,14 @@ fn prepared_cache_key(
         )
     };
     let payload = serde_json::json!({
-        "schema": 2,
+        "schema": 3,
         "bbox": [bbox.0, bbox.1, bbox.2, bbox.3],
         "filter": filter,
         "overture": overture,
         "themes": effective_themes,
         "poi_source_mode": effective_poi_source_mode,
         "failure_mode": effective_failure_mode,
+        "overpass_url": overpass_url,
     });
     let hash = Sha256::digest(payload.to_string().as_bytes());
     format!("{hash:x}")
@@ -796,6 +851,7 @@ mod tests {
             &[],
             par_osm_rust::sources::PoiSourceMode::OsmOnly,
             par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+            par_osm_rust::overpass::default_overpass_url(),
         );
         let mut req = cached_prepare_request(bbox, filter);
         req.spawn_lat = Some(38.0005);
@@ -838,6 +894,7 @@ mod tests {
             &[],
             par_osm_rust::sources::PoiSourceMode::OsmOnly,
             par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+            par_osm_rust::overpass::default_overpass_url(),
         );
         let noisy_key = prepared_cache_key(
             bbox,
@@ -846,6 +903,7 @@ mod tests {
             &["not-a-theme".to_string(), "places".to_string()],
             par_osm_rust::sources::PoiSourceMode::OverturePreferred,
             par_osm_rust::sources::OvertureFailureMode::Fail,
+            par_osm_rust::overpass::default_overpass_url(),
         );
 
         assert_eq!(noisy_key, default_key);
@@ -869,6 +927,7 @@ mod tests {
             ],
             mode,
             failure,
+            par_osm_rust::overpass::default_overpass_url(),
         );
         let canonical_key = prepared_cache_key(
             bbox,
@@ -877,10 +936,19 @@ mod tests {
             &["building".to_string(), "place".to_string()],
             mode,
             failure,
+            par_osm_rust::overpass::default_overpass_url(),
         );
         assert_eq!(alias_key, canonical_key);
 
-        let default_all_key = prepared_cache_key(bbox, &filter, true, &[], mode, failure);
+        let default_all_key = prepared_cache_key(
+            bbox,
+            &filter,
+            true,
+            &[],
+            mode,
+            failure,
+            par_osm_rust::overpass::default_overpass_url(),
+        );
         let explicit_all_key = prepared_cache_key(
             bbox,
             &filter,
@@ -894,6 +962,7 @@ mod tests {
             ],
             mode,
             failure,
+            par_osm_rust::overpass::default_overpass_url(),
         );
         assert_eq!(default_all_key, explicit_all_key);
     }
@@ -935,6 +1004,72 @@ mod tests {
     }
 
     #[test]
+    fn prepare_area_missing_prepared_metadata_returns_conservative_cache_hit() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+
+        let first = prepare_area(cached_prepare_request(bbox, filter.clone()), tmp.path()).unwrap();
+        std::fs::remove_file(Path::new(&first.osm_path).with_extension("meta.json")).unwrap();
+        let second = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
+
+        assert_eq!(second.cache_status, "prepared_cache_hit");
+        assert_eq!(second.source_status, "cached_unknown");
+        assert!(
+            second
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("metadata") && warning.contains("missing")),
+            "expected missing metadata warning, got {:?}",
+            second.warnings
+        );
+    }
+
+    #[test]
+    fn prepare_area_includes_effective_overpass_url_in_prepared_cache_key() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+
+        let default_response =
+            prepare_area(cached_prepare_request(bbox, filter.clone()), tmp.path()).unwrap();
+        let mut custom_req = cached_prepare_request(bbox, filter);
+        custom_req.overpass_url = Some("https://overpass.kumi.systems/api/interpreter".to_string());
+        let custom_response = prepare_area(custom_req, tmp.path()).unwrap();
+
+        assert_ne!(custom_response.cache_key, default_response.cache_key);
+        assert_ne!(custom_response.osm_path, default_response.osm_path);
+    }
+
+    #[test]
     fn prepare_area_rejects_invalid_overture_theme_only_when_overture_enabled() {
         let bbox = [38.0, -121.0, 38.001, -120.999];
         let filter = par_osm_rust::filter::FeatureFilter::default();
@@ -973,6 +1108,7 @@ mod tests {
             &[],
             par_osm_rust::sources::PoiSourceMode::OsmOnly,
             par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+            par_osm_rust::overpass::default_overpass_url(),
         );
         let mut req = cached_prepare_request(bbox, filter);
         req.overture_themes = vec!["definitely-not-a-theme".to_string()];
@@ -1026,6 +1162,7 @@ mod tests {
             &[],
             par_osm_rust::sources::PoiSourceMode::OsmOnly,
             par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
+            par_osm_rust::overpass::default_overpass_url(),
         );
 
         let response = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();
@@ -1128,6 +1265,62 @@ mod tests {
                 .any(|warning| warning.contains("Overture"))
         );
         assert!(Path::new(&response.osm_path).exists());
+        assert!(
+            Path::new(&response.osm_path)
+                .with_extension("meta.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn prepare_area_prepared_cache_hit_preserves_overture_fallback_metadata() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "HOME",
+            "PATH",
+            "PAR_OSM_OVERPASS_CACHE_DIR",
+            "OVERPASS_CACHE_DIR",
+            "PAR_OSM_SRTM_CACHE_DIR",
+            "SRTM_CACHE_DIR",
+            "PAR_OSM_OVERTURE_CACHE_DIR",
+            "OVERTURE_CACHE_DIR",
+        ]);
+        let tmp = tempfile::tempdir().unwrap();
+        set_test_cache_env(&tmp);
+        unsafe {
+            std::env::set_var("PATH", tmp.path().join("empty-path"));
+        }
+
+        let bbox = [38.0, -121.0, 38.001, -120.999];
+        let filter = par_osm_rust::filter::FeatureFilter::default();
+        cache_xml_for_bbox(bbox, &filter);
+        let mut req = cached_prepare_request(bbox, filter.clone());
+        req.overture = true;
+        req.poi_source_mode = Some(par_osm_rust::sources::PoiSourceMode::OverturePreferred);
+        req.overture_failure_mode = Some(par_osm_rust::sources::OvertureFailureMode::FallbackToOsm);
+        req.overture_timeout = Some(1);
+
+        let first = prepare_area(req, tmp.path()).unwrap();
+        let mut second_req = cached_prepare_request(bbox, filter);
+        second_req.overture = true;
+        second_req.poi_source_mode = Some(par_osm_rust::sources::PoiSourceMode::OverturePreferred);
+        second_req.overture_failure_mode =
+            Some(par_osm_rust::sources::OvertureFailureMode::FallbackToOsm);
+        second_req.overture_timeout = Some(1);
+        let second = prepare_area(second_req, tmp.path()).unwrap();
+
+        assert_eq!(first.cache_status, "prepared");
+        assert_eq!(second.cache_status, "prepared_cache_hit");
+        assert_eq!(second.cache_key, first.cache_key);
+        assert_eq!(second.osm_path, first.osm_path);
+        assert_eq!(second.source_status, "overture_fallback_to_osm");
+        assert_eq!(second.warnings, first.warnings);
+        assert!(
+            second
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("Overture"))
+        );
     }
 
     #[test]

@@ -252,6 +252,15 @@ fn shadow_cascade_debug_color(distance_to_camera: f32) -> vec3<f32> {
     return colors[0] * blend.x + colors[1] * blend.y + colors[2] * blend.z + colors[3] * blend.w + colors[4] * (1.0 - shadow_strength);
 }
 
+fn is_tree_point_feature(feature_type: f32, uv: vec2<f32>) -> bool {
+    return abs(feature_type - 7.0) < 0.5 && abs(uv.x - 1.0) < 0.25;
+}
+
+fn should_discard_vegetation(feature_type: f32, uv: vec2<f32>, distance_to_camera: f32) -> bool {
+    return is_tree_point_feature(feature_type, uv)
+        && (scene.visual_params.w < 0.5 || distance_to_camera > scene.visual_params.z);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(in.world_normal);
@@ -262,6 +271,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = hemisphere * scene.ambient_light;
 
     let dist = distance(in.world_position, scene.camera_pos);
+    if (should_discard_vegetation(in.feature_type, in.uv, dist)) {
+        discard;
+    }
 
     // Diffuse + shadow
     let shadow_factor = sample_shadow(in.world_position, normal, dist);

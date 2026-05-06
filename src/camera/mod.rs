@@ -323,5 +323,16 @@ mod tests {
         assert_eq!(uniforms.visual_params[1], visual.roof_variation);
         assert_eq!(uniforms.visual_params[2], visual.vegetation_max_distance);
         assert_eq!(uniforms.visual_params[3], 1.0);
+
+        let hidden_visual = crate::visual_detail::VisualDetailSettings {
+            vegetation_visible: false,
+            ..visual
+        };
+        let hidden_uniforms = camera.uniforms_with_visual_detail(&day, &atmosphere, &hidden_visual);
+        assert_eq!(
+            hidden_uniforms.visual_params[2],
+            hidden_visual.vegetation_max_distance
+        );
+        assert_eq!(hidden_uniforms.visual_params[3], 0.0);
     }
 }

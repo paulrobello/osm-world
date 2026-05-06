@@ -21,18 +21,6 @@ Remove completed items from this list.
    - Add subtle animated normal/wave distortion and stronger sun glints for rivers and lakes.
    - Keep geometry unchanged; start as shader-only work.
 
-4. **Landmark-specific models**
-   - Replace generic landmark markers with simple recognizable meshes for towers, chimneys, monuments, peaks, and viewpoints.
-   - Use tag-driven low-poly models to keep rendering cheap.
-
-5. **Building façade variation**
-   - Add deterministic façade colors, window stripe hints, and roof material variation based on tags and feature hash.
-   - Avoid texture dependencies initially; use procedural color bands or extra simple geometry.
-
-6. **Tree and vegetation density controls**
-    - Add settings for tree marker density, synthetic tree caps, and vegetation visibility by distance.
-    - Value: helps tune clutter/performance in parks and forests.
-
 7. **Terrain tunnel cuts and bridge abutments**
     - Follow up the current bridge/tunnel visuals with terrain carving around tunnel portals and stronger bridge approach structures.
     - Value: removes the main visual mismatch in layered roads.

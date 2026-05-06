@@ -31,9 +31,15 @@ pub fn building_color(tags: &HashMap<String, String>) -> [f32; 3] {
     }
 }
 
+const VEHICLE_ROAD_COLOR: [f32; 3] = [0.02, 0.02, 0.02];
+const SIDEWALK_ROAD_COLOR: [f32; 3] = [0.55, 0.55, 0.55];
+
 /// Color for road ribbons.
-pub fn road_color(_tags: &HashMap<String, String>) -> [f32; 3] {
-    [0.02, 0.02, 0.02]
+pub fn road_color(tags: &HashMap<String, String>) -> [f32; 3] {
+    match tags.get("highway").map(String::as_str) {
+        Some("footway" | "path" | "pedestrian" | "cycleway") => SIDEWALK_ROAD_COLOR,
+        _ => VEHICLE_ROAD_COLOR,
+    }
 }
 
 /// Width in metres for a road based on its highway tag or explicit width tag.
@@ -123,11 +129,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn road_color_is_black_for_all_highway_types() {
+    fn road_color_keeps_vehicle_roads_black() {
         let primary = HashMap::from([("highway".to_string(), "primary".to_string())]);
         let service = HashMap::from([("highway".to_string(), "service".to_string())]);
 
-        assert_eq!(road_color(&primary), [0.02, 0.02, 0.02]);
-        assert_eq!(road_color(&service), [0.02, 0.02, 0.02]);
+        assert_eq!(road_color(&primary), VEHICLE_ROAD_COLOR);
+        assert_eq!(road_color(&service), VEHICLE_ROAD_COLOR);
+    }
+
+    #[test]
+    fn road_color_makes_sidewalk_like_ways_grey() {
+        for highway in ["footway", "path", "pedestrian", "cycleway"] {
+            let tags = HashMap::from([("highway".to_string(), highway.to_string())]);
+            assert_eq!(road_color(&tags), SIDEWALK_ROAD_COLOR);
+        }
     }
 }

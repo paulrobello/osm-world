@@ -12,6 +12,7 @@ pub struct SettingsDrawState<'a> {
     pub minimap: &'a mut crate::ui::minimap::MinimapState,
     pub label_settings: LabelSettingsMut<'a>,
     pub area_switch: &'a mut crate::app::AreaSwitchState,
+    pub visual_detail: &'a mut crate::visual_detail::VisualDetailSettings,
     pub show: &'a mut bool,
 }
 
@@ -23,6 +24,7 @@ pub fn draw(ctx: &egui::Context, state: SettingsDrawState<'_>) {
             ScrollArea::vertical().show(ui, |ui| {
                 day_cycle_section(ui, state.day_cycle, state.atmosphere);
                 performance_section(ui, state.performance);
+                visual_detail_section(ui, state.visual_detail);
                 minimap_section(ui, state.minimap);
                 area_switch_section(ui, state.area_switch);
                 poi_labels_section(ui, state.label_settings.poi);
@@ -73,6 +75,60 @@ fn performance_section(ui: &mut egui::Ui, performance: &mut crate::app::Performa
         .show(ui, |ui| {
             ui.checkbox(&mut performance.show_fps, "Show FPS counter");
             ui.label(format!("Current FPS: {:.0}", performance.fps));
+        });
+}
+
+fn visual_detail_section(
+    ui: &mut egui::Ui,
+    settings: &mut crate::visual_detail::VisualDetailSettings,
+) {
+    CollapsingHeader::new(RichText::new("Visual Detail").strong())
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.label(format!("Preset: {:?}", settings.preset));
+            ui.label(format!("Landmarks: {:?}", settings.landmark_detail));
+            ui.checkbox(&mut settings.vegetation_visible, "Vegetation visible");
+            ui.add(
+                Slider::new(&mut settings.facade_variation, 0.0..=1.0)
+                    .step_by(0.01)
+                    .text("Facade variation"),
+            );
+            ui.add(
+                Slider::new(&mut settings.roof_variation, 0.0..=1.0)
+                    .step_by(0.01)
+                    .text("Roof variation"),
+            );
+            if ui
+                .add(
+                    Slider::new(&mut settings.vegetation_density, 0.0..=3.0)
+                        .step_by(0.05)
+                        .text("Vegetation density"),
+                )
+                .changed()
+            {
+                settings.reload_required = true;
+            }
+            if ui
+                .add(
+                    Slider::new(&mut settings.synthetic_tree_cap, 1..=1000)
+                        .text("Synthetic tree cap"),
+                )
+                .changed()
+            {
+                settings.reload_required = true;
+            }
+            ui.add(
+                Slider::new(&mut settings.vegetation_max_distance, 0.0..=8000.0)
+                    .step_by(25.0)
+                    .text("Vegetation max distance"),
+            );
+            settings.clamp();
+            if settings.reload_required {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    "Reload area to apply density/cap placement changes.",
+                );
+            }
         });
 }
 

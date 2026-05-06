@@ -63,7 +63,7 @@ fn uniform_has_correct_size_and_padding() {
         uniforms.light_direction,
         osm_world::atmosphere::dominant_light_direction(day.time_of_day)
     );
-    assert_eq!(std::mem::size_of::<osm_world::camera::SceneUniforms>(), 288);
+    assert_eq!(std::mem::size_of::<osm_world::camera::SceneUniforms>(), 320);
 }
 
 #[test]

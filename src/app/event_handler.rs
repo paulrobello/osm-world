@@ -9,15 +9,16 @@ use crate::app::{render_loop, update};
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
-            match init::init_wgpu(
-                event_loop,
-                self.opts.window_width,
-                self.opts.window_height,
-                self.opts.input_path.as_deref(),
-                self.opts.srtm_dir.as_deref(),
-                self.opts.cam_override.as_ref(),
-                self.persisted_camera.as_ref(),
-            ) {
+            let init_options = init::InitWgpuOptions {
+                window_width: self.opts.window_width,
+                window_height: self.opts.window_height,
+                input_path: self.opts.input_path.as_deref(),
+                srtm_dir: self.opts.srtm_dir.as_deref(),
+                cam_override: self.opts.cam_override.as_ref(),
+                persisted_camera: self.persisted_camera.as_ref(),
+                visual_detail: &self.visual_detail,
+            };
+            match init::init_wgpu(event_loop, &init_options) {
                 Ok((state, egui)) => {
                     log::info!("WGPU initialized: {:?}", state.device.adapter_info());
                     log::info!(
@@ -165,6 +166,7 @@ impl ApplicationHandler for App {
                             street_sign_labels: &mut self.street_sign_labels,
                             performance: &mut self.performance,
                             area_switch: &mut self.area_switch,
+                            visual_detail: &mut self.visual_detail,
                         },
                     );
                     self.persist_preferences_if_changed(false);

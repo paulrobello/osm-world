@@ -252,6 +252,18 @@ fn ensure_ccw(poly: &mut [(f32, f32)], elevations: &mut [f32]) {
 }
 
 pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Result<WorldSource> {
+    load_world_source_with_visual_detail(
+        pbf_path,
+        srtm_dir,
+        &crate::visual_detail::VisualDetailSettings::default(),
+    )
+}
+
+pub fn load_world_source_with_visual_detail(
+    pbf_path: &Path,
+    srtm_dir: Option<&Path>,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+) -> anyhow::Result<WorldSource> {
     // 1. Parse OSM input (PBF or XML)
     let osm_data = parse_osm_file(pbf_path)?;
 
@@ -366,7 +378,13 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
             });
         }
         if is_closed {
-            append_tree_area_point_features(&resolved, &conv, &elev, &mut point_features);
+            append_tree_area_point_features_with_settings(
+                &resolved,
+                &conv,
+                &elev,
+                visual_detail,
+                &mut point_features,
+            );
         }
 
         if is_building {
@@ -441,7 +459,13 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
             });
         }
         if !is_water {
-            append_tree_area_point_features(&resolved, &conv, &elev, &mut point_features);
+            append_tree_area_point_features_with_settings(
+                &resolved,
+                &conv,
+                &elev,
+                visual_detail,
+                &mut point_features,
+            );
         }
 
         if is_water {
@@ -527,13 +551,18 @@ fn tree_area_config(tags: &HashMap<String, String>) -> Option<TreeAreaConfig> {
     None
 }
 
-fn append_tree_area_point_features(
+fn append_tree_area_point_features_with_settings(
     area: &ResolvedFeature,
     conv: &CoordConverter,
     elev: &impl Fn(f64, f64) -> f32,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
     point_features: &mut Vec<ResolvedPointFeature>,
 ) {
     if area.points.len() < 3 {
+        return;
+    }
+    let density = visual_detail.vegetation_density;
+    if !visual_detail.vegetation_visible || !density.is_finite() || density <= 0.0 {
         return;
     }
 
@@ -543,27 +572,29 @@ fn append_tree_area_point_features(
     let Some((min_x, min_z, max_x, max_z)) = feature_bbox(area) else {
         return;
     };
+    let spacing_metres = config.spacing_metres / density.sqrt().max(0.25);
+    let max_points = config.max_points.min(visual_detail.synthetic_tree_cap);
     let mut candidates = Vec::new();
     let mut row = 0usize;
-    let mut z = min_z + config.spacing_metres * 0.5;
+    let mut z = min_z + spacing_metres * 0.5;
     while z <= max_z {
         let row_offset = if row.is_multiple_of(2) {
             0.0
         } else {
-            config.spacing_metres * 0.5
+            spacing_metres * 0.5
         };
-        let mut x = min_x + config.spacing_metres * 0.5 + row_offset;
+        let mut x = min_x + spacing_metres * 0.5 + row_offset;
         while x <= max_x {
             if point_in_polygon((x, z), &area.points) {
                 candidates.push((x, z));
             }
-            x += config.spacing_metres;
+            x += spacing_metres;
         }
         row += 1;
-        z += config.spacing_metres;
+        z += spacing_metres;
     }
 
-    for (x, z) in evenly_capped_points(&candidates, config.max_points) {
+    for (x, z) in evenly_capped_points(&candidates, max_points) {
         let (lat, lon) = conv.world_xz_to_lat_lon(x, z);
         point_features.push(ResolvedPointFeature {
             tags: HashMap::from([("natural".to_string(), "tree".to_string())]),
@@ -1501,6 +1532,115 @@ mod tests {
                 .point_features
                 .iter()
                 .all(|feature| { feature.tags.get("natural").map(String::as_str) == Some("tree") })
+        );
+    }
+
+    #[test]
+    fn visual_settings_scale_synthetic_tree_counts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("orchard-visual.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.998"/>
+  <node id="3" lat="38.002" lon="-120.998"/>
+  <node id="4" lat="38.002" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="landuse" v="orchard"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let low_density = crate::visual_detail::VisualDetailSettings {
+            vegetation_density: 0.25,
+            synthetic_tree_cap: 120,
+            ..Default::default()
+        };
+        let low_count = load_world_source_with_visual_detail(&path, None, &low_density)
+            .unwrap()
+            .point_features
+            .len();
+
+        let high_density = crate::visual_detail::VisualDetailSettings {
+            vegetation_density: 1.0,
+            ..low_density.clone()
+        };
+        let high_count = load_world_source_with_visual_detail(&path, None, &high_density)
+            .unwrap()
+            .point_features
+            .len();
+
+        let capped = crate::visual_detail::VisualDetailSettings {
+            synthetic_tree_cap: 3,
+            ..high_density.clone()
+        };
+        let capped_count = load_world_source_with_visual_detail(&path, None, &capped)
+            .unwrap()
+            .point_features
+            .len();
+
+        assert!(low_count > 0, "low density should still place some trees");
+        assert!(
+            high_count > low_count,
+            "high density count {high_count} should exceed low density count {low_count}"
+        );
+        assert_eq!(capped_count, 3);
+    }
+
+    #[test]
+    fn visual_settings_can_disable_synthetic_tree_points() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("orchard-hidden.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.998"/>
+  <node id="3" lat="38.002" lon="-120.998"/>
+  <node id="4" lat="38.002" lon="-121.0"/>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="landuse" v="orchard"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let hidden = crate::visual_detail::VisualDetailSettings {
+            vegetation_visible: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            load_world_source_with_visual_detail(&path, None, &hidden)
+                .unwrap()
+                .point_features
+                .len(),
+            0
+        );
+
+        let zero_density = crate::visual_detail::VisualDetailSettings {
+            vegetation_density: 0.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            load_world_source_with_visual_detail(&path, None, &zero_density)
+                .unwrap()
+                .point_features
+                .len(),
+            0
         );
     }
 

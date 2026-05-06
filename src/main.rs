@@ -322,6 +322,7 @@ fn main() -> anyhow::Result<()> {
             max_uploaded_tiles: args.max_uploaded_tiles,
             max_uploaded_mb: args.max_uploaded_mb,
         },
+        visual_detail,
     });
     event_loop.run_app(&mut app)?;
 

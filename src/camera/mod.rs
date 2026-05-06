@@ -96,6 +96,14 @@ fn smoothstep(start: f32, end: f32, value: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+fn landmark_detail_value(detail: crate::visual_detail::LandmarkDetail) -> f32 {
+    match detail {
+        crate::visual_detail::LandmarkDetail::Off => 0.0,
+        crate::visual_detail::LandmarkDetail::Simple => 1.0,
+        crate::visual_detail::LandmarkDetail::Showcase => 2.0,
+    }
+}
+
 /// Optional overrides for the initial camera position and orientation.
 pub struct CameraOverride {
     pub x: Option<f32>,
@@ -107,7 +115,7 @@ pub struct CameraOverride {
     pub spawn_lon: Option<f64>,
 }
 
-/// Scene uniform buffer layout (GPU). 288 bytes: camera + atmosphere.
+/// Scene uniform buffer layout (GPU). 320 bytes: camera + atmosphere + visual detail.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct SceneUniforms {
@@ -137,6 +145,10 @@ pub struct SceneUniforms {
     pub clouds_enabled: u32,
     pub ground_color: [f32; 3],
     pub _pad7: f32,
+    /// facade variation, roof variation, vegetation max distance, vegetation visible 1/0
+    pub visual_params: [f32; 4],
+    /// landmark detail numeric, reserved
+    pub visual_params2: [f32; 4],
 }
 
 /// Flycam: free-flight camera controlled by WASD + mouse.
@@ -191,6 +203,19 @@ impl Flycam {
         day: &crate::atmosphere::DayCycleState,
         atm: &crate::atmosphere::AtmosphereSettings,
     ) -> SceneUniforms {
+        self.uniforms_with_visual_detail(
+            day,
+            atm,
+            &crate::visual_detail::VisualDetailSettings::default(),
+        )
+    }
+
+    pub fn uniforms_with_visual_detail(
+        &self,
+        day: &crate::atmosphere::DayCycleState,
+        atm: &crate::atmosphere::AtmosphereSettings,
+        visual: &crate::visual_detail::VisualDetailSettings,
+    ) -> SceneUniforms {
         let view = self.view_matrix();
         let proj = self.projection_matrix();
         let vp = proj * view;
@@ -224,6 +249,13 @@ impl Flycam {
             clouds_enabled: atm.clouds_enabled as u32,
             ground_color: atm.ground_color,
             _pad7: 0.0,
+            visual_params: [
+                visual.facade_variation,
+                visual.roof_variation,
+                visual.vegetation_max_distance,
+                if visual.vegetation_visible { 1.0 } else { 0.0 },
+            ],
+            visual_params2: [landmark_detail_value(visual.landmark_detail), 0.0, 0.0, 0.0],
         }
     }
 
@@ -269,5 +301,27 @@ impl Flycam {
         );
 
         light_proj * light_view
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_uniforms_include_visual_detail_params() {
+        let camera = Flycam::new(1.0);
+        let day = crate::atmosphere::DayCycleState::default();
+        let atmosphere = crate::atmosphere::AtmosphereSettings::default();
+        let visual = crate::visual_detail::VisualDetailSettings::from_preset(
+            crate::visual_detail::VisualPreset::Showcase,
+        );
+
+        let uniforms = camera.uniforms_with_visual_detail(&day, &atmosphere, &visual);
+
+        assert_eq!(uniforms.visual_params[0], visual.facade_variation);
+        assert_eq!(uniforms.visual_params[1], visual.roof_variation);
+        assert_eq!(uniforms.visual_params[2], visual.vegetation_max_distance);
+        assert_eq!(uniforms.visual_params[3], 1.0);
     }
 }

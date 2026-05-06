@@ -82,6 +82,7 @@ pub struct AppOptions {
     pub initial_time_of_day: Option<f32>,
     pub debug_shadow_cascades: bool,
     pub streaming: StreamingOptions,
+    pub visual_detail: crate::visual_detail::VisualDetailSettings,
 }
 
 #[derive(Clone, Debug)]
@@ -135,6 +136,7 @@ pub struct App {
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
     pub area_switch: AreaSwitchState,
+    pub visual_detail: crate::visual_detail::VisualDetailSettings,
 }
 
 impl App {
@@ -149,6 +151,7 @@ impl App {
             day_cycle.time_of_day = time_of_day;
         }
 
+        let visual_detail = opts.visual_detail.clone();
         let prefs = crate::app::prefs::load_user_prefs();
         let mut minimap = crate::ui::minimap::MinimapState::default();
         prefs.minimap.apply_to_minimap_state(&mut minimap);
@@ -178,6 +181,7 @@ impl App {
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
             street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings::default(),
             area_switch,
+            visual_detail,
         }
     }
 }

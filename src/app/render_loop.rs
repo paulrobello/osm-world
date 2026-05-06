@@ -17,6 +17,7 @@ pub struct RenderUiState<'a> {
     pub street_sign_labels: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
     pub performance: &'a mut crate::app::PerformanceState,
     pub area_switch: &'a mut crate::app::AreaSwitchState,
+    pub visual_detail: &'a mut crate::visual_detail::VisualDetailSettings,
 }
 
 pub fn render(
@@ -42,6 +43,13 @@ pub fn render(
     let view = output
         .texture
         .create_view(&TextureViewDescriptor::default());
+
+    let camera_uniforms = state.camera.uniforms_with_visual_detail(
+        ui_state.day_cycle,
+        ui_state.atmosphere,
+        ui_state.visual_detail,
+    );
+    state.camera_bg.update(&state.queue, &camera_uniforms);
 
     let light_dir = crate::atmosphere::dominant_light_direction(ui_state.day_cycle.time_of_day);
     let cascades = state.camera.shadow_cascades(light_dir);
@@ -167,10 +175,11 @@ pub fn render(
 
     // Minimap pass
     if ui_state.minimap.visible {
-        let minimap_uniforms = state.minimap_target.uniforms(
+        let minimap_uniforms = state.minimap_target.uniforms_with_visual_detail(
             &state.camera,
             ui_state.day_cycle,
             ui_state.atmosphere,
+            ui_state.visual_detail,
             ui_state.minimap.zoom,
             ui_state.minimap.rotate_with_camera,
         );
@@ -312,6 +321,7 @@ pub fn render(
                         street_signs: ui_state.street_sign_labels,
                     },
                     area_switch: ui_state.area_switch,
+                    visual_detail: ui_state.visual_detail,
                     show: ui_state.show_settings,
                 },
             );

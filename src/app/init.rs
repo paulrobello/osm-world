@@ -42,20 +42,28 @@ pub struct AppState {
     pub minimap_target: MinimapTarget,
 }
 
+pub struct InitWgpuOptions<'a> {
+    pub window_width: f64,
+    pub window_height: f64,
+    pub input_path: Option<&'a str>,
+    pub srtm_dir: Option<&'a str>,
+    pub cam_override: Option<&'a crate::camera::CameraOverride>,
+    pub persisted_camera: Option<&'a crate::app::prefs::CameraPrefs>,
+    pub visual_detail: &'a crate::visual_detail::VisualDetailSettings,
+}
+
 pub fn init_wgpu(
     event_loop: &winit::event_loop::ActiveEventLoop,
-    window_width: f64,
-    window_height: f64,
-    input_path: Option<&str>,
-    srtm_dir: Option<&str>,
-    cam_override: Option<&crate::camera::CameraOverride>,
-    persisted_camera: Option<&crate::app::prefs::CameraPrefs>,
+    options: &InitWgpuOptions<'_>,
 ) -> anyhow::Result<(AppState, crate::ui::EguiState)> {
     let window = Arc::new(
         event_loop.create_window(
             winit::window::WindowAttributes::default()
                 .with_title("osm-world")
-                .with_inner_size(winit::dpi::LogicalSize::new(window_width, window_height)),
+                .with_inner_size(winit::dpi::LogicalSize::new(
+                    options.window_width,
+                    options.window_height,
+                )),
         )?,
     );
 
@@ -107,7 +115,7 @@ pub fn init_wgpu(
     let egui = crate::ui::EguiState::new(&device, &surface_config, &window);
 
     let mut camera = Flycam::new(surface_config.width as f32 / surface_config.height as f32);
-    let spawn_lat_lon = camera_spawn_lat_lon(cam_override)?;
+    let spawn_lat_lon = camera_spawn_lat_lon(options.cam_override)?;
     let camera_bg = SceneBindGroup::new(&device);
     let shadow_bg = ShadowBindGroup::new(&device);
     let pipeline = CityPipeline::new(
@@ -129,12 +137,20 @@ pub fn init_wgpu(
     let occlusion = OcclusionQueries::new(&device, 256);
     let minimap_target = MinimapTarget::new(&device, surface_format);
 
-    let loaded_scene = match input_path {
+    let loaded_scene = match options.input_path {
         Some(path) => {
-            let srtm = srtm_dir.map(std::path::Path::new);
-            let source = crate::world::loader::load_world_source(std::path::Path::new(path), srtm)?;
+            let srtm = options.srtm_dir.map(std::path::Path::new);
+            let source = crate::world::loader::load_world_source_with_visual_detail(
+                std::path::Path::new(path),
+                srtm,
+                options.visual_detail,
+            )?;
             apply_default_input_camera(&mut camera);
-            apply_persisted_camera_if_allowed(&mut camera, persisted_camera, cam_override);
+            apply_persisted_camera_if_allowed(
+                &mut camera,
+                options.persisted_camera,
+                options.cam_override,
+            );
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
             }
@@ -148,7 +164,7 @@ pub fn init_wgpu(
         },
     };
 
-    if let Some(ov) = cam_override {
+    if let Some(ov) = options.cam_override {
         if let Some(x) = ov.x {
             camera.position.x = x;
         }
@@ -197,8 +213,13 @@ pub fn load_scene_resources(
     device: &Device,
     input_path: &std::path::Path,
     srtm_dir: Option<&std::path::Path>,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
 ) -> anyhow::Result<LoadedScene> {
-    let source = crate::world::loader::load_world_source(input_path, srtm_dir)?;
+    let source = crate::world::loader::load_world_source_with_visual_detail(
+        input_path,
+        srtm_dir,
+        visual_detail,
+    )?;
     Ok(loaded_scene_from_source(device, source))
 }
 

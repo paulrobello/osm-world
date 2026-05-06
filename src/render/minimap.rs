@@ -69,6 +69,26 @@ impl MinimapTarget {
         zoom_radius: f32,
         rotate_with_camera: bool,
     ) -> SceneUniforms {
+        self.uniforms_with_visual_detail(
+            main_camera,
+            day,
+            atm,
+            &crate::visual_detail::VisualDetailSettings::default(),
+            zoom_radius,
+            rotate_with_camera,
+        )
+    }
+
+    /// Compute orthographic view-projection SceneUniforms for the minimap.
+    pub fn uniforms_with_visual_detail(
+        &self,
+        main_camera: &crate::camera::Flycam,
+        day: &crate::atmosphere::DayCycleState,
+        atm: &crate::atmosphere::AtmosphereSettings,
+        visual: &crate::visual_detail::VisualDetailSettings,
+        zoom_radius: f32,
+        rotate_with_camera: bool,
+    ) -> SceneUniforms {
         let horizontal_forward = {
             let forward = main_camera.forward();
             let horizontal = glam::Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
@@ -124,6 +144,21 @@ impl MinimapTarget {
             clouds_enabled: 0,
             ground_color: atm.ground_color,
             _pad7: 0.0,
+            visual_params: [
+                visual.facade_variation,
+                visual.roof_variation,
+                visual.vegetation_max_distance,
+                if visual.vegetation_visible { 1.0 } else { 0.0 },
+            ],
+            visual_params2: [landmark_detail_value(visual.landmark_detail), 0.0, 0.0, 0.0],
         }
+    }
+}
+
+fn landmark_detail_value(detail: crate::visual_detail::LandmarkDetail) -> f32 {
+    match detail {
+        crate::visual_detail::LandmarkDetail::Off => 0.0,
+        crate::visual_detail::LandmarkDetail::Simple => 1.0,
+        crate::visual_detail::LandmarkDetail::Showcase => 2.0,
     }
 }

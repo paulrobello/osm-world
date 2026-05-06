@@ -13,6 +13,7 @@ pub struct RenderUiState<'a> {
     pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
     pub show_settings: &'a mut bool,
     pub minimap: &'a mut crate::ui::minimap::MinimapState,
+    pub settings_sections: &'a mut crate::app::prefs::SettingsSectionsPrefs,
     pub poi_labels: &'a mut crate::ui::poi_labels::PoiLabelSettings,
     pub address_labels: &'a mut crate::ui::poi_labels::AddressLabelSettings,
     pub street_sign_labels: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
@@ -326,6 +327,7 @@ pub fn render(
                     day_cycle: ui_state.day_cycle,
                     performance: ui_state.performance,
                     minimap: ui_state.minimap,
+                    settings_sections: ui_state.settings_sections,
                     label_settings: crate::ui::settings::LabelSettingsMut {
                         poi: ui_state.poi_labels,
                         addresses: ui_state.address_labels,
@@ -344,7 +346,13 @@ pub fn render(
             &mut state.camera,
         );
         crate::ui::inspect::draw(ctx, ui_state.inspect);
-        crate::ui::minimap::draw(ctx, &state.camera, ui_state.minimap);
+        crate::ui::minimap::draw(
+            ctx,
+            &state.camera,
+            ui_state.minimap,
+            &state.tile_debug_entries,
+            state.tile_debug_tile_size,
+        );
     });
 
     egui_state

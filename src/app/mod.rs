@@ -132,6 +132,8 @@ pub struct App {
     pub minimap: crate::ui::minimap::MinimapState,
     pub persisted_minimap: crate::app::prefs::MinimapPrefs,
     pub persisted_camera: Option<crate::app::prefs::CameraPrefs>,
+    pub settings_sections: crate::app::prefs::SettingsSectionsPrefs,
+    pub persisted_settings_sections: crate::app::prefs::SettingsSectionsPrefs,
     pub last_prefs_save: std::time::Instant,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub address_labels: crate::ui::poi_labels::AddressLabelSettings,
@@ -171,7 +173,7 @@ impl App {
             egui: None,
             controller: CameraController::new(),
             last_frame_time: std::time::Instant::now(),
-            show_settings: opts.show_settings,
+            show_settings: true,
             opts,
             render_start: None,
             screenshot_taken: false,
@@ -181,6 +183,8 @@ impl App {
             minimap,
             persisted_minimap: prefs.minimap,
             persisted_camera: prefs.camera,
+            settings_sections: prefs.settings_sections.clone(),
+            persisted_settings_sections: prefs.settings_sections,
             last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
             poi_labels: crate::ui::poi_labels::PoiLabelSettings::default(),
             address_labels: crate::ui::poi_labels::AddressLabelSettings::default(),
@@ -197,6 +201,28 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_starts_with_settings_panel_visible_and_sections_collapsed() {
+        let app = App::new(AppOptions {
+            window_width: 800.0,
+            window_height: 600.0,
+            screenshot_path: None,
+            screenshot_delay: 0.0,
+            auto_exit_delay: None,
+            input_path: None,
+            srtm_dir: None,
+            cam_override: None,
+            show_settings: false,
+            initial_time_of_day: None,
+            debug_shadow_cascades: false,
+            streaming: StreamingOptions::default(),
+            visual_detail: crate::visual_detail::VisualDetailSettings::default(),
+        });
+
+        assert!(app.show_settings);
+        assert!(app.settings_sections.all_collapsed());
+    }
 
     #[test]
     fn area_switch_state_trims_paths_and_ignores_empty_input() {

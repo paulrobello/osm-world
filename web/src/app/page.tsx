@@ -19,6 +19,7 @@ import {
   type PreparedAreaEntry,
   type SourceControls,
 } from '@/lib/api';
+import { BBOX_PRESETS, type BboxPreset } from '@/lib/bboxPresets';
 import type { BBox, SpawnPoint } from '@/components/MapPicker';
 
 const MapPicker = dynamic(() => import('@/components/MapPicker'), {
@@ -319,6 +320,16 @@ export default function Home() {
     setSelectedBbox(bbox);
   };
 
+  const applyBboxPreset = (preset: BboxPreset) => {
+    if (isPreparing) {
+      return;
+    }
+    clearPreparedOutput();
+    setPrepareError(null);
+    setSelectedBbox(preset.bbox);
+    setSpawnPoint(preset.spawnPoint ?? null);
+  };
+
   const handleSpawnChange = (nextSpawnPoint: SpawnPoint) => {
     if (isPreparing) {
       return;
@@ -611,6 +622,30 @@ export default function Home() {
               </label>
             </div>
             <p className="microcopy">Overture settings are sent only when the mode is not OSM-only.</p>
+          </section>
+
+          <section className="control-group" aria-labelledby="bbox-presets-title">
+            <div className="section-heading">
+              <h2 id="bbox-presets-title">Area presets</h2>
+              <span>quick select</span>
+            </div>
+            <p className="microcopy">
+              Jump to common renderer test boxes without retyping coordinates.
+            </p>
+            <div className="button-row preset-buttons">
+              {BBOX_PRESETS.map((preset) => (
+                <button
+                  className="ghost-button"
+                  type="button"
+                  key={preset.id}
+                  onClick={() => applyBboxPreset(preset)}
+                  disabled={isPreparing}
+                  title={preset.description}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
           </section>
 
           <section className="control-group" aria-labelledby="manual-bbox-title">

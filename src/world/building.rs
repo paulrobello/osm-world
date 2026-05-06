@@ -163,6 +163,41 @@ pub fn generate_building_with_style(
     }
 }
 
+pub fn generate_simplified_building_with_style(
+    footprint: &[(f32, f32)],
+    base_y: f32,
+    height: f32,
+    style: super::color::BuildingStyle,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    if footprint.len() < 3 {
+        return;
+    }
+
+    let (mut min_x, mut min_z) = (f32::INFINITY, f32::INFINITY);
+    let (mut max_x, mut max_z) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for &(x, z) in footprint {
+        min_x = min_x.min(x);
+        min_z = min_z.min(z);
+        max_x = max_x.max(x);
+        max_z = max_z.max(z);
+    }
+
+    if max_x - min_x < 1e-3 || max_z - min_z < 1e-3 {
+        generate_building_with_style(footprint, base_y, height, style, verts, idxs);
+        return;
+    }
+
+    let simplified = [
+        (min_x, min_z),
+        (max_x, min_z),
+        (max_x, max_z),
+        (min_x, max_z),
+    ];
+    generate_building_with_style(&simplified, base_y, height, style, verts, idxs);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +267,61 @@ mod tests {
         assert_eq!(vertices[2].uv, [0.0, 1.0]);
         assert_eq!(vertices[3].uv, [1.0, 1.0]);
         assert_eq!(vertices[2].color, style.band_color);
+    }
+
+    #[test]
+    fn simplified_building_uses_bounding_box_and_reduces_complex_footprints() {
+        let footprint = [
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 0.5),
+            (1.0, 0.5),
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (2.0, 2.0),
+            (0.0, 2.0),
+        ];
+        let style = super::super::color::BuildingStyle {
+            wall_color: [0.1, 0.2, 0.3],
+            roof_color: [0.4, 0.5, 0.6],
+            band_color: [0.7, 0.8, 0.9],
+            facade_intensity: 1.0,
+            roof_intensity: 1.0,
+        };
+        let mut full_vertices = Vec::new();
+        let mut full_indices = Vec::new();
+        let mut simple_vertices = Vec::new();
+        let mut simple_indices = Vec::new();
+
+        generate_building_with_style(
+            &footprint,
+            3.0,
+            9.0,
+            style,
+            &mut full_vertices,
+            &mut full_indices,
+        );
+        generate_simplified_building_with_style(
+            &footprint,
+            3.0,
+            9.0,
+            style,
+            &mut simple_vertices,
+            &mut simple_indices,
+        );
+
+        assert!(simple_vertices.len() < full_vertices.len());
+        assert!(simple_indices.len() < full_indices.len());
+        assert!(
+            simple_vertices
+                .iter()
+                .any(|v| v.position == [0.0, 3.0, 0.0])
+        );
+        assert!(
+            simple_vertices
+                .iter()
+                .any(|v| v.position == [2.0, 12.0, 2.0])
+        );
     }
 
     #[test]

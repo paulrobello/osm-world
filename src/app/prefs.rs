@@ -8,6 +8,39 @@ use serde::{Deserialize, Serialize};
 pub struct UserPrefs {
     pub minimap: MinimapPrefs,
     pub camera: Option<CameraPrefs>,
+    pub settings_sections: SettingsSectionsPrefs,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct SettingsSectionsPrefs {
+    pub day_cycle: bool,
+    pub performance: bool,
+    pub visual_detail: bool,
+    pub minimap: bool,
+    pub area_switch: bool,
+    pub poi_labels: bool,
+    pub address_labels: bool,
+    pub street_sign_labels: bool,
+    pub clouds: bool,
+    pub fog: bool,
+    pub sky_colors: bool,
+}
+
+impl SettingsSectionsPrefs {
+    pub fn all_collapsed(&self) -> bool {
+        !self.day_cycle
+            && !self.performance
+            && !self.visual_detail
+            && !self.minimap
+            && !self.area_switch
+            && !self.poi_labels
+            && !self.address_labels
+            && !self.street_sign_labels
+            && !self.clouds
+            && !self.fog
+            && !self.sky_colors
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -16,6 +49,7 @@ pub struct MinimapPrefs {
     pub visible: bool,
     pub zoom: f32,
     pub rotate_with_camera: bool,
+    pub show_tile_debug: bool,
 }
 
 impl Default for MinimapPrefs {
@@ -31,6 +65,7 @@ impl MinimapPrefs {
             visible: state.visible,
             zoom: state.zoom,
             rotate_with_camera: state.rotate_with_camera,
+            show_tile_debug: state.show_tile_debug,
         }
     }
 
@@ -38,6 +73,7 @@ impl MinimapPrefs {
         state.visible = self.visible;
         state.zoom = self.zoom;
         state.rotate_with_camera = self.rotate_with_camera;
+        state.show_tile_debug = self.show_tile_debug;
     }
 }
 
@@ -120,6 +156,33 @@ mod tests {
     }
 
     #[test]
+    fn default_settings_sections_start_collapsed() {
+        let prefs = UserPrefs::default();
+
+        assert!(prefs.settings_sections.all_collapsed());
+    }
+
+    #[test]
+    fn settings_sections_round_trip_to_json_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("prefs.json");
+        let prefs = UserPrefs {
+            settings_sections: SettingsSectionsPrefs {
+                day_cycle: true,
+                minimap: true,
+                sky_colors: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        save_user_prefs_to_path(&prefs, &path).unwrap();
+        let loaded = load_user_prefs_from_path(&path).unwrap();
+
+        assert_eq!(loaded.settings_sections, prefs.settings_sections);
+    }
+
+    #[test]
     fn minimap_prefs_round_trip_to_json_file() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("prefs.json");
@@ -128,6 +191,7 @@ mod tests {
                 visible: false,
                 zoom: 875.0,
                 rotate_with_camera: true,
+                show_tile_debug: false,
             },
             camera: Some(CameraPrefs {
                 x: 1.0,
@@ -136,6 +200,7 @@ mod tests {
                 yaw: 4.0,
                 pitch: 5.0,
             }),
+            settings_sections: SettingsSectionsPrefs::default(),
         };
 
         save_user_prefs_to_path(&prefs, &path).unwrap();
@@ -167,6 +232,7 @@ mod tests {
             visible: true,
             zoom: 500.0,
             rotate_with_camera: false,
+            show_tile_debug: true,
             texture_id: Some(egui::TextureId::User(42)),
         };
         let texture_id = state.texture_id;
@@ -174,6 +240,7 @@ mod tests {
             visible: false,
             zoom: 1000.0,
             rotate_with_camera: true,
+            show_tile_debug: false,
         };
 
         prefs.apply_to_minimap_state(&mut state);
@@ -181,6 +248,7 @@ mod tests {
         assert!(!state.visible);
         assert_eq!(state.zoom, 1000.0);
         assert!(state.rotate_with_camera);
+        assert!(!state.show_tile_debug);
         assert_eq!(state.texture_id, texture_id);
     }
 }

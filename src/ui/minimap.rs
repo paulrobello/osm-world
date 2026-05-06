@@ -39,6 +39,7 @@ pub struct MinimapState {
     pub visible: bool,
     pub zoom: f32,
     pub rotate_with_camera: bool,
+    pub show_tile_debug: bool,
     pub texture_id: Option<egui::TextureId>,
 }
 
@@ -48,6 +49,7 @@ impl Default for MinimapState {
             visible: true,
             zoom: 500.0,
             rotate_with_camera: false,
+            show_tile_debug: true,
             texture_id: None,
         }
     }
@@ -118,6 +120,134 @@ fn draw_compass(
     );
 }
 
+fn tile_debug_legend_entries() -> [(crate::stream::TileDebugState, egui::Color32); 7] {
+    use crate::stream::TileDebugState;
+    [
+        (
+            TileDebugState::Queued,
+            egui::Color32::from_rgb(120, 170, 255),
+        ),
+        (
+            TileDebugState::Generating,
+            egui::Color32::from_rgb(255, 214, 92),
+        ),
+        (
+            TileDebugState::Uploaded,
+            egui::Color32::from_rgb(122, 220, 255),
+        ),
+        (
+            TileDebugState::Visible,
+            egui::Color32::from_rgb(101, 240, 162),
+        ),
+        (
+            TileDebugState::Culled,
+            egui::Color32::from_rgb(150, 150, 165),
+        ),
+        (
+            TileDebugState::Evicted,
+            egui::Color32::from_rgb(190, 120, 255),
+        ),
+        (TileDebugState::Failed, egui::Color32::from_rgb(255, 86, 86)),
+    ]
+}
+
+fn tile_debug_color(state: crate::stream::TileDebugState) -> egui::Color32 {
+    tile_debug_legend_entries()
+        .into_iter()
+        .find_map(|(candidate, color)| (candidate == state).then_some(color))
+        .unwrap_or(egui::Color32::WHITE)
+}
+
+fn world_point_to_minimap(
+    rect: egui::Rect,
+    camera: &Flycam,
+    rotate_with_camera: bool,
+    zoom: f32,
+    point: glam::Vec2,
+) -> egui::Pos2 {
+    let delta = glam::vec3(
+        point.x - camera.position.x,
+        0.0,
+        point.y - camera.position.z,
+    );
+    let view = glam::Mat4::look_to_rh(
+        glam::Vec3::ZERO,
+        glam::Vec3::NEG_Y,
+        minimap_up(camera, rotate_with_camera),
+    );
+    let screen = view.transform_vector3(delta);
+    let scale = rect.width().min(rect.height()) / (zoom.max(1.0) * 2.0);
+    rect.center() + egui::vec2(-screen.x * scale, screen.y * scale)
+}
+
+fn draw_tile_debug_overlay(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    camera: &Flycam,
+    state: &MinimapState,
+    tile_debug_entries: &[crate::stream::TileDebugEntry],
+    tile_size: f32,
+) {
+    let clip_rect = rect.expand(24.0);
+    for entry in tile_debug_entries {
+        let tile_rect = entry.coord.rect(tile_size.max(1.0));
+        let points = [
+            world_point_to_minimap(
+                rect,
+                camera,
+                state.rotate_with_camera,
+                state.zoom,
+                glam::vec2(tile_rect.min_x, tile_rect.min_z),
+            ),
+            world_point_to_minimap(
+                rect,
+                camera,
+                state.rotate_with_camera,
+                state.zoom,
+                glam::vec2(tile_rect.max_x, tile_rect.min_z),
+            ),
+            world_point_to_minimap(
+                rect,
+                camera,
+                state.rotate_with_camera,
+                state.zoom,
+                glam::vec2(tile_rect.max_x, tile_rect.max_z),
+            ),
+            world_point_to_minimap(
+                rect,
+                camera,
+                state.rotate_with_camera,
+                state.zoom,
+                glam::vec2(tile_rect.min_x, tile_rect.max_z),
+            ),
+        ];
+        if !points.iter().any(|point| clip_rect.contains(*point)) {
+            continue;
+        }
+        let color = tile_debug_color(entry.state);
+        painter.add(egui::Shape::convex_polygon(
+            points.to_vec(),
+            color.linear_multiply(0.18),
+            egui::Stroke::new(1.0, color),
+        ));
+    }
+
+    let mut y = rect.top() + 31.0;
+    for (debug_state, color) in tile_debug_legend_entries() {
+        let swatch =
+            egui::Rect::from_min_size(egui::pos2(rect.left() + 7.0, y + 3.0), egui::vec2(7.0, 7.0));
+        painter.rect_filled(swatch, 1.0, color);
+        painter.text(
+            egui::pos2(rect.left() + 18.0, y),
+            egui::Align2::LEFT_TOP,
+            debug_state.label(),
+            egui::FontId::monospace(9.5),
+            egui::Color32::from_white_alpha(220),
+        );
+        y += 13.0;
+    }
+}
+
 fn handle_minimap_click(state: &mut MinimapState, clicked: bool, ctrl_down: bool) -> bool {
     if clicked && ctrl_down {
         state.rotate_with_camera = !state.rotate_with_camera;
@@ -127,7 +257,13 @@ fn handle_minimap_click(state: &mut MinimapState, clicked: bool, ctrl_down: bool
     }
 }
 
-pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
+pub fn draw(
+    ctx: &egui::Context,
+    camera: &Flycam,
+    state: &mut MinimapState,
+    tile_debug_entries: &[crate::stream::TileDebugEntry],
+    tile_size: f32,
+) {
     if !state.visible {
         return;
     }
@@ -172,6 +308,16 @@ pub fn draw(ctx: &egui::Context, camera: &Flycam, state: &mut MinimapState) {
                     let right = tail - wing_direction * arrow_size * 0.45;
 
                     let painter = ui.painter_at(rect);
+                    if state.show_tile_debug {
+                        draw_tile_debug_overlay(
+                            &painter,
+                            rect,
+                            camera,
+                            state,
+                            tile_debug_entries,
+                            tile_size,
+                        );
+                    }
                     draw_compass(&painter, rect, camera, state.rotate_with_camera);
                     painter.add(egui::Shape::convex_polygon(
                         vec![tip, left, right],
@@ -276,5 +422,41 @@ mod tests {
 
         assert!(direction.x.abs() < 0.001);
         assert!(direction.y < -0.99);
+    }
+
+    #[test]
+    fn tile_debug_legend_covers_all_streaming_states() {
+        let states: Vec<_> = tile_debug_legend_entries()
+            .into_iter()
+            .map(|(state, _)| state)
+            .collect();
+
+        assert_eq!(
+            states,
+            vec![
+                crate::stream::TileDebugState::Queued,
+                crate::stream::TileDebugState::Generating,
+                crate::stream::TileDebugState::Uploaded,
+                crate::stream::TileDebugState::Visible,
+                crate::stream::TileDebugState::Culled,
+                crate::stream::TileDebugState::Evicted,
+                crate::stream::TileDebugState::Failed,
+            ]
+        );
+    }
+
+    #[test]
+    fn fixed_minimap_projects_world_east_to_screen_right() {
+        let mut camera = Flycam::new(1.0);
+        camera.position = glam::vec3(0.0, 10.0, 0.0);
+        camera.yaw = -std::f32::consts::FRAC_PI_2;
+        camera.pitch = 0.0;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(256.0, 256.0));
+
+        let center = world_point_to_minimap(rect, &camera, false, 500.0, glam::vec2(0.0, 0.0));
+        let east = world_point_to_minimap(rect, &camera, false, 500.0, glam::vec2(100.0, 0.0));
+
+        assert!(east.x > center.x);
+        assert!((east.y - center.y).abs() < 0.001);
     }
 }

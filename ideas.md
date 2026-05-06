@@ -55,20 +55,12 @@ Remove completed items from this list.
 
 ## Performance and engineering ideas
 
-19. **Streaming debug overlay improvements**
-    - Visualize tile states on the minimap: queued, generating, uploaded, visible, culled, evicted, failed.
-    - Value: easier tuning and debugging of LOD/streaming behavior.
-
 20. **Persistent tile mesh cache**
     - Cache generated CPU tile meshes by input hash, tile coord, LOD, and generator version.
     - Value: faster repeated launches of the same area.
 
 21. **Adaptive upload budget**
     - Adjust per-frame GPU upload budget based on frame time so loading speeds up when idle and backs off during frame drops.
-
-22. **LOD simplification for buildings**
-    - Replace far-distance full building meshes with simplified boxes, merged blocks, or height-only extrusions.
-    - Value: reduces far-city GPU cost.
 
 23. **Automated visual regression scenes**
     - Maintain a small suite of prepared city scenes plus screenshot camera positions.
@@ -82,9 +74,6 @@ Remove completed items from this list.
 
 25. **Copy command variants**
     - In the web UI, provide copy buttons for debug, release, screenshot, and no-streaming command variants.
-
-26. **Map picker presets**
-    - Add quick-select bbox presets for common test areas like Sacramento and Woodland.
 
 27. **Cache cleanup UI**
     - Let users remove old prepared areas from the web picker.

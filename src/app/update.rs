@@ -19,6 +19,12 @@ pub fn update(app: &mut App) {
             &app.visual_detail,
         );
         state.camera_bg.update(&state.queue, &uniforms);
+        crate::stream::tile::update_loaded_tile_debug_states(
+            &mut state.tile_debug_entries,
+            app.opts.streaming.tile_size,
+            state.camera.position,
+            app.opts.streaming.stream_radius,
+        );
     }
 }
 
@@ -33,6 +39,7 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
         std::path::Path::new(&request.input_path),
         srtm_dir,
         &app.visual_detail,
+        app.opts.streaming.tile_size,
     ) {
         Ok(loaded) => {
             state.scene = loaded.scene;
@@ -42,6 +49,8 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
             state.street_sign_labels = loaded.street_sign_labels;
             state.search_entries = loaded.search_entries;
             state.identifiables = loaded.identifiables;
+            state.tile_debug_entries = loaded.tile_debug_entries;
+            state.tile_debug_tile_size = app.opts.streaming.tile_size;
             mark_area_load_success(app, request);
         }
         Err(err) => {

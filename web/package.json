@@ -6,7 +6,8 @@
     "dev": "next dev -p 8032",
     "build": "next build",
     "start": "next start -p 8032",
-    "lint": "next build"
+    "lint": "next build",
+    "test": "bun test"
   },
   "dependencies": {
     "next": "16.2.1",

@@ -233,7 +233,16 @@ export default function MapPicker({
 
     selectedSource.clear();
     if (selectedBbox) {
-      selectedSource.addFeature(bboxToFeature(selectedBbox, 'selected bbox'));
+      const feature = bboxToFeature(selectedBbox, 'selected bbox');
+      selectedSource.addFeature(feature);
+      const geometry = feature.getGeometry();
+      if (geometry) {
+        mapRef.current?.getView().fit(geometry.getExtent(), {
+          padding: [60, 60, 60, 60],
+          maxZoom: 15,
+          duration: 250,
+        });
+      }
     }
   }, [selectedBbox]);
 

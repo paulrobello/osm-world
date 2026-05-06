@@ -29,6 +29,41 @@ pub struct TileAabb {
     pub max: glam::Vec3,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TileDebugState {
+    Queued,
+    Generating,
+    Uploaded,
+    Visible,
+    Culled,
+    Evicted,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TileDebugEntry {
+    pub coord: TileCoord,
+    pub state: TileDebugState,
+}
+
+impl TileDebugState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Generating => "generating",
+            Self::Uploaded => "uploaded",
+            Self::Visible => "visible",
+            Self::Culled => "culled",
+            Self::Evicted => "evicted",
+            Self::Failed => "failed",
+        }
+    }
+
+    fn is_loaded(self) -> bool {
+        matches!(self, Self::Uploaded | Self::Visible | Self::Culled)
+    }
+}
+
 impl TileCoord {
     pub fn from_world(x: f32, z: f32, tile_size: f32) -> Self {
         Self {
@@ -78,6 +113,35 @@ pub fn tiles_for_bbox(
     out
 }
 
+pub fn classify_loaded_tile_state(
+    coord: TileCoord,
+    tile_size: f32,
+    camera_position: glam::Vec3,
+    stream_radius: f32,
+) -> TileDebugState {
+    let center = coord.center(tile_size);
+    let delta = glam::vec2(center.x - camera_position.x, center.z - camera_position.z);
+    if delta.length() <= stream_radius {
+        TileDebugState::Visible
+    } else {
+        TileDebugState::Culled
+    }
+}
+
+pub fn update_loaded_tile_debug_states(
+    entries: &mut [TileDebugEntry],
+    tile_size: f32,
+    camera_position: glam::Vec3,
+    stream_radius: f32,
+) {
+    for entry in entries {
+        if entry.state.is_loaded() {
+            entry.state =
+                classify_loaded_tile_state(entry.coord, tile_size, camera_position, stream_radius);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +189,44 @@ mod tests {
         assert!(refs.landuses.is_empty());
         assert!(refs.point_features.is_empty());
         assert!(refs.street_signs.is_empty());
+    }
+
+    #[test]
+    fn loaded_tile_debug_state_tracks_camera_stream_radius() {
+        let near = TileCoord { x: 0, z: 0 };
+        let far = TileCoord { x: 3, z: 0 };
+
+        assert_eq!(
+            classify_loaded_tile_state(near, 100.0, glam::vec3(25.0, 0.0, 25.0), 150.0),
+            TileDebugState::Visible
+        );
+        assert_eq!(
+            classify_loaded_tile_state(far, 100.0, glam::vec3(25.0, 0.0, 25.0), 150.0),
+            TileDebugState::Culled
+        );
+    }
+
+    #[test]
+    fn tile_debug_entries_keep_failure_and_generation_states_when_reclassified() {
+        let mut entries = vec![
+            TileDebugEntry {
+                coord: TileCoord { x: 0, z: 0 },
+                state: TileDebugState::Uploaded,
+            },
+            TileDebugEntry {
+                coord: TileCoord { x: 1, z: 0 },
+                state: TileDebugState::Generating,
+            },
+            TileDebugEntry {
+                coord: TileCoord { x: 2, z: 0 },
+                state: TileDebugState::Failed,
+            },
+        ];
+
+        update_loaded_tile_debug_states(&mut entries, 100.0, glam::Vec3::ZERO, 120.0);
+
+        assert_eq!(entries[0].state, TileDebugState::Visible);
+        assert_eq!(entries[1].state, TileDebugState::Generating);
+        assert_eq!(entries[2].state, TileDebugState::Failed);
     }
 }

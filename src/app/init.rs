@@ -20,6 +20,7 @@ pub struct LoadedScene {
     pub street_sign_labels: Vec<crate::ui::poi_labels::StreetSignLabel>,
     pub search_entries: Vec<crate::ui::search::SearchEntry>,
     pub identifiables: Vec<crate::ui::inspect::IdentifiableFeature>,
+    pub tile_debug_entries: Vec<crate::stream::TileDebugEntry>,
 }
 
 pub struct AppState {
@@ -46,6 +47,8 @@ pub struct AppState {
     pub scene: SceneBuffers,
     pub occlusion: OcclusionQueries,
     pub minimap_target: MinimapTarget,
+    pub tile_debug_entries: Vec<crate::stream::TileDebugEntry>,
+    pub tile_debug_tile_size: f32,
 }
 
 pub struct InitWgpuOptions<'a> {
@@ -56,6 +59,7 @@ pub struct InitWgpuOptions<'a> {
     pub cam_override: Option<&'a crate::camera::CameraOverride>,
     pub persisted_camera: Option<&'a crate::app::prefs::CameraPrefs>,
     pub visual_detail: &'a crate::visual_detail::VisualDetailSettings,
+    pub streaming_tile_size: f32,
 }
 
 pub fn init_wgpu(
@@ -160,7 +164,12 @@ pub fn init_wgpu(
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
             }
-            loaded_scene_from_source(&device, source, options.visual_detail)
+            loaded_scene_from_source(
+                &device,
+                source,
+                options.visual_detail,
+                options.streaming_tile_size,
+            )
         }
         None => LoadedScene {
             scene: SceneBuffers::new(&device),
@@ -170,6 +179,7 @@ pub fn init_wgpu(
             street_sign_labels: Vec::new(),
             search_entries: Vec::new(),
             identifiables: Vec::new(),
+            tile_debug_entries: Vec::new(),
         },
     };
 
@@ -216,6 +226,8 @@ pub fn init_wgpu(
             scene: loaded_scene.scene,
             occlusion,
             minimap_target,
+            tile_debug_entries: loaded_scene.tile_debug_entries,
+            tile_debug_tile_size: options.streaming_tile_size,
         },
         egui,
     ))
@@ -226,19 +238,26 @@ pub fn load_scene_resources(
     input_path: &std::path::Path,
     srtm_dir: Option<&std::path::Path>,
     visual_detail: &crate::visual_detail::VisualDetailSettings,
+    streaming_tile_size: f32,
 ) -> anyhow::Result<LoadedScene> {
     let source = crate::world::loader::load_world_source_with_visual_detail(
         input_path,
         srtm_dir,
         visual_detail,
     )?;
-    Ok(loaded_scene_from_source(device, source, visual_detail))
+    Ok(loaded_scene_from_source(
+        device,
+        source,
+        visual_detail,
+        streaming_tile_size,
+    ))
 }
 
 fn loaded_scene_from_source(
     device: &Device,
     source: crate::world::loader::WorldSource,
     visual_detail: &crate::visual_detail::VisualDetailSettings,
+    tile_size: f32,
 ) -> LoadedScene {
     let coord_converter = source.conv;
     let poi_labels = crate::ui::poi_labels::labels_from_point_features(&source.point_features);
@@ -249,6 +268,7 @@ fn loaded_scene_from_source(
     let street_sign_labels = crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
     let search_entries = crate::ui::search::build_search_index(&source);
     let identifiables = crate::ui::inspect::build_identifiables(&source);
+    let tile_debug_entries = tile_debug_entries_from_source(&source, tile_size);
     let world =
         crate::world::loader::generate_world_mesh_with_visual_detail(&source, visual_detail);
     LoadedScene {
@@ -259,7 +279,27 @@ fn loaded_scene_from_source(
         street_sign_labels,
         search_entries,
         identifiables,
+        tile_debug_entries,
     }
+}
+
+fn tile_debug_entries_from_source(
+    source: &crate::world::loader::WorldSource,
+    tile_size: f32,
+) -> Vec<crate::stream::TileDebugEntry> {
+    let mut coords: Vec<_> = source
+        .feature_index_for_tile_size(tile_size)
+        .keys()
+        .copied()
+        .collect();
+    coords.sort_unstable();
+    coords
+        .into_iter()
+        .map(|coord| crate::stream::TileDebugEntry {
+            coord,
+            state: crate::stream::TileDebugState::Uploaded,
+        })
+        .collect()
 }
 
 fn apply_default_input_camera(camera: &mut Flycam) {

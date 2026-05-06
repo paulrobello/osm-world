@@ -17,6 +17,7 @@ impl ApplicationHandler for App {
                 cam_override: self.opts.cam_override.as_ref(),
                 persisted_camera: self.persisted_camera.as_ref(),
                 visual_detail: &self.visual_detail,
+                streaming_tile_size: self.opts.streaming.tile_size,
             };
             match init::init_wgpu(event_loop, &init_options) {
                 Ok((state, egui)) => {
@@ -188,6 +189,7 @@ impl ApplicationHandler for App {
                             day_cycle: &mut self.day_cycle,
                             show_settings: &mut self.show_settings,
                             minimap: &mut self.minimap,
+                            settings_sections: &mut self.settings_sections,
                             poi_labels: &mut self.poi_labels,
                             address_labels: &mut self.address_labels,
                             street_sign_labels: &mut self.street_sign_labels,
@@ -259,13 +261,16 @@ impl App {
             .as_ref()
             .map(|state| crate::app::prefs::CameraPrefs::from_camera(&state.camera))
             .or_else(|| self.persisted_camera.clone());
+        let settings_sections = self.settings_sections.clone();
         let minimap_changed = minimap != self.persisted_minimap;
         let camera_changed = camera != self.persisted_camera;
-        if !minimap_changed && !camera_changed {
+        let settings_sections_changed = settings_sections != self.persisted_settings_sections;
+        if !minimap_changed && !camera_changed && !settings_sections_changed {
             return;
         }
         if camera_changed
             && !minimap_changed
+            && !settings_sections_changed
             && !force
             && self.last_prefs_save.elapsed() < super::PREFS_SAVE_INTERVAL
         {
@@ -275,11 +280,13 @@ impl App {
         let prefs = crate::app::prefs::UserPrefs {
             minimap: minimap.clone(),
             camera: camera.clone(),
+            settings_sections: settings_sections.clone(),
         };
         match crate::app::prefs::save_user_prefs(&prefs) {
             Ok(()) => {
                 self.persisted_minimap = minimap;
                 self.persisted_camera = camera;
+                self.persisted_settings_sections = settings_sections;
                 self.last_prefs_save = std::time::Instant::now();
             }
             Err(err) => log::warn!("Failed to save preferences: {err}"),

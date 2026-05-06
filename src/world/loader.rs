@@ -1258,9 +1258,15 @@ fn append_tile_features_mesh(
         if footprint.len() > 3 && footprint.first() == footprint.last() {
             footprint.pop();
         }
-        super::building::generate_building_with_style(
-            &footprint, base_y, height, style, verts, idxs,
-        );
+        if lod == crate::stream::TileLod::Far {
+            super::building::generate_simplified_building_with_style(
+                &footprint, base_y, height, style, verts, idxs,
+            );
+        } else {
+            super::building::generate_building_with_style(
+                &footprint, base_y, height, style, verts, idxs,
+            );
+        }
     }
 }
 
@@ -2726,5 +2732,48 @@ mod tests {
                 8.0 + super::super::water::WATER_Y_OFFSET,
             ]
         );
+    }
+
+    #[test]
+    fn far_tile_lod_simplifies_complex_building_footprints() {
+        let mut source = empty_source();
+        source.buildings.push(feature(
+            "building",
+            "yes",
+            vec![
+                (0.0, 0.0),
+                (30.0, 0.0),
+                (30.0, 8.0),
+                (12.0, 8.0),
+                (12.0, 20.0),
+                (30.0, 20.0),
+                (30.0, 30.0),
+                (0.0, 30.0),
+            ],
+        ));
+        let refs = crate::stream::tile::TileFeatureRefs {
+            buildings: vec![0],
+            ..Default::default()
+        };
+
+        let meshes = generate_tile_mesh_set(
+            &source,
+            crate::stream::TileCoord { x: 0, z: 0 },
+            &refs,
+            100.0,
+        );
+        let near_building_vertices = meshes.lods[crate::stream::TileLod::Near as usize]
+            .vertices
+            .iter()
+            .filter(|v| v.feature_type == crate::render::vertex::feature::BUILDING)
+            .count();
+        let far_building_vertices = meshes.lods[crate::stream::TileLod::Far as usize]
+            .vertices
+            .iter()
+            .filter(|v| v.feature_type == crate::render::vertex::feature::BUILDING)
+            .count();
+
+        assert_eq!(near_building_vertices, 40);
+        assert_eq!(far_building_vertices, 20);
     }
 }

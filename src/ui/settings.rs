@@ -11,6 +11,7 @@ pub struct SettingsDrawState<'a> {
     pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
     pub performance: &'a mut crate::app::PerformanceState,
     pub minimap: &'a mut crate::ui::minimap::MinimapState,
+    pub settings_sections: &'a mut crate::app::prefs::SettingsSectionsPrefs,
     pub label_settings: LabelSettingsMut<'a>,
     pub area_switch: &'a mut crate::app::AreaSwitchState,
     pub visual_detail: &'a mut crate::visual_detail::VisualDetailSettings,
@@ -23,17 +24,50 @@ pub fn draw(ctx: &egui::Context, state: SettingsDrawState<'_>) {
         .default_width(320.0)
         .show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
-                day_cycle_section(ui, state.day_cycle, state.atmosphere);
-                performance_section(ui, state.performance);
-                visual_detail_section(ui, state.visual_detail);
-                minimap_section(ui, state.minimap);
-                area_switch_section(ui, state.area_switch);
-                poi_labels_section(ui, state.label_settings.poi);
-                address_labels_section(ui, state.label_settings.addresses);
-                street_sign_labels_section(ui, state.label_settings.street_signs);
-                clouds_section(ui, state.atmosphere);
-                fog_section(ui, state.atmosphere);
-                sky_colors_section(ui, state.atmosphere);
+                day_cycle_section(
+                    ui,
+                    state.day_cycle,
+                    state.atmosphere,
+                    &mut state.settings_sections.day_cycle,
+                );
+                performance_section(
+                    ui,
+                    state.performance,
+                    &mut state.settings_sections.performance,
+                );
+                visual_detail_section(
+                    ui,
+                    state.visual_detail,
+                    &mut state.settings_sections.visual_detail,
+                );
+                minimap_section(ui, state.minimap, &mut state.settings_sections.minimap);
+                area_switch_section(
+                    ui,
+                    state.area_switch,
+                    &mut state.settings_sections.area_switch,
+                );
+                poi_labels_section(
+                    ui,
+                    state.label_settings.poi,
+                    &mut state.settings_sections.poi_labels,
+                );
+                address_labels_section(
+                    ui,
+                    state.label_settings.addresses,
+                    &mut state.settings_sections.address_labels,
+                );
+                street_sign_labels_section(
+                    ui,
+                    state.label_settings.street_signs,
+                    &mut state.settings_sections.street_sign_labels,
+                );
+                clouds_section(ui, state.atmosphere, &mut state.settings_sections.clouds);
+                fog_section(ui, state.atmosphere, &mut state.settings_sections.fog);
+                sky_colors_section(
+                    ui,
+                    state.atmosphere,
+                    &mut state.settings_sections.sky_colors,
+                );
             });
         });
 }
@@ -42,9 +76,10 @@ fn day_cycle_section(
     ui: &mut egui::Ui,
     day: &mut crate::atmosphere::DayCycleState,
     atm: &mut crate::atmosphere::AtmosphereSettings,
+    expanded: &mut bool,
 ) {
-    CollapsingHeader::new(RichText::new("Day / Night Cycle").strong())
-        .default_open(true)
+    let response = CollapsingHeader::new(RichText::new("Day / Night Cycle").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut day.paused, "Paused");
 
@@ -69,23 +104,30 @@ fn day_cycle_section(
             ui.checkbox(&mut atm.shadow_cascade_debug, "Debug shadow cascades");
             ui.label("Debug colors: blue = near, orange = mid, purple = far fade");
         });
+    *expanded = response.body_response.is_some();
 }
 
-fn performance_section(ui: &mut egui::Ui, performance: &mut crate::app::PerformanceState) {
-    CollapsingHeader::new(RichText::new("Performance").strong())
-        .default_open(true)
+fn performance_section(
+    ui: &mut egui::Ui,
+    performance: &mut crate::app::PerformanceState,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("Performance").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut performance.show_fps, "Show FPS counter");
             ui.label(format!("Current FPS: {:.0}", performance.fps));
         });
+    *expanded = response.body_response.is_some();
 }
 
 fn visual_detail_section(
     ui: &mut egui::Ui,
     settings: &mut crate::visual_detail::VisualDetailSettings,
+    expanded: &mut bool,
 ) {
-    CollapsingHeader::new(RichText::new("Visual Detail").strong())
-        .default_open(true)
+    let response = CollapsingHeader::new(RichText::new("Visual Detail").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             let mut selected_preset = settings.preset;
             ComboBox::from_label("Preset")
@@ -184,6 +226,7 @@ fn visual_detail_section(
                 );
             }
         });
+    *expanded = response.body_response.is_some();
 }
 
 fn apply_visual_preset(
@@ -208,18 +251,28 @@ fn mark_reload_required_if_changed(
     }
 }
 
-fn minimap_section(ui: &mut egui::Ui, minimap: &mut crate::ui::minimap::MinimapState) {
-    CollapsingHeader::new(RichText::new("Minimap").strong())
-        .default_open(true)
+fn minimap_section(
+    ui: &mut egui::Ui,
+    minimap: &mut crate::ui::minimap::MinimapState,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("Minimap").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut minimap.visible, "Visible");
             ui.checkbox(&mut minimap.rotate_with_camera, "Rotate map with camera");
+            ui.checkbox(&mut minimap.show_tile_debug, "Tile debug overlay");
         });
+    *expanded = response.body_response.is_some();
 }
 
-fn area_switch_section(ui: &mut egui::Ui, area_switch: &mut crate::app::AreaSwitchState) {
-    CollapsingHeader::new(RichText::new("Area Switching").strong())
-        .default_open(true)
+fn area_switch_section(
+    ui: &mut egui::Ui,
+    area_switch: &mut crate::app::AreaSwitchState,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("Area Switching").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.label("Load a prepared .osm file without restarting. Camera height, yaw, pitch, labels, lighting, and minimap settings are preserved.");
             ui.horizontal(|ui| {
@@ -237,11 +290,16 @@ fn area_switch_section(ui: &mut egui::Ui, area_switch: &mut crate::app::AreaSwit
                 ui.label(&area_switch.status);
             }
         });
+    *expanded = response.body_response.is_some();
 }
 
-fn poi_labels_section(ui: &mut egui::Ui, poi_labels: &mut crate::ui::poi_labels::PoiLabelSettings) {
-    CollapsingHeader::new(RichText::new("POI Labels").strong())
-        .default_open(true)
+fn poi_labels_section(
+    ui: &mut egui::Ui,
+    poi_labels: &mut crate::ui::poi_labels::PoiLabelSettings,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("POI Labels").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut poi_labels.visible, "Visible");
             ui.add(
@@ -250,14 +308,16 @@ fn poi_labels_section(ui: &mut egui::Ui, poi_labels: &mut crate::ui::poi_labels:
                     .text("Max distance (m)"),
             );
         });
+    *expanded = response.body_response.is_some();
 }
 
 fn address_labels_section(
     ui: &mut egui::Ui,
     address_labels: &mut crate::ui::poi_labels::AddressLabelSettings,
+    expanded: &mut bool,
 ) {
-    CollapsingHeader::new(RichText::new("Address Labels").strong())
-        .default_open(false)
+    let response = CollapsingHeader::new(RichText::new("Address Labels").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut address_labels.visible, "Visible");
             ui.add(
@@ -267,14 +327,16 @@ fn address_labels_section(
             );
             ui.add(Slider::new(&mut address_labels.max_visible, 1..=200).text("Max labels"));
         });
+    *expanded = response.body_response.is_some();
 }
 
 fn street_sign_labels_section(
     ui: &mut egui::Ui,
     street_sign_labels: &mut crate::ui::poi_labels::StreetSignLabelSettings,
+    expanded: &mut bool,
 ) {
-    CollapsingHeader::new(RichText::new("Street Sign Labels").strong())
-        .default_open(true)
+    let response = CollapsingHeader::new(RichText::new("Street Sign Labels").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut street_sign_labels.visible, "Visible");
             ui.add(
@@ -283,11 +345,16 @@ fn street_sign_labels_section(
                     .text("Max distance (m)"),
             );
         });
+    *expanded = response.body_response.is_some();
 }
 
-fn clouds_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::AtmosphereSettings) {
-    CollapsingHeader::new(RichText::new("Clouds").strong())
-        .default_open(true)
+fn clouds_section(
+    ui: &mut egui::Ui,
+    atm: &mut crate::atmosphere::AtmosphereSettings,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("Clouds").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.checkbox(&mut atm.clouds_enabled, "Enabled");
 
@@ -305,11 +372,16 @@ fn clouds_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::AtmosphereSett
 
             color_edit_rgb(ui, "Cloud Color", &mut atm.cloud_color);
         });
+    *expanded = response.body_response.is_some();
 }
 
-fn fog_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::AtmosphereSettings) {
-    CollapsingHeader::new(RichText::new("Fog").strong())
-        .default_open(true)
+fn fog_section(
+    ui: &mut egui::Ui,
+    atm: &mut crate::atmosphere::AtmosphereSettings,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("Fog").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             ui.add(
                 Slider::new(&mut atm.fog_density, 0.0..=0.01)
@@ -323,11 +395,16 @@ fn fog_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::AtmosphereSetting
                     .text("Start Distance"),
             );
         });
+    *expanded = response.body_response.is_some();
 }
 
-fn sky_colors_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::AtmosphereSettings) {
-    CollapsingHeader::new(RichText::new("Sky Colors").strong())
-        .default_open(true)
+fn sky_colors_section(
+    ui: &mut egui::Ui,
+    atm: &mut crate::atmosphere::AtmosphereSettings,
+    expanded: &mut bool,
+) {
+    let response = CollapsingHeader::new(RichText::new("Sky Colors").strong())
+        .default_open(*expanded)
         .show(ui, |ui| {
             color_edit_rgb(ui, "Zenith", &mut atm.sky_color_zenith);
             color_edit_rgb(ui, "Horizon", &mut atm.sky_color_horizon);
@@ -340,6 +417,7 @@ fn sky_colors_section(ui: &mut egui::Ui, atm: &mut crate::atmosphere::Atmosphere
                 atm.ground_color = defaults.ground_color;
             }
         });
+    *expanded = response.body_response.is_some();
 }
 
 fn color_edit_rgb(ui: &mut egui::Ui, label: &str, arr: &mut [f32; 3]) {

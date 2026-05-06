@@ -353,15 +353,14 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
 
         if super::point_feature::point_feature_style(tags).is_some() {
             let base_elevation = elev(rep_lat, rep_lon);
-            let marker_elevation = if is_building {
-                base_elevation + super::building::parse_building_height(tags) + 0.25
-            } else {
-                base_elevation
-            };
+            let mut point = conv.to_world_xz(rep_lat, rep_lon);
+            if is_building {
+                point = move_point_outside_polygon(point, &resolved.points).unwrap_or(point);
+            }
             point_features.push(ResolvedPointFeature {
                 tags: tags.clone(),
-                point: conv.to_world_xz(rep_lat, rep_lon),
-                elevation: marker_elevation,
+                point,
+                elevation: base_elevation,
                 rep_lat,
                 rep_lon,
             });
@@ -454,7 +453,8 @@ pub fn load_world_source(pbf_path: &Path, srtm_dir: Option<&Path>) -> anyhow::Re
 
     for node in osm_data.nodes.values() {
         if super::point_feature::point_feature_style(&node.tags).is_some() {
-            let point = conv.to_world_xz(node.lat, node.lon);
+            let raw_point = conv.to_world_xz(node.lat, node.lon);
+            let point = move_point_outside_containing_building(raw_point, &buildings);
             point_features.push(ResolvedPointFeature {
                 tags: node.tags.clone(),
                 point,
@@ -593,6 +593,81 @@ fn evenly_capped_points(candidates: &[(f32, f32)], max_points: usize) -> Vec<(f3
             candidates[index]
         })
         .collect()
+}
+
+const POINT_FEATURE_BUILDING_CLEARANCE_METRES: f32 = 2.0;
+
+fn move_point_outside_containing_building(
+    point: (f32, f32),
+    buildings: &[ResolvedFeature],
+) -> (f32, f32) {
+    buildings
+        .iter()
+        .find(|building| point_in_polygon(point, &building.points))
+        .and_then(|building| move_point_outside_polygon(point, &building.points))
+        .unwrap_or(point)
+}
+
+fn move_point_outside_polygon(point: (f32, f32), polygon: &[(f32, f32)]) -> Option<(f32, f32)> {
+    let nearest = nearest_point_on_polygon_edges(point, polygon)?;
+    let to_edge = glam::vec2(nearest.0 - point.0, nearest.1 - point.1);
+    let fallback = {
+        let center = polygon_center(polygon)?;
+        glam::vec2(nearest.0 - center.0, nearest.1 - center.1)
+    };
+    let direction = if to_edge.length_squared() > 1e-8 {
+        to_edge.normalize()
+    } else if fallback.length_squared() > 1e-8 {
+        fallback.normalize()
+    } else {
+        glam::Vec2::X
+    };
+    Some((
+        nearest.0 + direction.x * POINT_FEATURE_BUILDING_CLEARANCE_METRES,
+        nearest.1 + direction.y * POINT_FEATURE_BUILDING_CLEARANCE_METRES,
+    ))
+}
+
+fn nearest_point_on_polygon_edges(point: (f32, f32), polygon: &[(f32, f32)]) -> Option<(f32, f32)> {
+    if polygon.len() < 2 {
+        return None;
+    }
+
+    let p = glam::vec2(point.0, point.1);
+    let mut best: Option<(f32, (f32, f32))> = None;
+    for i in 0..polygon.len() {
+        let a = glam::vec2(polygon[i].0, polygon[i].1);
+        let b = glam::vec2(
+            polygon[(i + 1) % polygon.len()].0,
+            polygon[(i + 1) % polygon.len()].1,
+        );
+        let ab = b - a;
+        if ab.length_squared() <= 1e-8 {
+            continue;
+        }
+        let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+        let candidate = a + ab * t;
+        let dist_sq = p.distance_squared(candidate);
+        if best.is_none_or(|(best_dist_sq, _)| dist_sq < best_dist_sq) {
+            best = Some((dist_sq, (candidate.x, candidate.y)));
+        }
+    }
+    best.map(|(_, point)| point)
+}
+
+fn polygon_center(polygon: &[(f32, f32)]) -> Option<(f32, f32)> {
+    let mut sum_x = 0.0;
+    let mut sum_z = 0.0;
+    let mut count = 0usize;
+    for (index, point) in polygon.iter().enumerate() {
+        if index + 1 == polygon.len() && polygon.first() == Some(point) {
+            continue;
+        }
+        sum_x += point.0;
+        sum_z += point.1;
+        count += 1;
+    }
+    (count > 0).then_some((sum_x / count as f32, sum_z / count as f32))
 }
 
 fn point_in_polygon(point: (f32, f32), polygon: &[(f32, f32)]) -> bool {
@@ -1255,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn load_world_source_classifies_poi_ways() {
+    fn load_world_source_moves_building_poi_way_markers_outside_footprint() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("poi-way.osm");
         std::fs::write(
@@ -1288,7 +1363,56 @@ mod tests {
             point_feature.tags.get("shop").map(String::as_str),
             Some("convenience")
         );
-        assert!(point_feature.elevation > 10.0);
+        assert_eq!(point_feature.elevation, 0.0);
+        assert!(!point_in_polygon(
+            point_feature.point,
+            &source.buildings[0].points
+        ));
+    }
+
+    #[test]
+    fn load_world_source_moves_poi_nodes_outside_containing_building() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("poi-node-inside-building.osm");
+        std::fs::write(
+            &path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6">
+  <node id="1" lat="38.0" lon="-121.0"/>
+  <node id="2" lat="38.0" lon="-120.999"/>
+  <node id="3" lat="38.001" lon="-120.999"/>
+  <node id="4" lat="38.001" lon="-121.0"/>
+  <node id="5" lat="38.0005" lon="-120.9995">
+    <tag k="amenity" v="restaurant"/>
+    <tag k="name" v="Center Cafe"/>
+  </node>
+  <way id="10">
+    <nd ref="1"/>
+    <nd ref="2"/>
+    <nd ref="3"/>
+    <nd ref="4"/>
+    <nd ref="1"/>
+    <tag k="building" v="yes"/>
+  </way>
+</osm>"#,
+        )
+        .unwrap();
+
+        let source = load_world_source(&path, None).unwrap();
+
+        assert_eq!(source.buildings.len(), 1);
+        assert_eq!(source.point_features.len(), 1);
+        let point_feature = &source.point_features[0];
+        assert_eq!(
+            point_feature.tags.get("name").map(String::as_str),
+            Some("Center Cafe")
+        );
+        assert!(!point_in_polygon(
+            point_feature.point,
+            &source.buildings[0].points
+        ));
+        let original_point = source.conv.to_world_xz(38.0005, -120.9995);
+        assert_ne!(point_feature.point, original_point);
     }
 
     #[test]

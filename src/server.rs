@@ -789,19 +789,24 @@ mod tests {
     }
 
     fn cache_xml_for_bbox(bbox: [f64; 4], filter: &par_osm_rust::filter::FeatureFilter) -> String {
+        let overpass_url = par_osm_rust::overpass::default_overpass_url();
+        cache_xml_for_bbox_with_overpass_url(bbox, filter, overpass_url)
+    }
+
+    fn cache_xml_for_bbox_with_overpass_url(
+        bbox: [f64; 4],
+        filter: &par_osm_rust::filter::FeatureFilter,
+        overpass_url: &str,
+    ) -> String {
+        let bbox_tuple = (bbox[0], bbox[1], bbox[2], bbox[3]);
         let cache_key =
-            par_osm_rust::osm_cache::cache_key((bbox[0], bbox[1], bbox[2], bbox[3]), filter);
+            par_osm_rust::osm_cache::cache_key_for_url(bbox_tuple, filter, overpass_url);
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <osm version="0.6">
   <node id="1" lat="38.0" lon="-121.0"/>
 </osm>"#;
-        par_osm_rust::osm_cache::write(
-            &cache_key,
-            (bbox[0], bbox[1], bbox[2], bbox[3]),
-            filter,
-            xml,
-        )
-        .unwrap();
+        par_osm_rust::osm_cache::write_for_url(&cache_key, bbox_tuple, filter, xml, overpass_url)
+            .unwrap();
         cache_key
     }
 
@@ -1061,8 +1066,10 @@ mod tests {
 
         let default_response =
             prepare_area(cached_prepare_request(bbox, filter.clone()), tmp.path()).unwrap();
+        let custom_overpass_url = "https://overpass.kumi.systems/api/interpreter";
+        cache_xml_for_bbox_with_overpass_url(bbox, &filter, custom_overpass_url);
         let mut custom_req = cached_prepare_request(bbox, filter);
-        custom_req.overpass_url = Some("https://overpass.kumi.systems/api/interpreter".to_string());
+        custom_req.overpass_url = Some(custom_overpass_url.to_string());
         let custom_response = prepare_area(custom_req, tmp.path()).unwrap();
 
         assert_ne!(custom_response.cache_key, default_response.cache_key);

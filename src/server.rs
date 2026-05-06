@@ -15,6 +15,7 @@ use tower_http::cors::CorsLayer;
 const MAX_BBOX_SPAN_DEGREES: f64 = 0.5;
 const MAX_BBOX_AREA_DEGREES: f64 = 0.10;
 const MAX_SRTM_TILE_COUNT: usize = 16;
+const OVERTURE_FALLBACK_TO_OSM_STATUS: &str = "overture_fallback_to_osm";
 
 #[derive(Clone)]
 struct AppState {
@@ -288,61 +289,72 @@ pub(crate) fn prepare_area(
     let osm_path = prepared_dir.join(format!("{cache_key}.osm"));
     let metadata_path = prepared_metadata_path(&osm_path);
 
-    let (cache_status, source_status, warnings) = if !req.force_refresh && osm_path.exists() {
+    let prepared_cache_hit = if !req.force_refresh && osm_path.exists() {
         let (source_status, warnings) = read_prepared_cache_metadata(&metadata_path);
-        ("prepared_cache_hit".to_string(), source_status, warnings)
+        if is_degraded_overture_prepared_cache(req.overture, &source_status) {
+            None
+        } else {
+            Some((source_status, warnings))
+        }
     } else {
-        let source_options = par_osm_rust::sources::SourceOptions {
-            filter: req.filter.clone(),
-            overpass_url: req.overpass_url.clone(),
-            use_overpass_cache: !req.force_refresh,
-            overture: par_osm_rust::overture::OvertureParams {
-                enabled: req.overture,
-                themes,
-                priority: std::collections::HashMap::new(),
-                timeout_secs: req.overture_timeout.unwrap_or(120),
-            },
-            poi_source_mode,
-            overture_failure_mode: failure_mode,
-        };
-        let mut progress_cb = |pct: f32, message: &str| {
-            log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);
-        };
-        let par_osm_rust::sources::SourceFetchResult {
-            data,
-            status,
-            warnings,
-        } = par_osm_rust::sources::fetch_map_data(bbox, &source_options, &mut progress_cb)
-            .map_err(|err| {
-                PrepareAreaError::upstream(
-                    "failed to fetch map data",
-                    err.context("fetching map data from configured sources"),
+        None
+    };
+
+    let (cache_status, source_status, warnings) =
+        if let Some((source_status, warnings)) = prepared_cache_hit {
+            ("prepared_cache_hit".to_string(), source_status, warnings)
+        } else {
+            let source_options = par_osm_rust::sources::SourceOptions {
+                filter: req.filter.clone(),
+                overpass_url: req.overpass_url.clone(),
+                use_overpass_cache: !req.force_refresh,
+                overture: par_osm_rust::overture::OvertureParams {
+                    enabled: req.overture,
+                    themes,
+                    priority: std::collections::HashMap::new(),
+                    timeout_secs: req.overture_timeout.unwrap_or(120),
+                },
+                poi_source_mode,
+                overture_failure_mode: failure_mode,
+            };
+            let mut progress_cb = |pct: f32, message: &str| {
+                log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);
+            };
+            let par_osm_rust::sources::SourceFetchResult {
+                data,
+                status,
+                warnings,
+            } = par_osm_rust::sources::fetch_map_data(bbox, &source_options, &mut progress_cb)
+                .map_err(|err| {
+                    PrepareAreaError::upstream(
+                        "failed to fetch map data",
+                        err.context("fetching map data from configured sources"),
+                    )
+                })?;
+            let source_status = source_status_string(status);
+            let xml = par_osm_rust::osm::write_osm_xml_string(&data);
+
+            std::fs::create_dir_all(&prepared_dir).map_err(|err| {
+                PrepareAreaError::internal(
+                    "failed to prepare area",
+                    anyhow::Error::new(err).context(format!(
+                        "creating prepared cache dir {}",
+                        prepared_dir.display()
+                    )),
                 )
             })?;
-        let source_status = source_status_string(status);
-        let xml = par_osm_rust::osm::write_osm_xml_string(&data);
+            write_atomic(&osm_path, &xml)
+                .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+            write_prepared_cache_metadata(&metadata_path, &source_status, &warnings)
+                .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
 
-        std::fs::create_dir_all(&prepared_dir).map_err(|err| {
-            PrepareAreaError::internal(
-                "failed to prepare area",
-                anyhow::Error::new(err).context(format!(
-                    "creating prepared cache dir {}",
-                    prepared_dir.display()
-                )),
-            )
-        })?;
-        write_atomic(&osm_path, &xml)
-            .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
-        write_prepared_cache_metadata(&metadata_path, &source_status, &warnings)
-            .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
-
-        let cache_status = if req.force_refresh {
-            "force_refreshed".to_string()
-        } else {
-            "prepared".to_string()
+            let cache_status = if req.force_refresh {
+                "force_refreshed".to_string()
+            } else {
+                "prepared".to_string()
+            };
+            (cache_status, source_status, warnings)
         };
-        (cache_status, source_status, warnings)
-    };
 
     let srtm_dir = if req.use_elevation {
         validate_srtm_tile_limit(bbox)?;
@@ -408,9 +420,15 @@ fn source_status_string(status: par_osm_rust::sources::SourceStatus) -> String {
         par_osm_rust::sources::SourceStatus::OvertureOnly => "overture_only",
         par_osm_rust::sources::SourceStatus::Both => "both",
         par_osm_rust::sources::SourceStatus::OverturePreferred => "overture_preferred",
-        par_osm_rust::sources::SourceStatus::OvertureFallbackToOsm => "overture_fallback_to_osm",
+        par_osm_rust::sources::SourceStatus::OvertureFallbackToOsm => {
+            OVERTURE_FALLBACK_TO_OSM_STATUS
+        }
     }
     .to_string()
+}
+
+fn is_degraded_overture_prepared_cache(overture_enabled: bool, source_status: &str) -> bool {
+    overture_enabled && source_status == OVERTURE_FALLBACK_TO_OSM_STATUS
 }
 
 fn effective_overpass_url_for_prepare(overpass_url: Option<&str>) -> PrepareResult<String> {
@@ -1342,7 +1360,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_area_prepared_cache_hit_preserves_overture_fallback_metadata() {
+    fn prepare_area_retries_degraded_overture_fallback_prepared_cache() {
         let _guard = ENV_MUTEX.lock().unwrap();
         let _restore = EnvRestore::capture(&[
             "HOME",
@@ -1379,11 +1397,10 @@ mod tests {
         let second = prepare_area(second_req, tmp.path()).unwrap();
 
         assert_eq!(first.cache_status, "prepared");
-        assert_eq!(second.cache_status, "prepared_cache_hit");
+        assert_eq!(second.cache_status, "prepared");
         assert_eq!(second.cache_key, first.cache_key);
         assert_eq!(second.osm_path, first.osm_path);
         assert_eq!(second.source_status, "overture_fallback_to_osm");
-        assert_eq!(second.warnings, first.warnings);
         assert!(
             second
                 .warnings

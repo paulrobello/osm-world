@@ -33,8 +33,10 @@ pub mod feature {
     pub const TERRAIN: f32 = 0.0;
     pub const BUILDING: f32 = 1.0;
     pub const ROAD: f32 = 2.0;
+    pub const ROAD_PATH: f32 = 2.25;
     pub const WATER: f32 = 3.0;
     pub const LANDUSE: f32 = 4.0;
+    pub const LANDUSE_OVERLAY: f32 = 4.25;
     pub const ROAD_MARKING: f32 = 5.0;
     pub const RAILWAY: f32 = 6.0;
     pub const POINT_FEATURE: f32 = 7.0;

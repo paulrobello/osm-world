@@ -34,11 +34,19 @@ pub fn building_color(tags: &HashMap<String, String>) -> [f32; 3] {
 const VEHICLE_ROAD_COLOR: [f32; 3] = [0.02, 0.02, 0.02];
 const SIDEWALK_ROAD_COLOR: [f32; 3] = [0.55, 0.55, 0.55];
 
+pub fn is_sidewalk_like_road(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("highway").map(String::as_str),
+        Some("footway" | "path" | "pedestrian" | "cycleway")
+    )
+}
+
 /// Color for road ribbons.
 pub fn road_color(tags: &HashMap<String, String>) -> [f32; 3] {
-    match tags.get("highway").map(String::as_str) {
-        Some("footway" | "path" | "pedestrian" | "cycleway") => SIDEWALK_ROAD_COLOR,
-        _ => VEHICLE_ROAD_COLOR,
+    if is_sidewalk_like_road(tags) {
+        SIDEWALK_ROAD_COLOR
+    } else {
+        VEHICLE_ROAD_COLOR
     }
 }
 

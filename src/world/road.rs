@@ -324,6 +324,26 @@ pub fn generate_road_with_elevations(
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
+    generate_road_with_elevations_and_feature_type(
+        points,
+        elevations,
+        width,
+        color,
+        feature::ROAD,
+        verts,
+        idxs,
+    );
+}
+
+pub fn generate_road_with_elevations_and_feature_type(
+    points: &[(f32, f32)],
+    elevations: &[f32],
+    width: f32,
+    color: [f32; 3],
+    feature_type: f32,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     if points.len() != elevations.len() || points.len() < 2 {
         return;
     }
@@ -407,14 +427,14 @@ pub fn generate_road_with_elevations(
             normal,
             color,
             uv: [0.0, 0.0],
-            feature_type: feature::ROAD,
+            feature_type,
         });
         verts.push(Vertex {
             position: [x - px, y, z - pz],
             normal,
             color,
             uv: [0.0, 0.0],
-            feature_type: feature::ROAD,
+            feature_type,
         });
     }
 
@@ -1602,6 +1622,30 @@ mod tests {
                 1.0 + road_layer_y_offset(&tags),
                 2.0 + road_layer_y_offset(&tags)
             ]
+        );
+    }
+
+    #[test]
+    fn road_ribbon_can_use_path_feature_type_for_ordered_overlay_draws() {
+        let points = [(0.0, 0.0), (10.0, 0.0)];
+        let elevations = [5.0, 7.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        generate_road_with_elevations_and_feature_type(
+            &points,
+            &elevations,
+            2.0,
+            [1.0, 1.0, 1.0],
+            feature::ROAD_PATH,
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(!indices.is_empty());
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.feature_type == feature::ROAD_PATH)
         );
     }
 

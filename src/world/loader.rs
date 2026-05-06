@@ -720,11 +720,17 @@ fn append_road_feature_mesh(
     let color = super::color::road_color(&road.tags);
     let render_path = super::road::road_render_path(&road.tags, &road.points, &road.elevations);
 
-    super::road::generate_road_with_elevations(
+    let feature_type = if super::color::is_sidewalk_like_road(&road.tags) {
+        crate::render::vertex::feature::ROAD_PATH
+    } else {
+        crate::render::vertex::feature::ROAD
+    };
+    super::road::generate_road_with_elevations_and_feature_type(
         &render_path.points,
         &render_path.road_elevations,
         width,
         color,
+        feature_type,
         verts,
         idxs,
     );
@@ -2212,22 +2218,22 @@ mod tests {
         assert!(
             near.vertices
                 .iter()
-                .any(|v| v.feature_type == crate::render::vertex::feature::LANDUSE)
+                .any(|v| v.feature_type == crate::render::vertex::feature::LANDUSE_OVERLAY)
         );
         assert!(
             near.vertices
                 .iter()
-                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD_PATH)
         );
         assert!(
             !far.vertices
                 .iter()
-                .any(|v| v.feature_type == crate::render::vertex::feature::LANDUSE)
+                .any(|v| v.feature_type == crate::render::vertex::feature::LANDUSE_OVERLAY)
         );
         assert!(
             !far.vertices
                 .iter()
-                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD)
+                .any(|v| v.feature_type == crate::render::vertex::feature::ROAD_PATH)
         );
 
         let water_ys: Vec<f32> = near

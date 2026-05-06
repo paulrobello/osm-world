@@ -3,10 +3,24 @@ use wgpu::*;
 
 use super::vertex::{Vertex, feature};
 
+pub struct RenderIndexBuffer {
+    pub buffer: Buffer,
+    pub count: u32,
+}
+
 pub struct SceneBuffers {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub index_count: u32,
+    pub terrain: RenderIndexBuffer,
+    pub landuse: RenderIndexBuffer,
+    pub landuse_overlay: RenderIndexBuffer,
+    pub water: RenderIndexBuffer,
+    pub road_path: RenderIndexBuffer,
+    pub road: RenderIndexBuffer,
+    pub railway: RenderIndexBuffer,
+    pub road_marking: RenderIndexBuffer,
+    pub solids: RenderIndexBuffer,
     pub shadow_index_buffer: Buffer,
     pub shadow_index_count: u32,
 }
@@ -24,6 +38,7 @@ impl SceneBuffers {
     fn from_data(device: &Device, vertices: Vec<Vertex>, indices: Vec<u32>) -> Self {
         let index_count = indices.len() as u32;
         let shadow_indices = shadow_index_data(&vertices, &indices);
+        let render_layers = render_layer_index_data(&vertices, &indices);
 
         let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
             label: Some("scene vertex buffer"),
@@ -47,10 +62,117 @@ impl SceneBuffers {
             vertex_buffer,
             index_buffer,
             index_count,
+            terrain: create_render_index_buffer(
+                device,
+                "terrain index buffer",
+                &render_layers.terrain,
+            ),
+            landuse: create_render_index_buffer(
+                device,
+                "landuse index buffer",
+                &render_layers.landuse,
+            ),
+            landuse_overlay: create_render_index_buffer(
+                device,
+                "landuse overlay index buffer",
+                &render_layers.landuse_overlay,
+            ),
+            water: create_render_index_buffer(device, "water index buffer", &render_layers.water),
+            road_path: create_render_index_buffer(
+                device,
+                "road path index buffer",
+                &render_layers.road_path,
+            ),
+            road: create_render_index_buffer(device, "road index buffer", &render_layers.road),
+            railway: create_render_index_buffer(
+                device,
+                "railway index buffer",
+                &render_layers.railway,
+            ),
+            road_marking: create_render_index_buffer(
+                device,
+                "road marking index buffer",
+                &render_layers.road_marking,
+            ),
+            solids: create_render_index_buffer(device, "solid index buffer", &render_layers.solids),
             shadow_index_buffer,
             shadow_index_count: shadow_indices.draw_count,
         }
     }
+}
+
+struct RenderLayerIndexData {
+    terrain: Vec<u32>,
+    landuse: Vec<u32>,
+    landuse_overlay: Vec<u32>,
+    water: Vec<u32>,
+    road_path: Vec<u32>,
+    road: Vec<u32>,
+    railway: Vec<u32>,
+    road_marking: Vec<u32>,
+    solids: Vec<u32>,
+}
+
+fn create_render_index_buffer(device: &Device, label: &str, indices: &[u32]) -> RenderIndexBuffer {
+    let count = indices.len() as u32;
+    let buffer_indices = if indices.is_empty() {
+        &[0][..]
+    } else {
+        indices
+    };
+    let buffer = device.create_buffer_init(&util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::cast_slice(buffer_indices),
+        usage: BufferUsages::INDEX,
+    });
+    RenderIndexBuffer { buffer, count }
+}
+
+fn render_layer_index_data(vertices: &[Vertex], indices: &[u32]) -> RenderLayerIndexData {
+    debug_assert_eq!(indices.len() % 3, 0, "scene indices must be triangle lists");
+
+    let mut layers = RenderLayerIndexData {
+        terrain: Vec::new(),
+        landuse: Vec::new(),
+        landuse_overlay: Vec::new(),
+        water: Vec::new(),
+        road_path: Vec::new(),
+        road: Vec::new(),
+        railway: Vec::new(),
+        road_marking: Vec::new(),
+        solids: Vec::new(),
+    };
+
+    for tri in indices.chunks_exact(3) {
+        let feature_type = tri
+            .iter()
+            .filter_map(|&index| vertices.get(index as usize))
+            .map(|vertex| vertex.feature_type)
+            .next()
+            .unwrap_or(feature::BUILDING);
+        let layer = if feature_type == feature::TERRAIN {
+            &mut layers.terrain
+        } else if feature_type == feature::LANDUSE {
+            &mut layers.landuse
+        } else if feature_type == feature::LANDUSE_OVERLAY {
+            &mut layers.landuse_overlay
+        } else if feature_type == feature::WATER {
+            &mut layers.water
+        } else if feature_type == feature::ROAD_PATH {
+            &mut layers.road_path
+        } else if feature_type == feature::ROAD {
+            &mut layers.road
+        } else if feature_type == feature::RAILWAY {
+            &mut layers.railway
+        } else if feature_type == feature::ROAD_MARKING {
+            &mut layers.road_marking
+        } else {
+            &mut layers.solids
+        };
+        layer.extend_from_slice(tri);
+    }
+
+    layers
 }
 
 struct ShadowIndexData {
@@ -233,6 +355,52 @@ mod tests {
             uv: [0.0, 0.0],
             feature_type,
         }
+    }
+
+    #[test]
+    fn render_layers_partition_surface_overlays_for_ordered_draws() {
+        let vertices = vec![
+            vertex(feature::TERRAIN),
+            vertex(feature::TERRAIN),
+            vertex(feature::TERRAIN),
+            vertex(feature::LANDUSE),
+            vertex(feature::LANDUSE),
+            vertex(feature::LANDUSE),
+            vertex(feature::LANDUSE_OVERLAY),
+            vertex(feature::LANDUSE_OVERLAY),
+            vertex(feature::LANDUSE_OVERLAY),
+            vertex(feature::WATER),
+            vertex(feature::WATER),
+            vertex(feature::WATER),
+            vertex(feature::ROAD_PATH),
+            vertex(feature::ROAD_PATH),
+            vertex(feature::ROAD_PATH),
+            vertex(feature::ROAD),
+            vertex(feature::ROAD),
+            vertex(feature::ROAD),
+            vertex(feature::RAILWAY),
+            vertex(feature::RAILWAY),
+            vertex(feature::RAILWAY),
+            vertex(feature::ROAD_MARKING),
+            vertex(feature::ROAD_MARKING),
+            vertex(feature::ROAD_MARKING),
+            vertex(feature::BUILDING),
+            vertex(feature::BUILDING),
+            vertex(feature::BUILDING),
+        ];
+        let indices: Vec<u32> = (0..vertices.len() as u32).collect();
+
+        let layers = render_layer_index_data(&vertices, &indices);
+
+        assert_eq!(layers.terrain, vec![0, 1, 2]);
+        assert_eq!(layers.landuse, vec![3, 4, 5]);
+        assert_eq!(layers.landuse_overlay, vec![6, 7, 8]);
+        assert_eq!(layers.water, vec![9, 10, 11]);
+        assert_eq!(layers.road_path, vec![12, 13, 14]);
+        assert_eq!(layers.road, vec![15, 16, 17]);
+        assert_eq!(layers.railway, vec![18, 19, 20]);
+        assert_eq!(layers.road_marking, vec![21, 22, 23]);
+        assert_eq!(layers.solids, vec![24, 25, 26]);
     }
 
     #[test]

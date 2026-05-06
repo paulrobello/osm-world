@@ -85,6 +85,11 @@ pub fn generate_landuse_with_elevations_and_offset(
     }
 
     let normal = [0.0, 1.0, 0.0];
+    let feature_type = if y_offset > LANDUSE_Y_OFFSET {
+        feature::LANDUSE_OVERLAY
+    } else {
+        feature::LANDUSE
+    };
 
     let base = verts.len() as u32;
 
@@ -94,7 +99,7 @@ pub fn generate_landuse_with_elevations_and_offset(
             normal,
             color,
             uv: [0.0, 0.0],
-            feature_type: feature::LANDUSE,
+            feature_type,
         });
     }
 
@@ -163,7 +168,30 @@ mod tests {
 
         for (vertex, elevation) in vertices.iter().zip(elevations) {
             assert_eq!(vertex.position[1], elevation + LANDUSE_Y_OFFSET);
+            assert_eq!(vertex.feature_type, feature::LANDUSE);
         }
+    }
+
+    #[test]
+    fn green_landuse_overlays_use_overlay_feature_type() {
+        let points = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let elevations = [5.0, 6.0, 7.0, 8.0];
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+        generate_landuse_with_elevations_and_offset(
+            &points,
+            &elevations,
+            LANDUSE_OVERLAY_Y_OFFSET,
+            [1.0, 1.0, 1.0],
+            &mut vertices,
+            &mut indices,
+        );
+
+        assert!(
+            vertices
+                .iter()
+                .all(|v| v.feature_type == feature::LANDUSE_OVERLAY)
+        );
     }
 
     #[test]

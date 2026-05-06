@@ -4,6 +4,7 @@ use super::AppState;
 use crate::camera::{
     SHADOW_CASCADE_BLEND_DISTANCE, SHADOW_CASCADE_COUNT, SHADOW_FAR_FADE_DISTANCE, SHADOW_MAP_SIZE,
 };
+use crate::render::buffers::RenderIndexBuffer;
 use crate::render::shadow_bind_group::LightUniforms;
 use crate::ui::EguiState;
 
@@ -144,13 +145,23 @@ pub fn render(
         pass.set_bind_group(0, &state.camera_bg.group, &[]);
         pass.draw(0..3, 0..1);
 
-        // City pass
-        pass.set_pipeline(&state.pipeline.pipeline);
+        // City pass: write terrain depth, draw close surface overlays in a
+        // deterministic order without depth writes, then draw solid geometry.
         pass.set_bind_group(0, &state.camera_bg.group, &[]);
         pass.set_bind_group(1, &state.shadow_bg.group, &[]);
         pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
-        pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
-        pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
+        pass.set_pipeline(&state.pipeline.pipeline);
+        draw_render_layer(&mut pass, &state.scene.terrain);
+        pass.set_pipeline(&state.pipeline.overlay_pipeline);
+        draw_render_layer(&mut pass, &state.scene.landuse);
+        draw_render_layer(&mut pass, &state.scene.landuse_overlay);
+        draw_render_layer(&mut pass, &state.scene.water);
+        draw_render_layer(&mut pass, &state.scene.road_path);
+        draw_render_layer(&mut pass, &state.scene.road);
+        draw_render_layer(&mut pass, &state.scene.railway);
+        draw_render_layer(&mut pass, &state.scene.road_marking);
+        pass.set_pipeline(&state.pipeline.pipeline);
+        draw_render_layer(&mut pass, &state.scene.solids);
     }
 
     // Minimap pass
@@ -201,12 +212,21 @@ pub fn render(
             minimap_pass.set_bind_group(0, &state.minimap_target.bind_group.group, &[]);
             minimap_pass.draw(0..3, 0..1);
 
-            minimap_pass.set_pipeline(&state.pipeline.pipeline);
             minimap_pass.set_bind_group(0, &state.minimap_target.bind_group.group, &[]);
             minimap_pass.set_bind_group(1, &state.shadow_bg.group, &[]);
             minimap_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
-            minimap_pass.set_index_buffer(state.scene.index_buffer.slice(..), IndexFormat::Uint32);
-            minimap_pass.draw_indexed(0..state.scene.index_count, 0, 0..1);
+            minimap_pass.set_pipeline(&state.pipeline.pipeline);
+            draw_render_layer(&mut minimap_pass, &state.scene.terrain);
+            minimap_pass.set_pipeline(&state.pipeline.overlay_pipeline);
+            draw_render_layer(&mut minimap_pass, &state.scene.landuse);
+            draw_render_layer(&mut minimap_pass, &state.scene.landuse_overlay);
+            draw_render_layer(&mut minimap_pass, &state.scene.water);
+            draw_render_layer(&mut minimap_pass, &state.scene.road_path);
+            draw_render_layer(&mut minimap_pass, &state.scene.road);
+            draw_render_layer(&mut minimap_pass, &state.scene.railway);
+            draw_render_layer(&mut minimap_pass, &state.scene.road_marking);
+            minimap_pass.set_pipeline(&state.pipeline.pipeline);
+            draw_render_layer(&mut minimap_pass, &state.scene.solids);
         }
     }
 
@@ -386,6 +406,14 @@ pub fn render(
             save_screenshot(state, &buffer, width, height, padded_bytes_per_row, path);
         }
     }
+}
+
+fn draw_render_layer(pass: &mut RenderPass<'_>, layer: &RenderIndexBuffer) {
+    if layer.count == 0 {
+        return;
+    }
+    pass.set_index_buffer(layer.buffer.slice(..), IndexFormat::Uint32);
+    pass.draw_indexed(0..layer.count, 0, 0..1);
 }
 
 fn save_screenshot(

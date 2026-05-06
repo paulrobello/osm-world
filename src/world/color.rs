@@ -280,7 +280,7 @@ pub fn landuse_color(tags: &HashMap<String, String>) -> [f32; 3] {
 
 /// Constant terrain color.
 pub fn terrain_color() -> [f32; 3] {
-    [0.42, 0.55, 0.30]
+    [0.26, 0.27, 0.27]
 }
 
 #[cfg(test)]
@@ -323,6 +323,11 @@ mod tests {
         assert_eq!(style.roof_color, [0.42, 0.43, 0.46]);
         assert_eq!(style.facade_intensity, 1.0);
         assert_eq!(style.roof_intensity, 0.0);
+    }
+
+    #[test]
+    fn terrain_color_is_dark_grey() {
+        assert_eq!(terrain_color(), [0.26, 0.27, 0.27]);
     }
 
     #[test]

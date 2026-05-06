@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use crate::render::vertex::{Vertex, feature};
 
-// Sacramento screenshots are taken from kilometre-scale distances; keep roads
-// separated by multiple metres so depth quantization does not fight landuse.
-pub const ROAD_Y_OFFSET: f32 = 2.0;
-const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.05;
+// Keep road/path overlays close to terrain, but still above landuse/water
+// overlays to avoid z-fighting.
+pub const ROAD_Y_OFFSET: f32 = 0.55;
+const ROAD_CAP_EXTRA_Y_OFFSET: f32 = 0.02;
 const ROAD_BRIDGE_LAYER_Y_OFFSET: f32 = 5.0;
 const ROAD_TUNNEL_LAYER_Y_OFFSET: f32 = -5.0;
 const ROAD_CAP_SEGMENTS: usize = 12;
@@ -28,7 +28,7 @@ const CENTERLINE_MIN_ROAD_WIDTH: f32 = 4.0;
 const CENTERLINE_WIDTH: f32 = 0.22;
 const CENTERLINE_DASH_LENGTH: f32 = 4.0;
 const CENTERLINE_GAP_LENGTH: f32 = 6.0;
-const CENTERLINE_Y_OFFSET: f32 = 0.18;
+const CENTERLINE_Y_OFFSET: f32 = 0.02;
 const CENTERLINE_COLOR: [f32; 3] = [1.0, 0.82, 0.05];
 const BRIDGE_STRUCTURE_COLOR: [f32; 3] = [0.50, 0.52, 0.54];
 const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
@@ -36,9 +36,8 @@ const TUNNEL_STRUCTURE_COLOR: [f32; 3] = [0.34, 0.32, 0.30];
 /// Additional per-feature Y offset applied before road ribbon generation.
 ///
 /// The ribbon generator already adds [`ROAD_Y_OFFSET`] above sampled terrain.
-/// This offset keeps road/path overlays at least about one metre above green
-/// landuse overlays and separates bridges/layered crossings by several metres
-/// so large city-scale depth buffers do not z-fight at intersections.
+/// This offset keeps road/path overlays just above landuse and water overlays
+/// while layered crossings still separate by several metres.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoadProfileKind {
     Surface,
@@ -215,11 +214,11 @@ fn render_elevations_for_factors(
 fn surface_road_y_offset(tags: &HashMap<String, String>) -> f32 {
     let width = super::color::road_width(tags);
     if width >= 5.0 {
-        0.7
+        0.15
     } else if width >= 3.5 {
-        0.6
+        0.12
     } else {
-        0.5
+        0.10
     }
 }
 
@@ -1153,7 +1152,7 @@ mod tests {
             ("layer".to_string(), "1".to_string()),
         ]);
 
-        assert!(road_layer_y_offset(&surface) >= 0.5);
+        assert!(road_layer_y_offset(&surface) >= 0.10);
         assert!(road_layer_y_offset(&bridge) >= road_layer_y_offset(&surface) + 4.0);
     }
 

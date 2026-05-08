@@ -17,7 +17,7 @@ impl ApplicationHandler for App {
                 cam_override: self.opts.cam_override.as_ref(),
                 persisted_camera: self.persisted_camera.as_ref(),
                 visual_detail: &self.visual_detail,
-                streaming_tile_size: self.opts.streaming.tile_size,
+                streaming: &self.opts.streaming,
             };
             match init::init_wgpu(event_loop, &init_options) {
                 Ok((state, egui)) => {
@@ -262,15 +262,23 @@ impl App {
             .map(|state| crate::app::prefs::CameraPrefs::from_camera(&state.camera))
             .or_else(|| self.persisted_camera.clone());
         let settings_sections = self.settings_sections.clone();
+        let visual_detail =
+            crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(&self.visual_detail);
         let minimap_changed = minimap != self.persisted_minimap;
         let camera_changed = camera != self.persisted_camera;
         let settings_sections_changed = settings_sections != self.persisted_settings_sections;
-        if !minimap_changed && !camera_changed && !settings_sections_changed {
+        let visual_detail_changed = visual_detail != self.persisted_visual_detail;
+        if !minimap_changed
+            && !camera_changed
+            && !settings_sections_changed
+            && !visual_detail_changed
+        {
             return;
         }
         if camera_changed
             && !minimap_changed
             && !settings_sections_changed
+            && !visual_detail_changed
             && !force
             && self.last_prefs_save.elapsed() < super::PREFS_SAVE_INTERVAL
         {
@@ -281,12 +289,14 @@ impl App {
             minimap: minimap.clone(),
             camera: camera.clone(),
             settings_sections: settings_sections.clone(),
+            visual_detail: visual_detail.clone(),
         };
         match crate::app::prefs::save_user_prefs(&prefs) {
             Ok(()) => {
                 self.persisted_minimap = minimap;
                 self.persisted_camera = camera;
                 self.persisted_settings_sections = settings_sections;
+                self.persisted_visual_detail = visual_detail;
                 self.last_prefs_save = std::time::Instant::now();
             }
             Err(err) => log::warn!("Failed to save preferences: {err}"),

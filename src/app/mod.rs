@@ -89,6 +89,7 @@ pub struct AppOptions {
     pub debug_shadow_cascades: bool,
     pub streaming: StreamingOptions,
     pub visual_detail: crate::visual_detail::VisualDetailSettings,
+    pub visual_detail_overridden: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +141,7 @@ pub struct App {
     pub persisted_camera: Option<crate::app::prefs::CameraPrefs>,
     pub settings_sections: crate::app::prefs::SettingsSectionsPrefs,
     pub persisted_settings_sections: crate::app::prefs::SettingsSectionsPrefs,
+    pub persisted_visual_detail: crate::app::prefs::VisualDetailPrefs,
     pub last_prefs_save: std::time::Instant,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub address_labels: crate::ui::poi_labels::AddressLabelSettings,
@@ -164,8 +166,12 @@ impl App {
         }
         day_cycle.real_clock = opts.real_time_of_day;
 
-        let visual_detail = opts.visual_detail.clone();
         let prefs = crate::app::prefs::load_user_prefs();
+        let visual_detail = resolve_initial_visual_detail(
+            &opts.visual_detail,
+            &prefs.visual_detail,
+            opts.visual_detail_overridden,
+        );
         let mut minimap = crate::ui::minimap::MinimapState::default();
         prefs.minimap.apply_to_minimap_state(&mut minimap);
         if opts.hide_minimap {
@@ -210,6 +216,7 @@ impl App {
             persisted_camera: prefs.camera,
             settings_sections: prefs.settings_sections.clone(),
             persisted_settings_sections: prefs.settings_sections,
+            persisted_visual_detail: prefs.visual_detail,
             last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
             poi_labels,
             address_labels,
@@ -223,9 +230,65 @@ impl App {
     }
 }
 
+fn resolve_initial_visual_detail(
+    cli_settings: &crate::visual_detail::VisualDetailSettings,
+    persisted: &crate::app::prefs::VisualDetailPrefs,
+    cli_overridden: bool,
+) -> crate::visual_detail::VisualDetailSettings {
+    if cli_overridden {
+        cli_settings.clone()
+    } else {
+        persisted.to_visual_detail_settings()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_visual_detail_is_used_when_cli_does_not_override() {
+        let cli = crate::visual_detail::VisualDetailSettings::from_preset(
+            crate::visual_detail::VisualPreset::Balanced,
+        );
+        let prefs = crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(
+            &crate::visual_detail::VisualDetailSettings {
+                vegetation_density: 2.5,
+                synthetic_tree_cap: 333,
+                ..crate::visual_detail::VisualDetailSettings::from_preset(
+                    crate::visual_detail::VisualPreset::Showcase,
+                )
+            },
+        );
+
+        let resolved = resolve_initial_visual_detail(&cli, &prefs, false);
+
+        assert_eq!(
+            resolved.preset,
+            crate::visual_detail::VisualPreset::Showcase
+        );
+        assert_eq!(resolved.vegetation_density, 2.5);
+        assert_eq!(resolved.synthetic_tree_cap, 333);
+    }
+
+    #[test]
+    fn explicit_cli_visual_detail_overrides_persisted_prefs() {
+        let cli = crate::visual_detail::VisualDetailSettings::from_preset(
+            crate::visual_detail::VisualPreset::Performance,
+        );
+        let prefs = crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(
+            &crate::visual_detail::VisualDetailSettings::from_preset(
+                crate::visual_detail::VisualPreset::Showcase,
+            ),
+        );
+
+        let resolved = resolve_initial_visual_detail(&cli, &prefs, true);
+
+        assert_eq!(
+            resolved.preset,
+            crate::visual_detail::VisualPreset::Performance
+        );
+    }
 
     #[test]
     fn app_starts_with_settings_panel_visible_by_default() {
@@ -249,6 +312,7 @@ mod tests {
             debug_shadow_cascades: false,
             streaming: StreamingOptions::default(),
             visual_detail: crate::visual_detail::VisualDetailSettings::default(),
+            visual_detail_overridden: false,
         });
 
         assert!(app.show_settings);

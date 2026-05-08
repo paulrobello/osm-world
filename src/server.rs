@@ -109,6 +109,8 @@ pub struct LaunchRendererRequest {
     pub srtm_dir: Option<String>,
     pub spawn_lat: Option<f64>,
     pub spawn_lon: Option<f64>,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -550,6 +552,7 @@ pub(crate) fn prepare_area(
         srtm_dir: srtm_dir.clone(),
         spawn_lat,
         spawn_lon,
+        extra_args: Vec::new(),
     };
     let launch_command = renderer_launch_command(project_root, &launch_req)?;
 
@@ -692,6 +695,7 @@ fn prepared_entry_from_osm_path(
         srtm_dir: metadata.srtm_dir.clone(),
         spawn_lat: metadata.spawn_lat,
         spawn_lon: metadata.spawn_lon,
+        extra_args: Vec::new(),
     };
     let launch_command = renderer_launch_command(project_root, &launch_req)?;
 
@@ -785,6 +789,7 @@ pub(crate) fn renderer_launch_command(
             args.push(srtm_dir.clone());
         }
     }
+    args.extend(req.extra_args.clone());
     let program = "cargo".to_string();
     let command = shell_command(&program, &args);
     Ok(RendererLaunchCommand {
@@ -1433,6 +1438,7 @@ mod tests {
             srtm_dir: Some("/tmp/srtm cache".to_string()),
             spawn_lat: Some(38.0005),
             spawn_lon: Some(-120.9995),
+            extra_args: vec!["--visual-preset".to_string(), "showcase".to_string()],
         };
 
         let command = renderer_launch_command(project_root, &req).unwrap();
@@ -1464,6 +1470,12 @@ mod tests {
                 .args
                 .windows(2)
                 .any(|window| window == ["--spawn-lon", "-120.9995"])
+        );
+        assert!(
+            command
+                .args
+                .windows(2)
+                .any(|window| window == ["--visual-preset", "showcase"])
         );
         assert!(command.command.contains("'/tmp/osm world/Cargo.toml'"));
     }

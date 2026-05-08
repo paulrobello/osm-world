@@ -59,7 +59,7 @@ pub struct InitWgpuOptions<'a> {
     pub cam_override: Option<&'a crate::camera::CameraOverride>,
     pub persisted_camera: Option<&'a crate::app::prefs::CameraPrefs>,
     pub visual_detail: &'a crate::visual_detail::VisualDetailSettings,
-    pub streaming_tile_size: f32,
+    pub streaming: &'a crate::app::StreamingOptions,
 }
 
 pub fn init_wgpu(
@@ -164,12 +164,14 @@ pub fn init_wgpu(
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
             }
+            apply_explicit_camera_overrides(&mut camera, options.cam_override);
             loaded_scene_from_source(
                 &device,
                 source,
                 options.visual_detail,
-                options.streaming_tile_size,
-            )
+                options.streaming,
+                camera.position,
+            )?
         }
         None => LoadedScene {
             scene: SceneBuffers::new(&device),
@@ -183,23 +185,7 @@ pub fn init_wgpu(
         },
     };
 
-    if let Some(ov) = options.cam_override {
-        if let Some(x) = ov.x {
-            camera.position.x = x;
-        }
-        if let Some(y) = ov.y {
-            camera.position.y = y;
-        }
-        if let Some(z) = ov.z {
-            camera.position.z = z;
-        }
-        if let Some(yaw) = ov.yaw {
-            camera.yaw = yaw.to_radians();
-        }
-        if let Some(pitch) = ov.pitch {
-            camera.pitch = pitch.to_radians();
-        }
-    }
+    apply_explicit_camera_overrides(&mut camera, options.cam_override);
 
     Ok((
         AppState {
@@ -227,7 +213,7 @@ pub fn init_wgpu(
             occlusion,
             minimap_target,
             tile_debug_entries: loaded_scene.tile_debug_entries,
-            tile_debug_tile_size: options.streaming_tile_size,
+            tile_debug_tile_size: options.streaming.tile_size,
         },
         egui,
     ))
@@ -238,27 +224,24 @@ pub fn load_scene_resources(
     input_path: &std::path::Path,
     srtm_dir: Option<&std::path::Path>,
     visual_detail: &crate::visual_detail::VisualDetailSettings,
-    streaming_tile_size: f32,
+    streaming: &crate::app::StreamingOptions,
+    camera_position: glam::Vec3,
 ) -> anyhow::Result<LoadedScene> {
     let source = crate::world::loader::load_world_source_with_visual_detail(
         input_path,
         srtm_dir,
         visual_detail,
     )?;
-    Ok(loaded_scene_from_source(
-        device,
-        source,
-        visual_detail,
-        streaming_tile_size,
-    ))
+    loaded_scene_from_source(device, source, visual_detail, streaming, camera_position)
 }
 
 fn loaded_scene_from_source(
     device: &Device,
     source: crate::world::loader::WorldSource,
     visual_detail: &crate::visual_detail::VisualDetailSettings,
-    tile_size: f32,
-) -> LoadedScene {
+    streaming: &crate::app::StreamingOptions,
+    camera_position: glam::Vec3,
+) -> anyhow::Result<LoadedScene> {
     let coord_converter = source.conv;
     let poi_labels = crate::ui::poi_labels::labels_from_point_features(&source.point_features);
     let address_labels = crate::ui::poi_labels::labels_from_address_features(
@@ -268,11 +251,10 @@ fn loaded_scene_from_source(
     let street_sign_labels = crate::ui::poi_labels::labels_from_street_signs(&source.street_signs);
     let search_entries = crate::ui::search::build_search_index(&source);
     let identifiables = crate::ui::inspect::build_identifiables(&source);
-    let tile_debug_entries = tile_debug_entries_from_source(&source, tile_size);
-    let world =
-        crate::world::loader::generate_world_mesh_with_visual_detail(&source, visual_detail);
-    LoadedScene {
-        scene: SceneBuffers::from_mesh(device, world.vertices, world.indices),
+    let (scene, tile_debug_entries) =
+        scene_buffers_from_source(device, &source, visual_detail, streaming, camera_position)?;
+    Ok(LoadedScene {
+        scene,
         coord_converter: Some(coord_converter),
         poi_labels,
         address_labels,
@@ -280,7 +262,167 @@ fn loaded_scene_from_source(
         search_entries,
         identifiables,
         tile_debug_entries,
+    })
+}
+
+fn scene_buffers_from_source(
+    device: &Device,
+    source: &crate::world::loader::WorldSource,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+    streaming: &crate::app::StreamingOptions,
+    camera_position: glam::Vec3,
+) -> anyhow::Result<(SceneBuffers, Vec<crate::stream::TileDebugEntry>)> {
+    let (vertices, indices, debug_entries) = if streaming.enabled {
+        streaming_mesh_for_camera(source, visual_detail, streaming, camera_position, device)
+    } else {
+        let world =
+            crate::world::loader::generate_world_mesh_with_visual_detail(source, visual_detail);
+        let debug_entries = tile_debug_entries_from_source(source, streaming.tile_size);
+        (world.vertices, world.indices, debug_entries)
+    };
+
+    validate_scene_buffer_sizes(device, vertices.len(), indices.len())?;
+    Ok((
+        SceneBuffers::from_mesh(device, vertices, indices),
+        debug_entries,
+    ))
+}
+
+fn validate_scene_buffer_sizes(
+    device: &Device,
+    vertex_count: usize,
+    index_count: usize,
+) -> anyhow::Result<()> {
+    let vertex_bytes =
+        vertex_count.saturating_mul(std::mem::size_of::<crate::render::vertex::Vertex>());
+    let index_bytes = index_count.saturating_mul(std::mem::size_of::<u32>());
+    let max_buffer_size = device.limits().max_buffer_size as usize;
+
+    if vertex_bytes > max_buffer_size {
+        anyhow::bail!(
+            "scene vertex buffer would be {:.1} MiB, exceeding this GPU's {:.1} MiB buffer limit; enable streaming or reduce the rendered area/detail",
+            bytes_to_mib(vertex_bytes),
+            bytes_to_mib(max_buffer_size),
+        );
     }
+    if index_bytes > max_buffer_size {
+        anyhow::bail!(
+            "scene index buffer would be {:.1} MiB, exceeding this GPU's {:.1} MiB buffer limit; enable streaming or reduce the rendered area/detail",
+            bytes_to_mib(index_bytes),
+            bytes_to_mib(max_buffer_size),
+        );
+    }
+    Ok(())
+}
+
+fn streaming_mesh_for_camera(
+    source: &crate::world::loader::WorldSource,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+    streaming: &crate::app::StreamingOptions,
+    camera_position: glam::Vec3,
+    device: &Device,
+) -> (
+    Vec<crate::render::vertex::Vertex>,
+    Vec<u32>,
+    Vec<crate::stream::TileDebugEntry>,
+) {
+    let index = source.feature_index_for_tile_size(streaming.tile_size);
+    let selected = select_streaming_tiles(
+        &index,
+        streaming.tile_size,
+        camera_position,
+        streaming.stream_radius,
+        streaming.max_uploaded_tiles,
+    );
+    let vertex_budget = device.limits().max_buffer_size as usize;
+    let index_budget = device.limits().max_buffer_size as usize;
+    let mut selected_coords: Vec<_> = selected.iter().map(|(coord, _)| *coord).collect();
+    let requested_tile_count = selected_coords.len();
+
+    let mut mesh = crate::world::loader::generate_streamed_startup_mesh(
+        source,
+        &selected_coords,
+        streaming.tile_size,
+        visual_detail,
+    );
+    while selected_coords.len() > 1
+        && (mesh
+            .vertices
+            .len()
+            .saturating_mul(std::mem::size_of::<crate::render::vertex::Vertex>())
+            > vertex_budget
+            || mesh
+                .indices
+                .len()
+                .saturating_mul(std::mem::size_of::<u32>())
+                > index_budget)
+    {
+        selected_coords.truncate((selected_coords.len() * 3 / 4).max(1));
+        mesh = crate::world::loader::generate_streamed_startup_mesh(
+            source,
+            &selected_coords,
+            streaming.tile_size,
+            visual_detail,
+        );
+    }
+
+    let debug_entries = selected_coords
+        .iter()
+        .copied()
+        .map(|coord| crate::stream::TileDebugEntry {
+            coord,
+            state: crate::stream::TileDebugState::Uploaded,
+        })
+        .collect::<Vec<_>>();
+    let skipped_for_budget = requested_tile_count.saturating_sub(debug_entries.len());
+
+    log::info!(
+        "Generated streamed startup mesh: {} vertices, {} indices, {} tiles loaded{}",
+        mesh.vertices.len(),
+        mesh.indices.len(),
+        debug_entries.len(),
+        if skipped_for_budget == 0 {
+            String::new()
+        } else {
+            format!(", {skipped_for_budget} skipped for GPU buffer budget")
+        }
+    );
+
+    (mesh.vertices, mesh.indices, debug_entries)
+}
+
+fn select_streaming_tiles(
+    index: &std::collections::HashMap<
+        crate::stream::TileCoord,
+        crate::stream::tile::TileFeatureRefs,
+    >,
+    tile_size: f32,
+    camera_position: glam::Vec3,
+    stream_radius: f32,
+    max_tiles: usize,
+) -> Vec<(crate::stream::TileCoord, f32)> {
+    let mut selected: Vec<_> = index
+        .keys()
+        .copied()
+        .map(|coord| {
+            let center = coord.center(tile_size);
+            let delta = glam::vec2(center.x - camera_position.x, center.z - camera_position.z);
+            (coord, delta.length())
+        })
+        .filter(|(_, distance)| *distance <= stream_radius)
+        .collect();
+
+    selected.sort_by(|(a_coord, a_distance), (b_coord, b_distance)| {
+        a_distance
+            .total_cmp(b_distance)
+            .then_with(|| a_coord.cmp(b_coord))
+    });
+    selected.truncate(max_tiles.max(1));
+    selected
+}
+
+fn bytes_to_mib(bytes: usize) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0)
 }
 
 fn tile_debug_entries_from_source(
@@ -357,6 +499,30 @@ fn apply_spawn_camera_location(
     let (x, z) = conv.to_world_xz(lat, lon);
     camera.position.x = x;
     camera.position.z = z;
+}
+
+fn apply_explicit_camera_overrides(
+    camera: &mut Flycam,
+    cam_override: Option<&crate::camera::CameraOverride>,
+) {
+    let Some(ov) = cam_override else {
+        return;
+    };
+    if let Some(x) = ov.x {
+        camera.position.x = x;
+    }
+    if let Some(y) = ov.y {
+        camera.position.y = y;
+    }
+    if let Some(z) = ov.z {
+        camera.position.z = z;
+    }
+    if let Some(yaw) = ov.yaw {
+        camera.yaw = yaw.to_radians();
+    }
+    if let Some(pitch) = ov.pitch {
+        camera.pitch = pitch.to_radians();
+    }
 }
 
 pub fn create_depth_buffer(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
@@ -465,5 +631,47 @@ mod tests {
         assert_eq!(camera.position.x, expected_x);
         assert_eq!(camera.position.y, 122.8);
         assert_eq!(camera.position.z, expected_z);
+    }
+
+    #[test]
+    fn explicit_camera_overrides_apply_before_streaming_selection() {
+        let mut camera = Flycam::new(1.0);
+        let overrides = crate::camera::CameraOverride {
+            x: Some(10.0),
+            y: Some(20.0),
+            z: Some(-30.0),
+            yaw: Some(45.0),
+            pitch: Some(-10.0),
+            spawn_lat: None,
+            spawn_lon: None,
+        };
+
+        apply_explicit_camera_overrides(&mut camera, Some(&overrides));
+
+        assert_eq!(camera.position, glam::vec3(10.0, 20.0, -30.0));
+        assert_eq!(camera.yaw, 45.0_f32.to_radians());
+        assert_eq!(camera.pitch, -10.0_f32.to_radians());
+    }
+
+    #[test]
+    fn streaming_tile_selection_sorts_by_distance_and_caps_count() {
+        let mut index = std::collections::HashMap::new();
+        for coord in [
+            crate::stream::TileCoord { x: 0, z: 0 },
+            crate::stream::TileCoord { x: 1, z: 0 },
+            crate::stream::TileCoord { x: 3, z: 0 },
+        ] {
+            index.insert(coord, crate::stream::tile::TileFeatureRefs::default());
+        }
+
+        let selected = select_streaming_tiles(&index, 100.0, glam::Vec3::ZERO, 250.0, 2);
+
+        assert_eq!(
+            selected.iter().map(|(coord, _)| *coord).collect::<Vec<_>>(),
+            vec![
+                crate::stream::TileCoord { x: 0, z: 0 },
+                crate::stream::TileCoord { x: 1, z: 0 },
+            ]
+        );
     }
 }

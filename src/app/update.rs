@@ -39,7 +39,8 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
         std::path::Path::new(&request.input_path),
         srtm_dir,
         &app.visual_detail,
-        app.opts.streaming.tile_size,
+        &app.opts.streaming,
+        state.camera.position,
     ) {
         Ok(loaded) => {
             state.scene = loaded.scene;
@@ -94,6 +95,7 @@ mod tests {
             streaming: crate::app::StreamingOptions::default(),
             visual_detail: crate::visual_detail::VisualDetailSettings::default()
                 .with_reload_required(),
+            visual_detail_overridden: true,
         }
     }
 

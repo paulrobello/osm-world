@@ -1,8 +1,31 @@
 //! Water mesh generator.
 
+use std::collections::HashMap;
+
 use crate::render::vertex::{Vertex, feature};
 
 pub const WATER_Y_OFFSET: f32 = 0.03;
+
+pub fn is_renderable_waterway(tags: &HashMap<String, String>) -> bool {
+    match tags.get("waterway").map(String::as_str) {
+        Some("river" | "canal") => tags.contains_key("name"),
+        Some("stream" | "drain" | "ditch") => true,
+        _ => false,
+    }
+}
+
+pub fn waterway_width(tags: &HashMap<String, String>) -> f32 {
+    tags.get("width")
+        .and_then(|width| width.parse::<f32>().ok())
+        .filter(|width| width.is_finite() && *width > 0.0)
+        .unwrap_or_else(|| match tags.get("waterway").map(String::as_str) {
+            Some("river") => 80.0,
+            Some("canal") => 14.0,
+            Some("stream") => 4.0,
+            Some("drain" | "ditch") => 3.0,
+            _ => 6.0,
+        })
+}
 
 /// Generate a flat triangulated mesh for a water polygon.
 ///
@@ -62,6 +85,51 @@ pub fn generate_water_with_elevations_and_offset(
             idxs.push(base + tri[2] as u32);
             idxs.push(base + tri[1] as u32);
         }
+    }
+}
+
+pub fn generate_waterway_with_elevations(
+    points: &[(f32, f32)],
+    elevations: &[f32],
+    tags: &HashMap<String, String>,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    if points.len() != elevations.len() || points.len() < 2 || !is_renderable_waterway(tags) {
+        return;
+    }
+
+    let half_width = waterway_width(tags) * 0.5;
+    let color = super::color::water_color();
+    let normal = [0.0, 1.0, 0.0];
+
+    for (segment_idx, segment) in points.windows(2).enumerate() {
+        let a = glam::vec2(segment[0].0, segment[0].1);
+        let b = glam::vec2(segment[1].0, segment[1].1);
+        let delta = b - a;
+        if delta.length_squared() <= f32::EPSILON {
+            continue;
+        }
+        let tangent = delta.normalize();
+        let side = glam::vec2(-tangent.y, tangent.x) * half_width;
+        let y0 = elevations[segment_idx] + WATER_Y_OFFSET;
+        let y1 = elevations[segment_idx + 1] + WATER_Y_OFFSET;
+        let base = verts.len() as u32;
+        for position in [
+            [a.x + side.x, y0, a.y + side.y],
+            [a.x - side.x, y0, a.y - side.y],
+            [b.x + side.x, y1, b.y + side.y],
+            [b.x - side.x, y1, b.y - side.y],
+        ] {
+            verts.push(Vertex {
+                position,
+                normal,
+                color,
+                uv: [0.0, 0.0],
+                feature_type: feature::WATER,
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 2, base + 1, base + 1, base + 2, base + 3]);
     }
 }
 

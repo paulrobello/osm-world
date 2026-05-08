@@ -105,6 +105,21 @@ pub fn road_layer_y_offset(tags: &HashMap<String, String>) -> f32 {
     road_profile(tags).layer_offset
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BridgeEndpointRamps {
+    pub start: bool,
+    pub end: bool,
+}
+
+impl Default for BridgeEndpointRamps {
+    fn default() -> Self {
+        Self {
+            start: true,
+            end: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RoadRenderPath {
     pub points: Vec<(f32, f32)>,
@@ -135,6 +150,20 @@ pub fn road_render_path(
     points: &[(f32, f32)],
     terrain_elevations: &[f32],
 ) -> RoadRenderPath {
+    road_render_path_with_bridge_endpoint_ramps(
+        tags,
+        points,
+        terrain_elevations,
+        BridgeEndpointRamps::default(),
+    )
+}
+
+pub fn road_render_path_with_bridge_endpoint_ramps(
+    tags: &HashMap<String, String>,
+    points: &[(f32, f32)],
+    terrain_elevations: &[f32],
+    endpoint_ramps: BridgeEndpointRamps,
+) -> RoadRenderPath {
     if points.len() != terrain_elevations.len() {
         return RoadRenderPath {
             points: Vec::new(),
@@ -163,12 +192,16 @@ pub fn road_render_path(
 
     let effective_ramp = BRIDGE_APPROACH_RAMP_LENGTH.min(total_length * 0.5);
     let mut sample_distances = distances.clone();
-    push_sample_distance(&mut sample_distances, effective_ramp, total_length);
-    push_sample_distance(
-        &mut sample_distances,
-        total_length - effective_ramp,
-        total_length,
-    );
+    if endpoint_ramps.start {
+        push_sample_distance(&mut sample_distances, effective_ramp, total_length);
+    }
+    if endpoint_ramps.end {
+        push_sample_distance(
+            &mut sample_distances,
+            total_length - effective_ramp,
+            total_length,
+        );
+    }
     sample_distances.sort_by(f32::total_cmp);
     sample_distances.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
 
@@ -180,7 +213,12 @@ pub fn road_render_path(
             interpolate_path_sample(points, terrain_elevations, &distances, distance);
         render_points.push(point);
         render_terrain_elevations.push(terrain_elevation);
-        ramp_factors.push(bridge_ramp_factor(distance, total_length, effective_ramp));
+        ramp_factors.push(bridge_ramp_factor_with_endpoints(
+            distance,
+            total_length,
+            effective_ramp,
+            endpoint_ramps,
+        ));
     }
 
     let road_elevations =
@@ -243,11 +281,33 @@ fn bridge_ramp_factors(points: &[(f32, f32)], ramp_length: f32) -> Vec<f32> {
 }
 
 fn bridge_ramp_factor(distance: f32, total_length: f32, effective_ramp: f32) -> f32 {
+    bridge_ramp_factor_with_endpoints(
+        distance,
+        total_length,
+        effective_ramp,
+        BridgeEndpointRamps::default(),
+    )
+}
+
+fn bridge_ramp_factor_with_endpoints(
+    distance: f32,
+    total_length: f32,
+    effective_ramp: f32,
+    endpoint_ramps: BridgeEndpointRamps,
+) -> f32 {
     if effective_ramp <= 1e-6 {
         return 1.0;
     }
-    let from_start = (distance / effective_ramp).clamp(0.0, 1.0);
-    let from_end = ((total_length - distance) / effective_ramp).clamp(0.0, 1.0);
+    let from_start = if endpoint_ramps.start {
+        (distance / effective_ramp).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let from_end = if endpoint_ramps.end {
+        ((total_length - distance) / effective_ramp).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
     from_start.min(from_end)
 }
 

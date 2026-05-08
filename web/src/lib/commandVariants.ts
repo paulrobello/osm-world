@@ -33,42 +33,42 @@ function insertCargoRelease(args: string[]): string[] {
   return ['run', '--release', ...args.slice(1)];
 }
 
-function appendRendererOptions(args: string[], renderer: RendererOptions): string[] {
-  const next = [...args];
-  next.push('--time-of-day', renderer.timeOfDay.toString());
-  next.push('--visual-preset', renderer.visualPreset);
+export function rendererOptionArgs(renderer: RendererOptions): string[] {
+  const args: string[] = [];
+  args.push('--time-of-day', renderer.timeOfDay.toString());
+  args.push('--visual-preset', renderer.visualPreset);
   if (renderer.showSettings) {
-    next.push('--show-settings');
+    args.push('--show-settings');
   }
   if (renderer.streamRadius !== 15000) {
-    next.push('--stream-radius', renderer.streamRadius.toString());
+    args.push('--stream-radius', renderer.streamRadius.toString());
   }
   if (renderer.uploadBudgetMb !== 4) {
-    next.push('--upload-budget-mb', renderer.uploadBudgetMb.toString());
+    args.push('--upload-budget-mb', renderer.uploadBudgetMb.toString());
   }
   if (renderer.maxUploadedTiles !== 256) {
-    next.push('--max-uploaded-tiles', renderer.maxUploadedTiles.toString());
+    args.push('--max-uploaded-tiles', renderer.maxUploadedTiles.toString());
   }
   if (!renderer.labels.poi) {
-    next.push('--hide-poi-labels');
+    args.push('--hide-poi-labels');
   }
   if (!renderer.labels.addresses) {
-    next.push('--hide-address-labels');
+    args.push('--hide-address-labels');
   }
   if (!renderer.labels.streetSigns) {
-    next.push('--hide-street-sign-labels');
+    args.push('--hide-street-sign-labels');
   }
   if (!renderer.minimap.visible) {
-    next.push('--hide-minimap');
+    args.push('--hide-minimap');
   }
   if (renderer.minimap.rotateWithCamera) {
-    next.push('--rotate-minimap');
+    args.push('--rotate-minimap');
   }
-  return next;
+  return args;
 }
 
 export function buildCommandVariants(input: CommandVariantInput, renderer: RendererOptions): CommandVariant[] {
-  const debugArgs = appendRendererOptions(input.command_args, renderer);
+  const debugArgs = [...input.command_args, ...rendererOptionArgs(renderer)];
   const screenshotPath = `screenshots/osm-world-${input.cache_key.slice(0, 12)}.png`;
 
   return [

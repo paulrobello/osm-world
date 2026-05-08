@@ -1,6 +1,6 @@
 //! World loading orchestrator.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::geo::{CoordConverter, ElevationData};
@@ -58,6 +58,7 @@ pub struct WorldSource {
     pub railways: Vec<ResolvedFeature>,
     pub transit_routes: Vec<ResolvedFeature>,
     pub waters: Vec<ResolvedFeature>,
+    pub waterways: Vec<ResolvedFeature>,
     pub landuses: Vec<ResolvedFeature>,
     pub point_features: Vec<ResolvedPointFeature>,
     pub address_points: Vec<ResolvedPointFeature>,
@@ -119,6 +120,15 @@ impl WorldSource {
                     .entry(coord)
                     .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
                     .waters
+                    .push(feature_idx);
+            }
+        }
+        for (feature_idx, feature) in self.waterways.iter().enumerate() {
+            if let Some(coord) = feature_owner_tile(feature, tile_size) {
+                index
+                    .entry(coord)
+                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                    .waterways
                     .push(feature_idx);
             }
         }
@@ -296,6 +306,7 @@ pub fn load_world_source_with_visual_detail(
     let mut railways: Vec<ResolvedFeature> = Vec::new();
     let mut transit_routes: Vec<ResolvedFeature> = Vec::new();
     let mut waters: Vec<ResolvedFeature> = Vec::new();
+    let mut waterways: Vec<ResolvedFeature> = Vec::new();
     let mut landuses: Vec<ResolvedFeature> = Vec::new();
     let mut point_features: Vec<ResolvedPointFeature> = Vec::new();
     let mut address_points: Vec<ResolvedPointFeature> = Vec::new();
@@ -397,6 +408,8 @@ pub fn load_world_source_with_visual_detail(
             waters.push(resolved.clone());
         } else if is_landuse {
             landuses.push(resolved.clone());
+        } else if super::water::is_renderable_waterway(tags) && resolved.points.len() >= 2 {
+            waterways.push(resolved.clone());
         }
         if is_road {
             roads.push(resolved.clone());
@@ -567,6 +580,7 @@ pub fn load_world_source_with_visual_detail(
         railways,
         transit_routes,
         waters,
+        waterways,
         landuses,
         point_features,
         address_points,
@@ -818,15 +832,21 @@ pub fn generate_world_mesh_with_visual_detail(
     }
 }
 
-fn append_road_feature_mesh(
+fn append_road_feature_mesh_with_ramps(
     road: &ResolvedFeature,
+    endpoint_ramps: crate::world::road::BridgeEndpointRamps,
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) -> (Vec<f32>, f32, [f32; 3]) {
     let width = super::color::road_width(&road.tags);
     let color = super::color::road_color(&road.tags);
     let profile = super::road::road_profile(&road.tags);
-    let render_path = super::road::road_render_path(&road.tags, &road.points, &road.elevations);
+    let render_path = super::road::road_render_path_with_bridge_endpoint_ramps(
+        &road.tags,
+        &road.points,
+        &road.elevations,
+        endpoint_ramps,
+    );
 
     let is_surface = profile.kind == super::road::RoadProfileKind::Surface;
     let feature_type = if !is_surface {
@@ -871,6 +891,48 @@ fn append_road_feature_mesh(
     let cap_elevations =
         super::road::road_render_elevations(&road.tags, &road.points, &road.elevations);
     (cap_elevations, width, color)
+}
+
+fn bridge_endpoint_ramps_for_road(
+    source: &WorldSource,
+    road_index: usize,
+) -> crate::world::road::BridgeEndpointRamps {
+    let Some(road) = source.roads.get(road_index) else {
+        return crate::world::road::BridgeEndpointRamps::default();
+    };
+    if super::road::road_profile(&road.tags).kind != super::road::RoadProfileKind::Bridge {
+        return crate::world::road::BridgeEndpointRamps::default();
+    }
+
+    crate::world::road::BridgeEndpointRamps {
+        start: road
+            .points
+            .first()
+            .is_none_or(|&point| !has_connected_bridge_road_at(source, road_index, point)),
+        end: road
+            .points
+            .last()
+            .is_none_or(|&point| !has_connected_bridge_road_at(source, road_index, point)),
+    }
+}
+
+fn has_connected_bridge_road_at(
+    source: &WorldSource,
+    road_index: usize,
+    point: (f32, f32),
+) -> bool {
+    source.roads.iter().enumerate().any(|(other_index, other)| {
+        other_index != road_index
+            && super::road::road_profile(&other.tags).kind == super::road::RoadProfileKind::Bridge
+            && other
+                .points
+                .iter()
+                .any(|&other_point| same_road_point(other_point, point))
+    })
+}
+
+fn same_road_point(a: (f32, f32), b: (f32, f32)) -> bool {
+    (a.0 - b.0).abs() <= 0.05 && (a.1 - b.1).abs() <= 0.05
 }
 
 fn terrain_cuts_for_roads(roads: &[ResolvedFeature]) -> Vec<super::terrain::TerrainCut> {
@@ -986,6 +1048,8 @@ fn append_world_mesh(
     for w in &source.waters {
         super::water::generate_water_with_elevations(&w.points, &w.elevations, verts, idxs);
     }
+    let all_waterway_refs: Vec<_> = (0..source.waterways.len()).collect();
+    append_uncovered_waterway_meshes(source, &all_waterway_refs, verts, idxs);
 
     // Roads
     type RoadPointKey = (i32, i32);
@@ -1017,8 +1081,10 @@ fn append_world_mesh(
     }
 
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
-    for r in &source.roads {
-        let (road_elevations, width, color) = append_road_feature_mesh(r, verts, idxs);
+    for (road_index, r) in source.roads.iter().enumerate() {
+        let ramps = bridge_endpoint_ramps_for_road(source, road_index);
+        let (road_elevations, width, color) =
+            append_road_feature_mesh_with_ramps(r, ramps, verts, idxs);
 
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
         for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
@@ -1119,7 +1185,7 @@ fn append_world_mesh(
     }
 
     log::info!(
-        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} point features, {} street signs, {} water areas, {} landuse areas",
+        "Generated world mesh: {} vertices, {} indices, {} buildings, {} roads, {} railways, {} point features, {} street signs, {} water areas, {} waterways, {} landuse areas",
         verts.len(),
         idxs.len(),
         source.buildings.len(),
@@ -1128,6 +1194,7 @@ fn append_world_mesh(
         source.point_features.len(),
         source.street_signs.len(),
         source.waters.len(),
+        source.waterways.len(),
         source.landuses.len(),
     );
 }
@@ -1182,6 +1249,223 @@ pub fn generate_tile_mesh_set_with_visual_detail(
     ];
     let aabb = aabb_for_lods(coord, tile_size, &lods);
     TileMeshSet { coord, aabb, lods }
+}
+
+pub fn generate_streamed_startup_mesh(
+    source: &WorldSource,
+    selected_tiles: &[crate::stream::TileCoord],
+    tile_size: f32,
+    visual_detail: &crate::visual_detail::VisualDetailSettings,
+) -> CpuMesh {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut coords = selected_tiles.to_vec();
+    coords.sort_unstable();
+    coords.dedup();
+
+    let rects: Vec<_> = coords.iter().map(|coord| coord.rect(tile_size)).collect();
+    let road_refs = feature_indices_intersecting_tiles(&source.roads, &rects);
+    let terrain_cuts = terrain_cuts_for_road_refs(source, &road_refs);
+
+    for coord in &coords {
+        let rect = coord.rect(tile_size);
+        super::terrain::generate_terrain_for_world_rect_with_cuts(
+            rect.min_x,
+            rect.min_z,
+            rect.max_x,
+            rect.max_z,
+            crate::stream::LodConfig::terrain_spacing(crate::stream::TileLod::Near),
+            &source.conv,
+            source.elevation.as_ref(),
+            &terrain_cuts,
+            &mut vertices,
+            &mut indices,
+        );
+    }
+
+    let water_refs = feature_indices_intersecting_tiles(&source.waters, &rects);
+    append_clipped_water_meshes(source, &water_refs, &rects, &mut vertices, &mut indices);
+
+    let refs = crate::stream::tile::TileFeatureRefs {
+        buildings: feature_indices_intersecting_tiles(&source.buildings, &rects),
+        roads: road_refs,
+        railways: feature_indices_intersecting_tiles(&source.railways, &rects),
+        waters: Vec::new(),
+        waterways: feature_indices_intersecting_tiles(&source.waterways, &rects),
+        landuses: feature_indices_intersecting_tiles(&source.landuses, &rects),
+        point_features: source
+            .point_features
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, point)| {
+                coords
+                    .binary_search(&crate::stream::TileCoord::from_world(
+                        point.point.0,
+                        point.point.1,
+                        tile_size,
+                    ))
+                    .is_ok()
+                    .then_some(idx)
+            })
+            .collect(),
+        street_signs: source
+            .street_signs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, sign)| {
+                coords
+                    .binary_search(&crate::stream::TileCoord::from_world(
+                        sign.point.0,
+                        sign.point.1,
+                        tile_size,
+                    ))
+                    .is_ok()
+                    .then_some(idx)
+            })
+            .collect(),
+    };
+
+    append_tile_features_mesh(
+        source,
+        &refs,
+        crate::stream::TileLod::Near,
+        visual_detail,
+        &mut vertices,
+        &mut indices,
+    );
+
+    CpuMesh { vertices, indices }
+}
+
+fn append_clipped_water_meshes(
+    source: &WorldSource,
+    water_refs: &[usize],
+    rects: &[crate::stream::TileRect],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    for &feature_idx in water_refs {
+        let Some(water) = source.waters.get(feature_idx) else {
+            continue;
+        };
+        let Some(bbox) = feature_bbox(water) else {
+            continue;
+        };
+        for &rect in rects {
+            if !bbox_intersects_rect(bbox, rect) {
+                continue;
+            }
+            let clipped = clip_polygon_to_rect(&water.points, rect);
+            if clipped.len() < 3 {
+                continue;
+            }
+            let elevations: Vec<_> = clipped
+                .iter()
+                .map(|&(x, z)| {
+                    let (lat, lon) = source.conv.world_xz_to_lat_lon(x, z);
+                    source.elevation_at(lat, lon)
+                })
+                .collect();
+            super::water::generate_water_with_elevations(&clipped, &elevations, verts, idxs);
+        }
+    }
+}
+
+fn clip_polygon_to_rect(points: &[(f32, f32)], rect: crate::stream::TileRect) -> Vec<(f32, f32)> {
+    let mut polygon = points.to_vec();
+    if polygon.len() >= 2 && polygon.first() == polygon.last() {
+        polygon.pop();
+    }
+    polygon = clip_polygon_edge(
+        polygon,
+        |point| point.0 >= rect.min_x,
+        |a, b| intersect_at_x(a, b, rect.min_x),
+    );
+    polygon = clip_polygon_edge(
+        polygon,
+        |point| point.0 <= rect.max_x,
+        |a, b| intersect_at_x(a, b, rect.max_x),
+    );
+    polygon = clip_polygon_edge(
+        polygon,
+        |point| point.1 >= rect.min_z,
+        |a, b| intersect_at_z(a, b, rect.min_z),
+    );
+    clip_polygon_edge(
+        polygon,
+        |point| point.1 <= rect.max_z,
+        |a, b| intersect_at_z(a, b, rect.max_z),
+    )
+}
+
+fn clip_polygon_edge(
+    polygon: Vec<(f32, f32)>,
+    inside: impl Fn((f32, f32)) -> bool,
+    intersect: impl Fn((f32, f32), (f32, f32)) -> (f32, f32),
+) -> Vec<(f32, f32)> {
+    if polygon.is_empty() {
+        return polygon;
+    }
+    let mut clipped = Vec::new();
+    let mut previous = *polygon.last().unwrap_or(&(0.0, 0.0));
+    let mut previous_inside = inside(previous);
+    for current in polygon {
+        let current_inside = inside(current);
+        if current_inside {
+            if !previous_inside {
+                clipped.push(intersect(previous, current));
+            }
+            clipped.push(current);
+        } else if previous_inside {
+            clipped.push(intersect(previous, current));
+        }
+        previous = current;
+        previous_inside = current_inside;
+    }
+    clipped.dedup_by(|a, b| same_road_point(*a, *b));
+    clipped
+}
+
+fn intersect_at_x(a: (f32, f32), b: (f32, f32), x: f32) -> (f32, f32) {
+    let dx = b.0 - a.0;
+    if dx.abs() <= f32::EPSILON {
+        return (x, a.1);
+    }
+    let t = ((x - a.0) / dx).clamp(0.0, 1.0);
+    (x, a.1 + (b.1 - a.1) * t)
+}
+
+fn intersect_at_z(a: (f32, f32), b: (f32, f32), z: f32) -> (f32, f32) {
+    let dz = b.1 - a.1;
+    if dz.abs() <= f32::EPSILON {
+        return (a.0, z);
+    }
+    let t = ((z - a.1) / dz).clamp(0.0, 1.0);
+    (a.0 + (b.0 - a.0) * t, z)
+}
+
+fn feature_indices_intersecting_tiles(
+    features: &[ResolvedFeature],
+    rects: &[crate::stream::TileRect],
+) -> Vec<usize> {
+    features
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, feature)| {
+            let bbox = feature_bbox(feature)?;
+            rects
+                .iter()
+                .any(|rect| bbox_intersects_rect(bbox, *rect))
+                .then_some(idx)
+        })
+        .collect()
+}
+
+fn bbox_intersects_rect(
+    (min_x, min_z, max_x, max_z): (f32, f32, f32, f32),
+    rect: crate::stream::TileRect,
+) -> bool {
+    min_x < rect.max_x && max_x > rect.min_x && min_z < rect.max_z && max_z > rect.min_z
 }
 
 fn aabb_for_lods(
@@ -1249,6 +1533,73 @@ fn generate_tile_lod_mesh(
     CpuMesh { vertices, indices }
 }
 
+fn append_uncovered_waterway_meshes(
+    source: &WorldSource,
+    waterway_refs: &[usize],
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
+    let mut emitted_segments = HashSet::new();
+    for &feature_idx in waterway_refs {
+        let Some(waterway) = source.waterways.get(feature_idx) else {
+            continue;
+        };
+        if waterway.points.len() != waterway.elevations.len() {
+            continue;
+        }
+        for segment_idx in 0..waterway.points.len().saturating_sub(1) {
+            let a = waterway.points[segment_idx];
+            let b = waterway.points[segment_idx + 1];
+            if same_road_point(a, b) {
+                continue;
+            }
+            let key = normalized_segment_key(a, b);
+            if !emitted_segments.insert(key) {
+                continue;
+            }
+            let midpoint = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
+            if point_is_inside_any_water_area(source, midpoint) {
+                continue;
+            }
+            super::water::generate_waterway_with_elevations(
+                &[a, b],
+                &[
+                    waterway.elevations[segment_idx],
+                    waterway.elevations[segment_idx + 1],
+                ],
+                &waterway.tags,
+                verts,
+                idxs,
+            );
+        }
+    }
+}
+
+fn normalized_segment_key(a: (f32, f32), b: (f32, f32)) -> ((i32, i32), (i32, i32)) {
+    let qa = quantized_point_key(a);
+    let qb = quantized_point_key(b);
+    if qa <= qb { (qa, qb) } else { (qb, qa) }
+}
+
+fn quantized_point_key(point: (f32, f32)) -> (i32, i32) {
+    (
+        (point.0 * 10.0).round() as i32,
+        (point.1 * 10.0).round() as i32,
+    )
+}
+
+fn point_is_inside_any_water_area(source: &WorldSource, point: (f32, f32)) -> bool {
+    source.waters.iter().any(|water| {
+        feature_bbox(water).is_some_and(|bbox| {
+            point.0 >= bbox.0
+                && point.0 <= bbox.2
+                && point.1 >= bbox.1
+                && point.1 <= bbox.3
+                && point_in_polygon(point, &water.points)
+        })
+    })
+}
+
 fn append_tile_features_mesh(
     source: &WorldSource,
     refs: &crate::stream::tile::TileFeatureRefs,
@@ -1282,6 +1633,7 @@ fn append_tile_features_mesh(
         };
         super::water::generate_water_with_elevations(&w.points, &w.elevations, verts, idxs);
     }
+    append_uncovered_waterway_meshes(source, &refs.waterways, verts, idxs);
 
     append_tile_roads_mesh(source, &refs.roads, lod, verts, idxs);
 
@@ -1370,10 +1722,15 @@ fn append_tile_roads_mesh(
         )
     };
 
-    let selected_roads: Vec<&ResolvedFeature> = road_refs
+    let selected_roads: Vec<(usize, &ResolvedFeature)> = road_refs
         .iter()
-        .filter_map(|&feature_idx| source.roads.get(feature_idx))
-        .filter(|road| lod != crate::stream::TileLod::Far || !is_minor_highway(&road.tags))
+        .filter_map(|&feature_idx| {
+            source
+                .roads
+                .get(feature_idx)
+                .map(|road| (feature_idx, road))
+        })
+        .filter(|(_, road)| lod != crate::stream::TileLod::Far || !is_minor_highway(&road.tags))
         .collect();
 
     let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
@@ -1390,8 +1747,10 @@ fn append_tile_roads_mesh(
     }
 
     let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
-    for r in selected_roads {
-        let (road_elevations, width, color) = append_road_feature_mesh(r, verts, idxs);
+    for (road_index, r) in selected_roads {
+        let ramps = bridge_endpoint_ramps_for_road(source, road_index);
+        let (road_elevations, width, color) =
+            append_road_feature_mesh_with_ramps(r, ramps, verts, idxs);
 
         let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
         for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
@@ -1545,6 +1904,7 @@ mod tests {
     <nd ref="6"/>
     <nd ref="7"/>
     <tag k="waterway" v="river"/>
+    <tag k="name" v="Example River"/>
   </way>
 </osm>"#,
         )
@@ -1553,9 +1913,14 @@ mod tests {
         let source = load_world_source(&path, None).unwrap();
 
         assert_eq!(source.waters.len(), 1);
+        assert_eq!(source.waterways.len(), 1);
         assert_eq!(
             source.waters[0].tags.get("natural").map(String::as_str),
             Some("water")
+        );
+        assert_eq!(
+            source.waterways[0].tags.get("waterway").map(String::as_str),
+            Some("river")
         );
     }
 
@@ -2075,6 +2440,7 @@ mod tests {
             railways: Vec::new(),
             transit_routes: Vec::new(),
             waters: Vec::new(),
+            waterways: Vec::new(),
             landuses: Vec::new(),
             point_features: Vec::new(),
             address_points: Vec::new(),
@@ -2131,6 +2497,7 @@ mod tests {
             railways: Vec::new(),
             transit_routes: Vec::new(),
             waters: Vec::new(),
+            waterways: Vec::new(),
             landuses: Vec::new(),
             point_features: Vec::new(),
             address_points: Vec::new(),
@@ -2358,6 +2725,234 @@ mod tests {
     }
 
     #[test]
+    fn tile_mesh_skips_open_waterway_ribbon_segments_already_covered_by_water_area() {
+        let mut source = empty_source();
+        source.waters.push(feature(
+            "natural",
+            "water",
+            vec![(-20.0, -30.0), (120.0, -30.0), (120.0, 30.0), (-20.0, 30.0)],
+        ));
+        let mut waterway = feature("waterway", "river", vec![(0.0, 0.0), (100.0, 0.0)]);
+        waterway
+            .tags
+            .insert("name".to_string(), "Example River".to_string());
+        source.waterways.push(waterway);
+        let refs = crate::stream::tile::TileFeatureRefs {
+            waterways: vec![0],
+            ..Default::default()
+        };
+
+        let tile = generate_tile_lod_mesh(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+            crate::stream::TileLod::Near,
+            &crate::visual_detail::VisualDetailSettings::default(),
+        );
+
+        assert!(
+            tile.vertices
+                .iter()
+                .all(|vertex| vertex.feature_type != crate::render::vertex::feature::WATER),
+            "waterway centerline should not overdraw an existing water polygon"
+        );
+    }
+
+    #[test]
+    fn tile_mesh_emits_open_waterway_ribbon_geometry() {
+        let mut source = empty_source();
+        let mut waterway = feature("waterway", "river", vec![(10.0, -10.0), (90.0, -10.0)]);
+        waterway.tags.insert("width".to_string(), "20".to_string());
+        waterway
+            .tags
+            .insert("name".to_string(), "Example River".to_string());
+        source.waterways.push(waterway);
+        let refs = crate::stream::tile::TileFeatureRefs {
+            waterways: vec![0],
+            ..Default::default()
+        };
+
+        let tile = generate_tile_lod_mesh(
+            &source,
+            crate::stream::TileCoord { x: 0, z: -1 },
+            &refs,
+            100.0,
+            crate::stream::TileLod::Near,
+            &crate::visual_detail::VisualDetailSettings::default(),
+        );
+
+        assert!(tile.vertices.iter().any(|vertex| {
+            vertex.feature_type == crate::render::vertex::feature::WATER
+                && (vertex.position[2] + 20.0).abs() < 0.1
+        }));
+    }
+
+    #[test]
+    fn streamed_startup_mesh_emits_water_intersecting_selected_tile_even_when_owner_is_unselected()
+    {
+        let mut source = empty_source();
+        source.waters.push(feature(
+            "natural",
+            "water",
+            vec![(80.0, -80.0), (220.0, -80.0), (220.0, -20.0), (80.0, -20.0)],
+        ));
+
+        let mesh = generate_streamed_startup_mesh(
+            &source,
+            &[crate::stream::TileCoord { x: 0, z: -1 }],
+            100.0,
+            &crate::visual_detail::VisualDetailSettings::default(),
+        );
+
+        let water_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.feature_type == crate::render::vertex::feature::WATER)
+            .collect();
+        assert!(!water_vertices.is_empty());
+        assert!(water_vertices.iter().all(|vertex| {
+            (0.0..=100.0).contains(&vertex.position[0])
+                && (-100.0..=0.0).contains(&vertex.position[2])
+        }));
+    }
+
+    #[test]
+    fn streamed_startup_water_clipping_does_not_fill_dry_gap_between_disconnected_intersections() {
+        let mut source = empty_source();
+        source.waters.push(feature(
+            "natural",
+            "water",
+            vec![
+                (0.0, 100.0),
+                (20.0, 100.0),
+                (20.0, 0.0),
+                (80.0, 0.0),
+                (80.0, 100.0),
+                (100.0, 100.0),
+                (100.0, -20.0),
+                (0.0, -20.0),
+            ],
+        ));
+
+        let mesh = generate_streamed_startup_mesh(
+            &source,
+            &[crate::stream::TileCoord { x: 0, z: 0 }],
+            100.0,
+            &crate::visual_detail::VisualDetailSettings::default(),
+        );
+
+        let water_triangle_centroids: Vec<_> = mesh
+            .indices
+            .chunks_exact(3)
+            .filter_map(|tri| {
+                let vertices = [
+                    mesh.vertices[tri[0] as usize],
+                    mesh.vertices[tri[1] as usize],
+                    mesh.vertices[tri[2] as usize],
+                ];
+                vertices
+                    .iter()
+                    .all(|vertex| vertex.feature_type == crate::render::vertex::feature::WATER)
+                    .then(|| {
+                        let x = vertices
+                            .iter()
+                            .map(|vertex| vertex.position[0])
+                            .sum::<f32>()
+                            / 3.0;
+                        let z = vertices
+                            .iter()
+                            .map(|vertex| vertex.position[2])
+                            .sum::<f32>()
+                            / 3.0;
+                        (x, z)
+                    })
+            })
+            .collect();
+
+        assert!(!water_triangle_centroids.is_empty());
+        assert!(
+            water_triangle_centroids
+                .iter()
+                .all(|&(x, z)| !(40.0..=60.0).contains(&x) || !(40.0..=80.0).contains(&z)),
+            "water triangles should not cover the dry middle gap; centroids={water_triangle_centroids:?}"
+        );
+    }
+
+    #[test]
+    fn streamed_startup_water_clipping_does_not_emit_water_for_tile_inside_dry_concavity() {
+        let mut source = empty_source();
+        source.waters.push(feature(
+            "natural",
+            "water",
+            vec![
+                (0.0, 100.0),
+                (20.0, 100.0),
+                (20.0, 0.0),
+                (80.0, 0.0),
+                (80.0, 100.0),
+                (100.0, 100.0),
+                (100.0, -20.0),
+                (0.0, -20.0),
+            ],
+        ));
+
+        let mesh = generate_streamed_startup_mesh(
+            &source,
+            &[crate::stream::TileCoord { x: 2, z: 2 }],
+            20.0,
+            &crate::visual_detail::VisualDetailSettings::default(),
+        );
+
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.feature_type != crate::render::vertex::feature::WATER),
+            "a tile wholly inside the dry concavity must not receive clipped water"
+        );
+    }
+
+    #[test]
+    fn connected_bridge_road_fragments_stay_elevated_at_shared_split() {
+        let mut source = empty_source();
+        let tags = HashMap::from([
+            ("highway".to_string(), "primary".to_string()),
+            ("bridge".to_string(), "yes".to_string()),
+        ]);
+        source.roads.push(ResolvedFeature {
+            tags: tags.clone(),
+            points: vec![(0.0, 0.0), (50.0, 0.0)],
+            elevations: vec![0.0, 0.0],
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+        source.roads.push(ResolvedFeature {
+            tags: tags.clone(),
+            points: vec![(50.0, 0.0), (100.0, 0.0)],
+            elevations: vec![0.0, 0.0],
+            rep_lat: 1.0,
+            rep_lon: 2.0,
+        });
+
+        let mesh = generate_world_mesh(&source);
+        let bridge_y = crate::world::road::road_layer_y_offset(&tags);
+        let min_split_y = mesh
+            .vertices
+            .iter()
+            .filter(|vertex| {
+                vertex.feature_type == crate::render::vertex::feature::ROAD_LAYERED
+                    && (vertex.position[0] - 50.0).abs() < 0.1
+            })
+            .map(|vertex| vertex.position[1])
+            .fold(f32::INFINITY, f32::min);
+
+        assert!(
+            min_split_y > bridge_y - 0.1,
+            "bridge split dipped to {min_split_y}, expected near {bridge_y}"
+        );
+    }
+
+    #[test]
     fn feature_index_includes_empty_terrain_tiles_for_world_bbox() {
         let mut source = empty_source();
         source.max_lat = 1.002;
@@ -2373,6 +2968,7 @@ mod tests {
             && refs.roads.is_empty()
             && refs.railways.is_empty()
             && refs.waters.is_empty()
+            && refs.waterways.is_empty()
             && refs.landuses.is_empty()
             && refs.point_features.is_empty()
             && refs.street_signs.is_empty()));

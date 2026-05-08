@@ -147,6 +147,7 @@ export function launchRenderer(body: {
   srtm_dir?: string | null;
   spawn_lat?: number | null;
   spawn_lon?: number | null;
+  extra_args?: string[];
 }): Promise<LaunchRendererResponse> {
   return apiJson('/renderer/launch', {
     method: 'POST',

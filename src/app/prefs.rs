@@ -9,6 +9,62 @@ pub struct UserPrefs {
     pub minimap: MinimapPrefs,
     pub camera: Option<CameraPrefs>,
     pub settings_sections: SettingsSectionsPrefs,
+    pub visual_detail: VisualDetailPrefs,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct VisualDetailPrefs {
+    pub preset: crate::visual_detail::VisualPreset,
+    pub landmark_detail: crate::visual_detail::LandmarkDetail,
+    pub facade_variation: f32,
+    pub roof_variation: f32,
+    pub vegetation_visible: bool,
+    pub vegetation_density: f32,
+    pub synthetic_tree_cap: usize,
+    pub vegetation_max_distance: f32,
+    pub bike_ped_overlay: bool,
+}
+
+impl Default for VisualDetailPrefs {
+    fn default() -> Self {
+        Self::from_visual_detail_settings(&crate::visual_detail::VisualDetailSettings::default())
+    }
+}
+
+impl VisualDetailPrefs {
+    pub fn from_visual_detail_settings(
+        settings: &crate::visual_detail::VisualDetailSettings,
+    ) -> Self {
+        Self {
+            preset: settings.preset,
+            landmark_detail: settings.landmark_detail,
+            facade_variation: settings.facade_variation,
+            roof_variation: settings.roof_variation,
+            vegetation_visible: settings.vegetation_visible,
+            vegetation_density: settings.vegetation_density,
+            synthetic_tree_cap: settings.synthetic_tree_cap,
+            vegetation_max_distance: settings.vegetation_max_distance,
+            bike_ped_overlay: settings.bike_ped_overlay,
+        }
+    }
+
+    pub fn to_visual_detail_settings(&self) -> crate::visual_detail::VisualDetailSettings {
+        let mut settings = crate::visual_detail::VisualDetailSettings {
+            preset: self.preset,
+            landmark_detail: self.landmark_detail,
+            facade_variation: self.facade_variation,
+            roof_variation: self.roof_variation,
+            vegetation_visible: self.vegetation_visible,
+            vegetation_density: self.vegetation_density,
+            synthetic_tree_cap: self.synthetic_tree_cap,
+            vegetation_max_distance: self.vegetation_max_distance,
+            bike_ped_overlay: self.bike_ped_overlay,
+            reload_required: false,
+        };
+        settings.clamp();
+        settings
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -183,6 +239,41 @@ mod tests {
     }
 
     #[test]
+    fn visual_detail_prefs_round_trip_to_json_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("prefs.json");
+        let prefs = UserPrefs {
+            visual_detail: VisualDetailPrefs {
+                preset: crate::visual_detail::VisualPreset::Showcase,
+                landmark_detail: crate::visual_detail::LandmarkDetail::Showcase,
+                facade_variation: 0.9,
+                roof_variation: 0.8,
+                vegetation_visible: true,
+                vegetation_density: 2.25,
+                synthetic_tree_cap: 420,
+                vegetation_max_distance: 7600.0,
+                bike_ped_overlay: true,
+            },
+            ..Default::default()
+        };
+
+        save_user_prefs_to_path(&prefs, &path).unwrap();
+        let loaded = load_user_prefs_from_path(&path).unwrap();
+
+        assert_eq!(loaded.visual_detail, prefs.visual_detail);
+        let settings = loaded.visual_detail.to_visual_detail_settings();
+        assert_eq!(
+            settings.preset,
+            crate::visual_detail::VisualPreset::Showcase
+        );
+        assert_eq!(settings.vegetation_density, 2.25);
+        assert_eq!(settings.synthetic_tree_cap, 420);
+        assert_eq!(settings.vegetation_max_distance, 7600.0);
+        assert!(settings.bike_ped_overlay);
+        assert!(!settings.reload_required);
+    }
+
+    #[test]
     fn minimap_prefs_round_trip_to_json_file() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("prefs.json");
@@ -201,6 +292,7 @@ mod tests {
                 pitch: 5.0,
             }),
             settings_sections: SettingsSectionsPrefs::default(),
+            visual_detail: VisualDetailPrefs::default(),
         };
 
         save_user_prefs_to_path(&prefs, &path).unwrap();

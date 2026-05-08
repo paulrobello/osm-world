@@ -49,7 +49,7 @@ impl Default for MinimapState {
             visible: true,
             zoom: 500.0,
             rotate_with_camera: false,
-            show_tile_debug: true,
+            show_tile_debug: false,
             texture_id: None,
         }
     }
@@ -379,6 +379,13 @@ mod tests {
         assert!(west.x < -0.99, "west should be left, got {west:?}");
         assert!(east.y.abs() < 0.001);
         assert!(west.y.abs() < 0.001);
+    }
+
+    #[test]
+    fn tile_debug_overlay_starts_hidden() {
+        let state = MinimapState::default();
+
+        assert!(!state.show_tile_debug);
     }
 
     #[test]

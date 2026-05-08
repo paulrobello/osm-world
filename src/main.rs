@@ -208,8 +208,8 @@ struct Args {
     debug_shadow_cascades: bool,
 
     /// Visual detail preset to use at startup
-    #[arg(long, value_enum, default_value = "balanced")]
-    visual_preset: VisualPreset,
+    #[arg(long, value_enum)]
+    visual_preset: Option<VisualPreset>,
 
     /// Landmark rendering detail override
     #[arg(long, value_enum)]
@@ -273,7 +273,15 @@ fn main() -> anyhow::Result<()> {
     log::info!("osm-world starting");
     validate_spawn_pair(&args)?;
 
-    let mut visual_detail = VisualDetailSettings::from_preset(args.visual_preset);
+    let visual_detail_overridden = args.visual_preset.is_some()
+        || args.landmark_detail.is_some()
+        || args.facade_variation.is_some()
+        || args.roof_variation.is_some()
+        || args.vegetation_density.is_some()
+        || args.synthetic_tree_cap.is_some()
+        || args.vegetation_distance.is_some();
+    let mut visual_detail =
+        VisualDetailSettings::from_preset(args.visual_preset.unwrap_or(VisualPreset::Balanced));
     if let Some(landmark_detail) = args.landmark_detail {
         visual_detail.landmark_detail = landmark_detail;
     }
@@ -353,6 +361,7 @@ fn main() -> anyhow::Result<()> {
             max_uploaded_mb: args.max_uploaded_mb,
         },
         visual_detail,
+        visual_detail_overridden,
     });
     event_loop.run_app(&mut app)?;
 
@@ -515,7 +524,7 @@ mod tests {
 
         assert_eq!(
             args.visual_preset,
-            osm_world::visual_detail::VisualPreset::Showcase
+            Some(osm_world::visual_detail::VisualPreset::Showcase)
         );
         assert_eq!(
             args.landmark_detail,

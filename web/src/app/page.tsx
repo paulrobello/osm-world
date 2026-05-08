@@ -21,7 +21,7 @@ import {
   type SourceControls,
 } from '@/lib/api';
 import { BBOX_PRESETS, type BboxPreset } from '@/lib/bboxPresets';
-import { buildCommandVariants } from '@/lib/commandVariants';
+import { buildCommandVariants, rendererOptionArgs } from '@/lib/commandVariants';
 import { errorHintForMessage } from '@/lib/errorHints';
 import {
   DEFAULT_RENDERER_OPTIONS,
@@ -586,6 +586,7 @@ export default function Home() {
         srtm_dir: preparedArea.srtm_dir,
         spawn_lat: preparedArea.spawn_lat,
         spawn_lon: preparedArea.spawn_lon,
+        extra_args: rendererOptionArgs(rendererOptions),
       });
       setLaunchStatus('launched');
       setLaunchMessage(`Renderer launched as pid ${result.pid}.`);

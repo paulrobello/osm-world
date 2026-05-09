@@ -83,32 +83,34 @@ pub fn render(
         .create_command_encoder(&CommandEncoderDescriptor {
             label: Some("shadow render encoder"),
         });
-    for (cascade_index, cascade_view) in state.shadow_bg.cascade_views.iter().enumerate() {
-        let mut shadow_pass = shadow_encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("shadow render pass"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                view: cascade_view,
-                depth_ops: Some(Operations {
-                    load: LoadOp::Clear(1.0),
-                    store: StoreOp::Store,
+    if state.scene.index_count > 0 {
+        for (cascade_index, cascade_view) in state.shadow_bg.cascade_views.iter().enumerate() {
+            let mut shadow_pass = shadow_encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("shadow render pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+                    view: cascade_view,
+                    depth_ops: Some(Operations {
+                        load: LoadOp::Clear(1.0),
+                        store: StoreOp::Store,
+                    }),
+                    stencil_ops: None,
                 }),
-                stencil_ops: None,
-            }),
-            multiview_mask: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        shadow_pass.set_pipeline(&state.shadow_pipeline.pipeline);
-        shadow_pass.set_bind_group(0, &state.shadow_bg.pass_groups[cascade_index], &[]);
-        shadow_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
-        shadow_pass.set_index_buffer(
-            state.scene.shadow_index_buffer.slice(..),
-            IndexFormat::Uint32,
-        );
-        shadow_pass.draw_indexed(0..state.scene.shadow_index_count, 0, 0..1);
+                multiview_mask: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            shadow_pass.set_pipeline(&state.shadow_pipeline.pipeline);
+            shadow_pass.set_bind_group(0, &state.shadow_bg.pass_groups[cascade_index], &[]);
+            shadow_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
+            shadow_pass.set_index_buffer(
+                state.scene.shadow_index_buffer.slice(..),
+                IndexFormat::Uint32,
+            );
+            shadow_pass.draw_indexed(0..state.scene.shadow_index_count, 0, 0..1);
+        }
+        state.queue.submit(std::iter::once(shadow_encoder.finish()));
     }
-    state.queue.submit(std::iter::once(shadow_encoder.finish()));
 
     let mut encoder = state
         .device

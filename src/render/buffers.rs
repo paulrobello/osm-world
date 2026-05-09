@@ -74,21 +74,37 @@ impl SceneBuffers {
         let shadow_indices = shadow_index_data(&vertices, &indices);
         let render_layers = render_layer_index_data(&vertices, &indices);
 
+        let vertex_contents: &[u8] = if vertices.is_empty() {
+            &[0]
+        } else {
+            bytemuck::cast_slice(&vertices)
+        };
+        let index_contents: &[u8] = if indices.is_empty() {
+            &[0]
+        } else {
+            bytemuck::cast_slice(&indices)
+        };
+        let shadow_contents: &[u8] = if shadow_indices.buffer_indices.is_empty() {
+            &[0]
+        } else {
+            bytemuck::cast_slice(&shadow_indices.buffer_indices)
+        };
+
         let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
             label: Some("scene vertex buffer"),
-            contents: bytemuck::cast_slice(&vertices),
+            contents: vertex_contents,
             usage: BufferUsages::VERTEX,
         });
 
         let index_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
             label: Some("scene index buffer"),
-            contents: bytemuck::cast_slice(&indices),
+            contents: index_contents,
             usage: BufferUsages::INDEX,
         });
 
         let shadow_index_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
             label: Some("shadow caster index buffer"),
-            contents: bytemuck::cast_slice(&shadow_indices.buffer_indices),
+            contents: shadow_contents,
             usage: BufferUsages::INDEX,
         });
 

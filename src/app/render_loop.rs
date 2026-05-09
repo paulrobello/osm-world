@@ -9,19 +9,8 @@ use crate::render::shadow_bind_group::LightUniforms;
 use crate::ui::EguiState;
 
 pub struct RenderUiState<'a> {
-    pub atmosphere: &'a mut crate::atmosphere::AtmosphereSettings,
-    pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
-    pub show_settings: &'a mut bool,
-    pub minimap: &'a mut crate::ui::minimap::MinimapState,
-    pub settings_sections: &'a mut crate::app::prefs::SettingsSectionsPrefs,
-    pub poi_labels: &'a mut crate::ui::poi_labels::PoiLabelSettings,
-    pub address_labels: &'a mut crate::ui::poi_labels::AddressLabelSettings,
-    pub street_sign_labels: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
-    pub search: &'a mut crate::ui::search::SearchState,
-    pub inspect: &'a mut crate::ui::inspect::InspectState,
-    pub performance: &'a mut crate::app::PerformanceState,
-    pub area_switch: &'a mut crate::app::AreaSwitchState,
-    pub visual_detail: &'a mut crate::visual_detail::VisualDetailSettings,
+    pub ui: &'a mut crate::app::AppUiState,
+    pub render: &'a mut crate::app::AppRenderState,
 }
 
 pub fn render(
@@ -49,14 +38,14 @@ pub fn render(
         .create_view(&TextureViewDescriptor::default());
 
     let camera_uniforms = state.camera.uniforms_with_visual_detail(
-        ui_state.day_cycle,
-        ui_state.atmosphere,
-        ui_state.visual_detail,
+        &ui_state.render.day_cycle,
+        &ui_state.render.atmosphere,
+        &ui_state.render.visual_detail,
     );
     state.camera_bg.update(&state.queue, &camera_uniforms);
 
-    let light_dir = crate::atmosphere::dominant_light_direction(ui_state.day_cycle.time_of_day);
-    let cascades = if ui_state.day_cycle.real_clock || !ui_state.day_cycle.paused {
+    let light_dir = crate::atmosphere::dominant_light_direction(ui_state.render.day_cycle.time_of_day);
+    let cascades = if ui_state.render.day_cycle.real_clock || !ui_state.render.day_cycle.paused {
         state.camera.shadow_cascades_for_dynamic_light(light_dir)
     } else {
         state.camera.shadow_cascades(light_dir)
@@ -74,7 +63,7 @@ pub fn render(
         ],
         shadow_pass_params: [
             0,
-            ui_state.atmosphere.shadow_cascade_debug as u32,
+            ui_state.render.atmosphere.shadow_cascade_debug as u32,
             SHADOW_CASCADE_COUNT as u32,
             0,
         ],
@@ -182,14 +171,14 @@ pub fn render(
     }
 
     // Minimap pass
-    if ui_state.minimap.visible {
+    if ui_state.ui.minimap.visible {
         let minimap_uniforms = state.minimap_target.uniforms_with_visual_detail(
             &state.camera,
-            ui_state.day_cycle,
-            ui_state.atmosphere,
-            ui_state.visual_detail,
-            ui_state.minimap.zoom,
-            ui_state.minimap.rotate_with_camera,
+            &ui_state.render.day_cycle,
+            &ui_state.render.atmosphere,
+            &ui_state.render.visual_detail,
+            ui_state.ui.minimap.zoom,
+            ui_state.ui.minimap.rotate_with_camera,
         );
         state
             .minimap_target
@@ -277,8 +266,8 @@ pub fn render(
         pixels_per_point: state.window.scale_factor() as f32,
     };
 
-    if ui_state.minimap.texture_id.is_none() {
-        ui_state.minimap.texture_id = Some(egui_state.renderer.register_native_texture(
+    if ui_state.ui.minimap.texture_id.is_none() {
+        ui_state.ui.minimap.texture_id = Some(egui_state.renderer.register_native_texture(
             &state.device,
             &state.minimap_target.color_view,
             wgpu::FilterMode::Linear,
@@ -299,61 +288,61 @@ pub fn render(
             ctx,
             &state.camera,
             camera_lat_lon,
-            ui_state.day_cycle,
-            ui_state.performance,
+            &ui_state.render.day_cycle,
+            &ui_state.render.performance,
         );
         crate::ui::poi_labels::draw(
             ctx,
             &state.camera,
             &state.poi_labels,
-            ui_state.poi_labels,
+            &mut ui_state.ui.poi_labels,
             viewport_size,
         );
         crate::ui::poi_labels::draw_addresses(
             ctx,
             &state.camera,
             &state.address_labels,
-            ui_state.address_labels,
+            &mut ui_state.ui.address_labels,
             viewport_size,
         );
         crate::ui::poi_labels::draw_street_signs(
             ctx,
             &state.camera,
             &state.street_sign_labels,
-            ui_state.street_sign_labels,
+            &mut ui_state.ui.street_sign_labels,
             viewport_size,
         );
-        if *ui_state.show_settings {
+        if ui_state.ui.show_settings {
             crate::ui::settings::draw(
                 ctx,
                 crate::ui::settings::SettingsDrawState {
-                    atmosphere: ui_state.atmosphere,
-                    day_cycle: ui_state.day_cycle,
-                    performance: ui_state.performance,
-                    minimap: ui_state.minimap,
-                    settings_sections: ui_state.settings_sections,
+                    atmosphere: &mut ui_state.render.atmosphere,
+                    day_cycle: &mut ui_state.render.day_cycle,
+                    performance: &mut ui_state.render.performance,
+                    minimap: &mut ui_state.ui.minimap,
+                    settings_sections: &mut ui_state.ui.settings_sections,
                     label_settings: crate::ui::settings::LabelSettingsMut {
-                        poi: ui_state.poi_labels,
-                        addresses: ui_state.address_labels,
-                        street_signs: ui_state.street_sign_labels,
+                        poi: &mut ui_state.ui.poi_labels,
+                        addresses: &mut ui_state.ui.address_labels,
+                        street_signs: &mut ui_state.ui.street_sign_labels,
                     },
-                    area_switch: ui_state.area_switch,
-                    visual_detail: ui_state.visual_detail,
-                    show: ui_state.show_settings,
+                    area_switch: &mut ui_state.ui.area_switch,
+                    visual_detail: &mut ui_state.render.visual_detail,
+                    show: &mut ui_state.ui.show_settings,
                 },
             );
         }
         crate::ui::search::draw(
             ctx,
-            ui_state.search,
+            &mut ui_state.ui.search,
             &state.search_entries,
             &mut state.camera,
         );
-        crate::ui::inspect::draw(ctx, ui_state.inspect);
+        crate::ui::inspect::draw(ctx, &mut ui_state.ui.inspect);
         crate::ui::minimap::draw(
             ctx,
             &state.camera,
-            ui_state.minimap,
+            &mut ui_state.ui.minimap,
             &state.tile_debug_entries,
             state.tile_debug_tile_size,
         );

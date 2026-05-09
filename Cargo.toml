@@ -7,8 +7,11 @@ description = "3D city renderer using OpenStreetMap data and WGPU"
 authors = ["Paul Robello <probello@gmail.com>"]
 license = "MIT"
 
+[workspace]
+members = ["crates/par-osm-rust"]
+
 [dependencies]
-par-osm-rust = { path = "../par-osm-rust" }
+par-osm-rust = { path = "crates/par-osm-rust" }
 axum = "0.8.8"
 tokio = { version = "1.50.0", features = ["full"] }
 tower-http = { version = "0.6.8", features = ["cors"] }

@@ -124,25 +124,11 @@ impl PerformanceState {
     }
 }
 
-pub struct App {
-    pub state: Option<AppState>,
-    pub egui: Option<crate::ui::EguiState>,
-    pub controller: CameraController,
-    pub last_frame_time: std::time::Instant,
-    pub opts: AppOptions,
-    pub render_start: Option<std::time::Instant>,
-    pub screenshot_taken: bool,
-    pub atmosphere: crate::atmosphere::AtmosphereSettings,
-    pub day_cycle: crate::atmosphere::DayCycleState,
-    pub performance: PerformanceState,
+/// UI panel state: labels, search, inspect, minimap, area switch, settings toggle.
+pub struct AppUiState {
     pub show_settings: bool,
     pub minimap: crate::ui::minimap::MinimapState,
-    pub persisted_minimap: crate::app::prefs::MinimapPrefs,
-    pub persisted_camera: Option<crate::app::prefs::CameraPrefs>,
     pub settings_sections: crate::app::prefs::SettingsSectionsPrefs,
-    pub persisted_settings_sections: crate::app::prefs::SettingsSectionsPrefs,
-    pub persisted_visual_detail: crate::app::prefs::VisualDetailPrefs,
-    pub last_prefs_save: std::time::Instant,
     pub poi_labels: crate::ui::poi_labels::PoiLabelSettings,
     pub address_labels: crate::ui::poi_labels::AddressLabelSettings,
     pub street_sign_labels: crate::ui::poi_labels::StreetSignLabelSettings,
@@ -150,7 +136,36 @@ pub struct App {
     pub inspect: crate::ui::inspect::InspectState,
     pub last_cursor_pos: Option<egui::Pos2>,
     pub area_switch: AreaSwitchState,
+}
+
+/// Render pipeline state: atmosphere, day cycle, visual detail, performance metrics.
+pub struct AppRenderState {
+    pub atmosphere: crate::atmosphere::AtmosphereSettings,
+    pub day_cycle: crate::atmosphere::DayCycleState,
     pub visual_detail: crate::visual_detail::VisualDetailSettings,
+    pub performance: PerformanceState,
+    pub render_start: Option<std::time::Instant>,
+    pub screenshot_taken: bool,
+}
+
+/// Persisted preferences and save tracking.
+pub struct AppViewState {
+    pub persisted_minimap: crate::app::prefs::MinimapPrefs,
+    pub persisted_camera: Option<crate::app::prefs::CameraPrefs>,
+    pub persisted_settings_sections: crate::app::prefs::SettingsSectionsPrefs,
+    pub persisted_visual_detail: crate::app::prefs::VisualDetailPrefs,
+    pub last_prefs_save: std::time::Instant,
+}
+
+pub struct App {
+    pub state: Option<AppState>,
+    pub egui: Option<crate::ui::EguiState>,
+    pub controller: CameraController,
+    pub last_frame_time: std::time::Instant,
+    pub opts: AppOptions,
+    pub ui: AppUiState,
+    pub render: AppRenderState,
+    pub view: AppViewState,
 }
 
 impl App {
@@ -204,28 +219,34 @@ impl App {
             egui: None,
             controller: CameraController::new(),
             last_frame_time: std::time::Instant::now(),
-            show_settings: true,
             opts,
-            render_start: None,
-            screenshot_taken: false,
-            atmosphere,
-            day_cycle,
-            performance: PerformanceState::default(),
-            minimap,
-            persisted_minimap: prefs.minimap,
-            persisted_camera: prefs.camera,
-            settings_sections: prefs.settings_sections.clone(),
-            persisted_settings_sections: prefs.settings_sections,
-            persisted_visual_detail: prefs.visual_detail,
-            last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
-            poi_labels,
-            address_labels,
-            street_sign_labels,
-            search: crate::ui::search::SearchState::default(),
-            inspect: crate::ui::inspect::InspectState::default(),
-            last_cursor_pos: None,
-            area_switch,
-            visual_detail,
+            ui: AppUiState {
+                show_settings: true,
+                minimap,
+                settings_sections: prefs.settings_sections.clone(),
+                poi_labels,
+                address_labels,
+                street_sign_labels,
+                search: crate::ui::search::SearchState::default(),
+                inspect: crate::ui::inspect::InspectState::default(),
+                last_cursor_pos: None,
+                area_switch,
+            },
+            render: AppRenderState {
+                atmosphere,
+                day_cycle,
+                visual_detail,
+                performance: PerformanceState::default(),
+                render_start: None,
+                screenshot_taken: false,
+            },
+            view: AppViewState {
+                persisted_minimap: prefs.minimap,
+                persisted_camera: prefs.camera,
+                persisted_settings_sections: prefs.settings_sections,
+                persisted_visual_detail: prefs.visual_detail,
+                last_prefs_save: std::time::Instant::now() - PREFS_SAVE_INTERVAL,
+            },
         }
     }
 }
@@ -315,7 +336,7 @@ mod tests {
             visual_detail_overridden: false,
         });
 
-        assert!(app.show_settings);
+        assert!(app.ui.show_settings);
     }
 
     #[test]

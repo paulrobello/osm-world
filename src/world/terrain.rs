@@ -5,6 +5,19 @@ use crate::render::vertex::{Vertex, feature};
 
 const GRID_SPACING: f32 = 10.0; // metres between grid vertices
 
+/// Mutable output buffers for terrain mesh generation.
+pub struct MeshOutput<'a> {
+    pub vertices: &'a mut Vec<Vertex>,
+    pub indices: &'a mut Vec<u32>,
+}
+
+/// Shared terrain context: coordinate converter, elevation data, and road cuts.
+pub struct TerrainContext<'a> {
+    pub conv: &'a CoordConverter,
+    pub elevation: Option<&'a ElevationData>,
+    pub cuts: &'a [TerrainCut],
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainCut {
     pub start: (f32, f32),
@@ -53,43 +66,33 @@ fn smoothstep(t: f32) -> f32 {
 ///
 /// Creates a regular grid, samples elevation at each vertex, and computes
 /// per-vertex normals via finite differences.
-#[allow(clippy::too_many_arguments)]
 pub fn generate_terrain(
     min_lat: f64,
     min_lon: f64,
     max_lat: f64,
     max_lon: f64,
-    conv: &CoordConverter,
-    elevation: Option<&ElevationData>,
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
+    ctx: &TerrainContext<'_>,
+    output: &mut MeshOutput<'_>,
 ) {
     generate_terrain_with_cuts(
         min_lat,
         min_lon,
         max_lat,
         max_lon,
-        conv,
-        elevation,
-        &[],
-        verts,
-        idxs,
+        ctx,
+        output,
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn generate_terrain_with_cuts(
     min_lat: f64,
     min_lon: f64,
     max_lat: f64,
     max_lon: f64,
-    conv: &CoordConverter,
-    elevation: Option<&ElevationData>,
-    cuts: &[TerrainCut],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
+    ctx: &TerrainContext<'_>,
+    output: &mut MeshOutput<'_>,
 ) {
-    let (world_w, world_d) = conv.bbox_world_size(min_lat, min_lon, max_lat, max_lon);
+    let (world_w, world_d) = ctx.conv.bbox_world_size(min_lat, min_lon, max_lat, max_lon);
 
     let cols = (world_w / GRID_SPACING).ceil() as usize + 1;
     let rows = (world_d / GRID_SPACING).ceil() as usize + 1;
@@ -100,8 +103,8 @@ pub fn generate_terrain_with_cuts(
 
     // Grid origin in world space: (x, z) where z = -(lat - origin_lat) * scale
     // max_lat -> most negative z, min_lat -> least negative z
-    let (min_x, min_z) = conv.to_world_xz(max_lat, min_lon);
-    let (_max_x, _max_z) = conv.to_world_xz(min_lat, max_lon);
+    let (min_x, min_z) = ctx.conv.to_world_xz(max_lat, min_lon);
+    let (_max_x, _max_z) = ctx.conv.to_world_xz(min_lat, max_lon);
 
     append_terrain_grid(
         min_x,
@@ -109,11 +112,8 @@ pub fn generate_terrain_with_cuts(
         cols,
         rows,
         GRID_SPACING,
-        conv,
-        elevation,
-        cuts,
-        verts,
-        idxs,
+        ctx,
+        output,
     );
 }
 
@@ -122,17 +122,14 @@ pub fn generate_terrain_with_cuts(
 /// Creates a regular grid whose X/Z bounds come from the supplied rectangle,
 /// samples elevation at each vertex, and computes per-vertex normals via finite
 /// differences.
-#[allow(clippy::too_many_arguments)]
 pub fn generate_terrain_for_world_rect(
     min_x: f32,
     min_z: f32,
     max_x: f32,
     max_z: f32,
     grid_spacing: f32,
-    conv: &CoordConverter,
-    elevation: Option<&ElevationData>,
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
+    ctx: &TerrainContext<'_>,
+    output: &mut MeshOutput<'_>,
 ) {
     generate_terrain_for_world_rect_with_cuts(
         min_x,
@@ -140,26 +137,19 @@ pub fn generate_terrain_for_world_rect(
         max_x,
         max_z,
         grid_spacing,
-        conv,
-        elevation,
-        &[],
-        verts,
-        idxs,
+        ctx,
+        output,
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn generate_terrain_for_world_rect_with_cuts(
     min_x: f32,
     min_z: f32,
     max_x: f32,
     max_z: f32,
     grid_spacing: f32,
-    conv: &CoordConverter,
-    elevation: Option<&ElevationData>,
-    cuts: &[TerrainCut],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
+    ctx: &TerrainContext<'_>,
+    output: &mut MeshOutput<'_>,
 ) {
     let cols = ((max_x - min_x) / grid_spacing).ceil() as usize + 1;
     let rows = ((max_z - min_z) / grid_spacing).abs().ceil() as usize + 1;
@@ -174,26 +164,19 @@ pub fn generate_terrain_for_world_rect_with_cuts(
         cols,
         rows,
         grid_spacing,
-        conv,
-        elevation,
-        cuts,
-        verts,
-        idxs,
+        ctx,
+        output,
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_terrain_grid(
     min_x: f32,
     min_z: f32,
     cols: usize,
     rows: usize,
     grid_spacing: f32,
-    conv: &CoordConverter,
-    elevation: Option<&ElevationData>,
-    cuts: &[TerrainCut],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
+    ctx: &TerrainContext<'_>,
+    output: &mut MeshOutput<'_>,
 ) {
     let color = super::color::terrain_color();
 
@@ -206,14 +189,14 @@ fn append_terrain_grid(
             let z = min_z + (r as f32) * grid_spacing;
 
             // Reverse world coords to lat/lon for elevation lookup
-            let lat = conv.origin_lat - (z as f64) / 111_320.0;
-            let metres_per_deg_lon = 111_320.0 * conv.origin_lat.to_radians().cos();
-            let lon = conv.origin_lon + (x as f64) / metres_per_deg_lon;
+            let lat = ctx.conv.origin_lat - (z as f64) / 111_320.0;
+            let metres_per_deg_lon = 111_320.0 * ctx.conv.origin_lat.to_radians().cos();
+            let lon = ctx.conv.origin_lon + (x as f64) / metres_per_deg_lon;
 
-            let mut h = elevation
+            let mut h = ctx.elevation
                 .and_then(|e| e.elevation_at(lat, lon))
                 .unwrap_or(0.0) as f32;
-            for cut in cuts {
+            for cut in ctx.cuts {
                 h = cut.apply(x, z, h);
             }
 
@@ -222,7 +205,7 @@ fn append_terrain_grid(
     }
 
     // Compute normals via finite differences and emit vertices
-    let base = verts.len() as u32;
+    let base = output.vertices.len() as u32;
 
     for r in 0..rows {
         for c in 0..cols {
@@ -267,7 +250,7 @@ fn append_terrain_grid(
                 [0.0, 1.0, 0.0]
             };
 
-            verts.push(Vertex {
+            output.vertices.push(Vertex {
                 position: [x, h, z],
                 normal,
                 color,
@@ -285,13 +268,13 @@ fn append_terrain_grid(
             let i01 = base + ((r + 1) * cols + c) as u32;
             let i11 = base + ((r + 1) * cols + c + 1) as u32;
 
-            idxs.push(i00);
-            idxs.push(i01);
-            idxs.push(i10);
+            output.indices.push(i00);
+            output.indices.push(i01);
+            output.indices.push(i10);
 
-            idxs.push(i10);
-            idxs.push(i01);
-            idxs.push(i11);
+            output.indices.push(i10);
+            output.indices.push(i01);
+            output.indices.push(i11);
         }
     }
 }
@@ -303,10 +286,12 @@ mod tests {
     #[test]
     fn tile_terrain_generates_grid_for_bounds() {
         let conv = CoordConverter::new(38.0, -122.0);
+        let ctx = TerrainContext { conv: &conv, elevation: None, cuts: &[] };
         let mut verts = Vec::new();
         let mut idxs = Vec::new();
+        let mut output = MeshOutput { vertices: &mut verts, indices: &mut idxs };
         generate_terrain_for_world_rect(
-            0.0, -100.0, 100.0, 0.0, 50.0, &conv, None, &mut verts, &mut idxs,
+            0.0, -100.0, 100.0, 0.0, 50.0, &ctx, &mut output,
         );
         assert_eq!(verts.len(), 9);
         assert_eq!(idxs.len(), 24);
@@ -315,8 +300,6 @@ mod tests {
     #[test]
     fn tunnel_cut_lowers_only_vertices_inside_portal_cut() {
         let conv = CoordConverter::new(38.0, -122.0);
-        let mut verts = Vec::new();
-        let mut idxs = Vec::new();
         let cuts = [TerrainCut {
             start: (0.0, 0.0),
             end: (30.0, 0.0),
@@ -324,9 +307,13 @@ mod tests {
             floor_y: -4.8,
             blend_width: 8.0,
         }];
+        let ctx = TerrainContext { conv: &conv, elevation: None, cuts: &cuts };
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        let mut output = MeshOutput { vertices: &mut verts, indices: &mut idxs };
 
         generate_terrain_for_world_rect_with_cuts(
-            0.0, -40.0, 80.0, 40.0, 10.0, &conv, None, &cuts, &mut verts, &mut idxs,
+            0.0, -40.0, 80.0, 40.0, 10.0, &ctx, &mut output,
         );
 
         let centre = verts

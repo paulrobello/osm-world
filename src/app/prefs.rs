@@ -1,8 +1,15 @@
+//! Persisted user preferences: minimap, camera, visual detail, and settings panel state.
+//!
+//! Preferences are stored as JSON at `~/.config/osm-world/prefs.json`
+//! (overridable via `OSM_WORLD_PREFS_PATH`). Preferences are loaded at startup
+//! and saved periodically when changes are detected.
+
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+/// Top-level persisted preferences, serialized as JSON.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct UserPrefs {
@@ -12,6 +19,7 @@ pub struct UserPrefs {
     pub visual_detail: VisualDetailPrefs,
 }
 
+/// Persisted visual detail settings, convertible to and from [`VisualDetailSettings`](crate::visual_detail::VisualDetailSettings).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct VisualDetailPrefs {
@@ -67,6 +75,7 @@ impl VisualDetailPrefs {
     }
 }
 
+/// Tracks which settings panel sections are expanded in the UI.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct SettingsSectionsPrefs {
@@ -99,6 +108,7 @@ impl SettingsSectionsPrefs {
     }
 }
 
+/// Persisted minimap settings: visibility, zoom, rotation, and tile debug overlay.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct MinimapPrefs {
@@ -133,6 +143,7 @@ impl MinimapPrefs {
     }
 }
 
+/// Persisted camera position and orientation.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CameraPrefs {
     pub x: f32,
@@ -160,10 +171,12 @@ impl CameraPrefs {
     }
 }
 
+/// Loads user preferences from disk, returning defaults on failure.
 pub fn load_user_prefs() -> UserPrefs {
     load_user_prefs_from_path(&prefs_path()).unwrap_or_default()
 }
 
+/// Saves user preferences to disk atomically.
 pub fn save_user_prefs(prefs: &UserPrefs) -> anyhow::Result<()> {
     save_user_prefs_to_path(prefs, &prefs_path())
 }

@@ -227,16 +227,22 @@ fn append_world_mesh(
 
     // Terrain
     let terrain_cuts = terrain_cuts_for_roads(&source.roads);
+    let terrain_ctx = crate::world::terrain::TerrainContext {
+        conv: &source.conv,
+        elevation: source.elevation.as_ref(),
+        cuts: &terrain_cuts,
+    };
+    let mut terrain_output = crate::world::terrain::MeshOutput {
+        vertices: verts,
+        indices: idxs,
+    };
     crate::world::terrain::generate_terrain_with_cuts(
         source.min_lat,
         source.min_lon,
         source.max_lat,
         source.max_lon,
-        &source.conv,
-        source.elevation.as_ref(),
-        &terrain_cuts,
-        verts,
-        idxs,
+        &terrain_ctx,
+        &mut terrain_output,
     );
 
     // Landuse
@@ -476,19 +482,25 @@ pub fn generate_streamed_startup_mesh(
     let road_refs = super::geometry::feature_indices_intersecting_tiles(&source.roads, &rects);
     let terrain_cuts = terrain_cuts_for_road_refs(source, &road_refs);
 
+    let terrain_ctx = crate::world::terrain::TerrainContext {
+        conv: &source.conv,
+        elevation: source.elevation.as_ref(),
+        cuts: &terrain_cuts,
+    };
     for coord in &coords {
         let rect = coord.rect(tile_size);
+        let mut terrain_output = crate::world::terrain::MeshOutput {
+            vertices: &mut vertices,
+            indices: &mut indices,
+        };
         crate::world::terrain::generate_terrain_for_world_rect_with_cuts(
             rect.min_x,
             rect.min_z,
             rect.max_x,
             rect.max_z,
             crate::stream::LodConfig::terrain_spacing(crate::stream::TileLod::Near),
-            &source.conv,
-            source.elevation.as_ref(),
-            &terrain_cuts,
-            &mut vertices,
-            &mut indices,
+            &terrain_ctx,
+            &mut terrain_output,
         );
     }
 
@@ -620,17 +632,23 @@ fn generate_tile_lod_mesh(
     let rect = coord.rect(tile_size);
 
     let terrain_cuts = terrain_cuts_for_road_refs(source, &refs.roads);
+    let terrain_ctx = crate::world::terrain::TerrainContext {
+        conv: &source.conv,
+        elevation: source.elevation.as_ref(),
+        cuts: &terrain_cuts,
+    };
+    let mut terrain_output = crate::world::terrain::MeshOutput {
+        vertices: &mut vertices,
+        indices: &mut indices,
+    };
     crate::world::terrain::generate_terrain_for_world_rect_with_cuts(
         rect.min_x,
         rect.min_z,
         rect.max_x,
         rect.max_z,
         crate::stream::LodConfig::terrain_spacing(lod),
-        &source.conv,
-        source.elevation.as_ref(),
-        &terrain_cuts,
-        &mut vertices,
-        &mut indices,
+        &terrain_ctx,
+        &mut terrain_output,
     );
 
     append_tile_features_mesh(

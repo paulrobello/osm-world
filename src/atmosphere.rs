@@ -1,9 +1,20 @@
+//! Day cycle, sun/moon direction, lighting, and atmospheric settings.
+//!
+//! Time of day is expressed as a fraction of 24 hours: 0.0 is midnight,
+//! 0.5 is noon, and 1.0 wraps back to midnight. The `DAY_CYCLE_DURATION`
+//! constant controls how many real seconds one full day cycle takes when
+//! the animation is not paused and not synced to the wall clock.
+
 use chrono::Timelike;
 
+/// Duration of one full day-night cycle in real seconds (when animated).
 pub const DAY_CYCLE_DURATION: f32 = 120.0;
+/// Default time of day as a 0.0-1.0 fraction (14:00 / 24 = 0.5833).
 pub const DEFAULT_TIME_OF_DAY: f32 = 14.0 / 24.0;
+/// Light intensity multiplier used when the moon is the dominant light source.
 pub const MOON_LIGHT_INTENSITY: f32 = 0.25;
 
+/// Atmospheric and visual settings controlling fog, clouds, sky colors, and shadow debug.
 #[derive(Clone, Debug)]
 pub struct AtmosphereSettings {
     pub ambient_light: f32,
@@ -37,6 +48,7 @@ impl Default for AtmosphereSettings {
     }
 }
 
+/// Tracks the current time of day, animation state, and clock mode.
 #[derive(Clone, Debug)]
 pub struct DayCycleState {
     pub time_of_day: f32,
@@ -57,10 +69,16 @@ impl Default for DayCycleState {
 }
 
 impl DayCycleState {
+    /// Advances the time of day by `dt` seconds.
+    ///
+    /// When `real_clock` is true, overrides the time with the local wall clock.
+    /// When paused and not in real-clock mode, the time does not advance.
+    /// `animation_time` always advances (used for cloud and shader animations).
     pub fn update(&mut self, dt: f32) {
         self.update_with_clock(dt, local_clock_time_of_day);
     }
 
+    /// Like `update`, but accepts a custom clock function (testable).
     pub fn update_with_clock(&mut self, dt: f32, clock_time_of_day: impl FnOnce() -> f32) {
         if self.real_clock {
             self.time_of_day = clock_time_of_day().rem_euclid(1.0);
@@ -71,21 +89,27 @@ impl DayCycleState {
     }
 }
 
+/// Returns the current local wall-clock time as a 0.0-1.0 fraction of 24 hours.
 pub fn local_clock_time_of_day() -> f32 {
     let now = chrono::Local::now();
     time_of_day_from_hms_nanos(now.hour(), now.minute(), now.second(), now.nanosecond())
 }
 
+/// Converts hours, minutes, and seconds to a 0.0-1.0 time-of-day fraction.
 pub fn time_of_day_from_hms(hour: u32, minute: u32, second: u32) -> f32 {
     time_of_day_from_hms_nanos(hour, minute, second, 0)
 }
 
+/// Converts hours, minutes, seconds, and nanoseconds to a 0.0-1.0 time-of-day fraction.
 pub fn time_of_day_from_hms_nanos(hour: u32, minute: u32, second: u32, nanosecond: u32) -> f32 {
     let seconds = (hour % 24) * 3600 + (minute % 60) * 60 + (second % 60);
     let fractional_second = (nanosecond % 1_000_000_000) as f32 / 1_000_000_000.0;
     (seconds as f32 + fractional_second) / 86_400.0
 }
 
+/// Returns the sun direction as a unit-ish vector for the given time-of-day fraction.
+///
+/// `time_of_day` is 0.0-1.0 where 0.25 is sunrise and 0.75 is sunset.
 pub fn sun_direction(time_of_day: f32) -> [f32; 3] {
     let angle = time_of_day * 2.0 * std::f32::consts::PI;
     let y = -angle.cos();
@@ -94,16 +118,21 @@ pub fn sun_direction(time_of_day: f32) -> [f32; 3] {
     [xz / len, y / len, 0.3 / len]
 }
 
+/// Returns the moon direction (opposite of the sun) for the given time-of-day fraction.
 pub fn moon_direction(time_of_day: f32) -> [f32; 3] {
     let sun = sun_direction(time_of_day);
     [-sun[0], -sun[1], -sun[2]]
 }
 
+/// Returns a 0.0-1.0 daylight factor based on sun elevation.
+///
+/// Uses a smoothstep transition between -0.2 and 0.3 sun elevation.
 pub fn daylight_factor(time_of_day: f32) -> f32 {
     let sun_y = sun_direction(time_of_day)[1];
     smoothstep(-0.2, 0.3, sun_y)
 }
 
+/// Returns the direction of the dominant light source (sun above horizon, moon below).
 pub fn dominant_light_direction(time_of_day: f32) -> [f32; 3] {
     let sun = sun_direction(time_of_day);
     if sun[1] >= 0.0 {
@@ -113,6 +142,8 @@ pub fn dominant_light_direction(time_of_day: f32) -> [f32; 3] {
     }
 }
 
+/// Returns the dominant light intensity: daylight factor when the sun is up,
+/// or a reduced moonlight factor when the sun is below the horizon.
 pub fn dominant_light_intensity(time_of_day: f32) -> f32 {
     let sun = sun_direction(time_of_day);
     if sun[1] >= 0.0 {

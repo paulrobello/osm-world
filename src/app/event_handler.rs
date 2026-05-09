@@ -1,3 +1,5 @@
+//! Winit event handling: window lifecycle, input routing, and resize.
+
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;

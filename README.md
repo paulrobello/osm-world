@@ -133,7 +133,7 @@ Useful environment variables:
 | `NEXT_PUBLIC_OSM_WORLD_API_URL` | Web frontend API base URL. Defaults to `http://127.0.0.1:3030`. |
 | `PAR_OSM_OVERPASS_CACHE_DIR` | Override the shared Overpass cache directory used by `par-osm-rust`. |
 | `PAR_OSM_SRTM_CACHE_DIR` | Override the shared SRTM cache directory used by `par-osm-rust`. |
-| `OVERPASS_URL` | Override the Overpass endpoint used by source preparation. |
+| `OVERPASS_URL` | Override the Overpass endpoint used by the vendored `par-osm-rust` crate for source preparation. Read at process start; changes require a restart. |
 
 ## Command-Line Options
 

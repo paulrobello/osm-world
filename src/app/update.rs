@@ -1,5 +1,11 @@
+//! Per-frame update: delta time, day cycle, camera movement, and area-switch handling.
+
 use super::App;
 
+/// Advances the application state by one frame.
+///
+/// Updates performance metrics, processes area-switch requests, advances the
+/// day cycle, moves the camera from input, and updates tile debug states.
 pub fn update(app: &mut App) {
     let now = std::time::Instant::now();
     let dt = (now - app.last_frame_time).as_secs_f32();

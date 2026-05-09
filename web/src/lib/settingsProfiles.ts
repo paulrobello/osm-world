@@ -1,7 +1,15 @@
+/**
+ * Renderer settings profile import/export and defaults.
+ *
+ * @module settingsProfiles
+ */
+
 import { defaultFilter, defaultSourceControls, type FeatureFilter, type SourceControls } from './api';
 
+/** Visual quality preset matching the Rust `VisualPreset` enum. */
 export type VisualPreset = 'performance' | 'balanced' | 'showcase';
 
+/** Renderer options controlling visual quality, streaming, labels, and minimap. */
 export interface RendererOptions {
   timeOfDay: number;
   visualPreset: VisualPreset;
@@ -20,6 +28,7 @@ export interface RendererOptions {
   };
 }
 
+/** A complete settings profile combining filter, source controls, and renderer options. */
 export interface SettingsProfile {
   version: 1;
   name: string;
@@ -30,6 +39,7 @@ export interface SettingsProfile {
   renderer: RendererOptions;
 }
 
+/** Default renderer options: balanced preset, streaming enabled, all labels visible. */
 export const DEFAULT_RENDERER_OPTIONS: RendererOptions = {
   timeOfDay: 14,
   visualPreset: 'balanced',
@@ -61,6 +71,7 @@ function assertSettingsProfile(value: unknown): asserts value is SettingsProfile
   }
 }
 
+/** Creates a settings profile with the version field automatically set. */
 export function createSettingsProfile(input: Omit<SettingsProfile, 'version'>): SettingsProfile {
   return {
     version: 1,
@@ -68,10 +79,12 @@ export function createSettingsProfile(input: Omit<SettingsProfile, 'version'>): 
   };
 }
 
+/** Serializes a settings profile to a JSON string for export. */
 export function exportSettingsProfile(profile: SettingsProfile): string {
   return `${JSON.stringify(profile, null, 2)}\n`;
 }
 
+/** Parses and validates a JSON settings profile, filling defaults for missing fields. */
 export function importSettingsProfile(json: string): SettingsProfile {
   const parsed: unknown = JSON.parse(json);
   assertSettingsProfile(parsed);
@@ -98,6 +111,7 @@ export function importSettingsProfile(json: string): SettingsProfile {
   };
 }
 
+/** Returns the default settings profile with all defaults applied. */
 export function defaultSettingsProfile(): SettingsProfile {
   return createSettingsProfile({
     name: 'Default renderer profile',

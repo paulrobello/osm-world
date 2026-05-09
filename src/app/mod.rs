@@ -1,3 +1,12 @@
+//! Application state, startup configuration, and render-loop integration.
+//!
+//! The `app` module owns the main runtime state split into three groups:
+//! - [`AppUiState`] -- UI panel state, labels, search, minimap, area switch
+//! - [`AppRenderState`] -- atmosphere, day cycle, visual detail, performance metrics
+//! - [`AppViewState`] -- persisted preferences and save tracking
+//!
+//! [`App`] holds these groups along with the WGPU [`AppState`] and camera controller.
+
 pub mod event_handler;
 pub mod init;
 pub mod prefs;
@@ -10,6 +19,7 @@ const PREFS_SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(
 
 pub use init::AppState;
 
+/// Streaming tile configuration passed from CLI flags or defaults.
 #[derive(Clone, Debug)]
 pub struct StreamingOptions {
     pub enabled: bool,
@@ -33,6 +43,7 @@ impl Default for StreamingOptions {
     }
 }
 
+/// Tracks an in-flight area-switch request from the settings panel.
 #[derive(Clone, Debug, Default)]
 pub struct AreaSwitchState {
     pub input_path: String,
@@ -41,6 +52,7 @@ pub struct AreaSwitchState {
     pub request_load: bool,
 }
 
+/// A validated area-switch request with trimmed paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AreaSwitchRequest {
     pub input_path: String,
@@ -48,6 +60,10 @@ pub struct AreaSwitchRequest {
 }
 
 impl AreaSwitchState {
+    /// Consumes the area-switch request if one is pending.
+    ///
+    /// Trims whitespace from paths and returns `None` if the input path is empty
+    /// after trimming.
     pub fn take_request(&mut self) -> Option<AreaSwitchRequest> {
         if !self.request_load {
             return None;
@@ -69,6 +85,11 @@ impl AreaSwitchState {
     }
 }
 
+/// Startup configuration for the renderer, parsed from CLI flags.
+///
+/// Carries window size, screenshot settings, input paths, camera overrides,
+/// label/minimap flags, streaming options, and visual-detail settings.
+#[derive(Default)]
 pub struct AppOptions {
     pub window_width: f64,
     pub window_height: f64,
@@ -92,6 +113,7 @@ pub struct AppOptions {
     pub visual_detail_overridden: bool,
 }
 
+/// Smoothed frame timing and FPS display state.
 #[derive(Clone, Debug)]
 pub struct PerformanceState {
     pub show_fps: bool,
@@ -110,6 +132,7 @@ impl Default for PerformanceState {
 }
 
 impl PerformanceState {
+    /// Updates the smoothed frame time and FPS from the raw delta time.
     pub fn update(&mut self, dt: f32) {
         if dt <= 0.0 {
             return;
@@ -157,18 +180,36 @@ pub struct AppViewState {
     pub last_prefs_save: std::time::Instant,
 }
 
+/// Top-level application state for the desktop renderer.
+///
+/// Holds the WGPU state, egui integration, camera controller, startup options,
+/// and the three grouped state structs: [`AppUiState`], [`AppRenderState`],
+/// and [`AppViewState`].
 pub struct App {
+    /// WGPU device, surface, buffers, and loaded scene. `None` until `resumed`.
     pub state: Option<AppState>,
+    /// egui integration state. `None` until `resumed`.
     pub egui: Option<crate::ui::EguiState>,
+    /// Flycam input controller.
     pub controller: CameraController,
+    /// Timestamp of the previous frame for delta-time computation.
     pub last_frame_time: std::time::Instant,
+    /// Startup configuration from CLI flags.
     pub opts: AppOptions,
+    /// UI panel state: labels, search, inspect, minimap, area switch, settings toggle.
     pub ui: AppUiState,
+    /// Render pipeline state: atmosphere, day cycle, visual detail, performance metrics.
     pub render: AppRenderState,
+    /// Persisted preferences and save tracking.
     pub view: AppViewState,
 }
 
 impl App {
+    /// Creates a new `App` from the given startup options.
+    ///
+    /// Initializes the camera controller, day cycle, visual detail (preferring
+    /// persisted preferences unless CLI flags were explicitly set), label settings,
+    /// and area-switch state.
     pub fn new(opts: AppOptions) -> Self {
         let atmosphere = crate::atmosphere::AtmosphereSettings {
             shadow_cascade_debug: opts.debug_shadow_cascades,
@@ -316,24 +357,7 @@ mod tests {
         let app = App::new(AppOptions {
             window_width: 800.0,
             window_height: 600.0,
-            screenshot_path: None,
-            screenshot_delay: 0.0,
-            auto_exit_delay: None,
-            input_path: None,
-            srtm_dir: None,
-            cam_override: None,
-            show_settings: false,
-            initial_time_of_day: None,
-            real_time_of_day: false,
-            hide_poi_labels: false,
-            hide_address_labels: false,
-            hide_street_sign_labels: false,
-            hide_minimap: false,
-            rotate_minimap: false,
-            debug_shadow_cascades: false,
-            streaming: StreamingOptions::default(),
-            visual_detail: crate::visual_detail::VisualDetailSettings::default(),
-            visual_detail_overridden: false,
+            ..Default::default()
         });
 
         assert!(app.ui.show_settings);

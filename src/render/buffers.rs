@@ -3,6 +3,40 @@ use wgpu::*;
 
 use super::vertex::{Vertex, feature};
 
+/// Render layer classification for triangle batching.
+///
+/// Maps a vertex `feature_type` f32 constant to a typed layer, enabling
+/// exhaustive `match` dispatch instead of float equality chains.
+enum FeatureLayer {
+    Terrain,
+    Landuse,
+    LanduseOverlay,
+    Water,
+    RoadPath,
+    Road,
+    Railway,
+    RoadMarking,
+    Solids,
+}
+
+impl FeatureLayer {
+    fn from_f32(feature_type: f32) -> Self {
+        // Exact-match only: layered variants (ROAD_LAYERED, ROAD_MARKING_LAYERED)
+        // deliberately fall through to Solids, matching the original if/else chain.
+        match feature_type {
+            _ if feature_type == feature::TERRAIN => Self::Terrain,
+            _ if feature_type == feature::LANDUSE => Self::Landuse,
+            _ if feature_type == feature::LANDUSE_OVERLAY => Self::LanduseOverlay,
+            _ if feature_type == feature::WATER => Self::Water,
+            _ if feature_type == feature::ROAD_PATH => Self::RoadPath,
+            _ if feature_type == feature::ROAD => Self::Road,
+            _ if feature_type == feature::RAILWAY => Self::Railway,
+            _ if feature_type == feature::ROAD_MARKING => Self::RoadMarking,
+            _ => Self::Solids,
+        }
+    }
+}
+
 pub struct RenderIndexBuffer {
     pub buffer: Buffer,
     pub count: u32,
@@ -12,15 +46,15 @@ pub struct SceneBuffers {
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub index_count: u32,
-    pub terrain: RenderIndexBuffer,
-    pub landuse: RenderIndexBuffer,
-    pub landuse_overlay: RenderIndexBuffer,
-    pub water: RenderIndexBuffer,
-    pub road_path: RenderIndexBuffer,
-    pub road: RenderIndexBuffer,
-    pub railway: RenderIndexBuffer,
-    pub road_marking: RenderIndexBuffer,
-    pub solids: RenderIndexBuffer,
+    pub terrain: Option<RenderIndexBuffer>,
+    pub landuse: Option<RenderIndexBuffer>,
+    pub landuse_overlay: Option<RenderIndexBuffer>,
+    pub water: Option<RenderIndexBuffer>,
+    pub road_path: Option<RenderIndexBuffer>,
+    pub road: Option<RenderIndexBuffer>,
+    pub railway: Option<RenderIndexBuffer>,
+    pub road_marking: Option<RenderIndexBuffer>,
+    pub solids: Option<RenderIndexBuffer>,
     pub shadow_index_buffer: Buffer,
     pub shadow_index_count: u32,
 }
@@ -113,19 +147,17 @@ struct RenderLayerIndexData {
     solids: Vec<u32>,
 }
 
-fn create_render_index_buffer(device: &Device, label: &str, indices: &[u32]) -> RenderIndexBuffer {
+fn create_render_index_buffer(device: &Device, label: &str, indices: &[u32]) -> Option<RenderIndexBuffer> {
+    if indices.is_empty() {
+        return None;
+    }
     let count = indices.len() as u32;
-    let buffer_indices = if indices.is_empty() {
-        &[0][..]
-    } else {
-        indices
-    };
     let buffer = device.create_buffer_init(&util::BufferInitDescriptor {
         label: Some(label),
-        contents: bytemuck::cast_slice(buffer_indices),
+        contents: bytemuck::cast_slice(indices),
         usage: BufferUsages::INDEX,
     });
-    RenderIndexBuffer { buffer, count }
+    Some(RenderIndexBuffer { buffer, count })
 }
 
 fn render_layer_index_data(vertices: &[Vertex], indices: &[u32]) -> RenderLayerIndexData {
@@ -150,24 +182,16 @@ fn render_layer_index_data(vertices: &[Vertex], indices: &[u32]) -> RenderLayerI
             .map(|vertex| vertex.feature_type)
             .next()
             .unwrap_or(feature::BUILDING);
-        let layer = if feature_type == feature::TERRAIN {
-            &mut layers.terrain
-        } else if feature_type == feature::LANDUSE {
-            &mut layers.landuse
-        } else if feature_type == feature::LANDUSE_OVERLAY {
-            &mut layers.landuse_overlay
-        } else if feature_type == feature::WATER {
-            &mut layers.water
-        } else if feature_type == feature::ROAD_PATH {
-            &mut layers.road_path
-        } else if feature_type == feature::ROAD {
-            &mut layers.road
-        } else if feature_type == feature::RAILWAY {
-            &mut layers.railway
-        } else if feature_type == feature::ROAD_MARKING {
-            &mut layers.road_marking
-        } else {
-            &mut layers.solids
+        let layer = match FeatureLayer::from_f32(feature_type) {
+            FeatureLayer::Terrain => &mut layers.terrain,
+            FeatureLayer::Landuse => &mut layers.landuse,
+            FeatureLayer::LanduseOverlay => &mut layers.landuse_overlay,
+            FeatureLayer::Water => &mut layers.water,
+            FeatureLayer::RoadPath => &mut layers.road_path,
+            FeatureLayer::Road => &mut layers.road,
+            FeatureLayer::Railway => &mut layers.railway,
+            FeatureLayer::RoadMarking => &mut layers.road_marking,
+            FeatureLayer::Solids => &mut layers.solids,
         };
         layer.extend_from_slice(tri);
     }

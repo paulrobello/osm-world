@@ -88,60 +88,27 @@ impl WorldSource {
             }
         }
 
-        for (feature_idx, feature) in self.buildings.iter().enumerate() {
-            if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
-                index
-                    .entry(coord)
-                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                    .buildings
-                    .push(feature_idx);
-            }
+        macro_rules! index_features {
+            ($features:expr, $field:ident) => {
+                for (feature_idx, feature) in $features.iter().enumerate() {
+                    if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
+                        index
+                            .entry(coord)
+                            .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
+                            .$field
+                            .push(feature_idx);
+                    }
+                }
+            };
         }
-        for (feature_idx, feature) in self.roads.iter().enumerate() {
-            if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
-                index
-                    .entry(coord)
-                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                    .roads
-                    .push(feature_idx);
-            }
-        }
-        for (feature_idx, feature) in self.railways.iter().enumerate() {
-            if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
-                index
-                    .entry(coord)
-                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                    .railways
-                    .push(feature_idx);
-            }
-        }
-        for (feature_idx, feature) in self.waters.iter().enumerate() {
-            if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
-                index
-                    .entry(coord)
-                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                    .waters
-                    .push(feature_idx);
-            }
-        }
-        for (feature_idx, feature) in self.waterways.iter().enumerate() {
-            if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
-                index
-                    .entry(coord)
-                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                    .waterways
-                    .push(feature_idx);
-            }
-        }
-        for (feature_idx, feature) in self.landuses.iter().enumerate() {
-            if let Some(coord) = super::geometry::feature_owner_tile(feature, tile_size) {
-                index
-                    .entry(coord)
-                    .or_insert_with(crate::stream::tile::TileFeatureRefs::default)
-                    .landuses
-                    .push(feature_idx);
-            }
-        }
+
+        index_features!(self.buildings, buildings);
+        index_features!(self.roads, roads);
+        index_features!(self.railways, railways);
+        index_features!(self.waters, waters);
+        index_features!(self.waterways, waterways);
+        index_features!(self.landuses, landuses);
+
         for (feature_idx, feature) in self.point_features.iter().enumerate() {
             let coord =
                 crate::stream::TileCoord::from_world(feature.point.0, feature.point.1, tile_size);
@@ -315,6 +282,14 @@ pub fn load_world_source_with_visual_detail(
             );
         }
 
+        // Classify into a mutually-exclusive polygon category first (building,
+        // water, landuse, waterway), then into independent linear categories
+        // (road, railway). At most one clone is needed: when both a polygon
+        // category and an independent category match. When only the independent
+        // categories match, resolved is moved into the last one.
+        let matched_polygon = is_building || is_water || is_landuse
+            || (crate::world::water::is_renderable_waterway(tags) && resolved.points.len() >= 2);
+
         if is_building {
             buildings.push(resolved.clone());
         } else if is_water {
@@ -324,11 +299,14 @@ pub fn load_world_source_with_visual_detail(
         } else if crate::world::water::is_renderable_waterway(tags) && resolved.points.len() >= 2 {
             waterways.push(resolved.clone());
         }
-        if is_road {
+
+        if is_road && is_railway {
             roads.push(resolved.clone());
-        }
-        if is_railway {
             railways.push(resolved);
+        } else if is_road {
+            roads.push(if matched_polygon { resolved.clone() } else { resolved });
+        } else if is_railway {
+            railways.push(if matched_polygon { resolved.clone() } else { resolved });
         }
     }
 

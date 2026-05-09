@@ -1,5 +1,23 @@
 use wgpu::*;
 
+/// Concatenate sky_helpers.wgsl into the sky shader at the placeholder.
+const SKY_HELPERS: &str = include_str!("../../shaders/sky_helpers.wgsl");
+
+fn sky_shader_source() -> String {
+    let mut source = String::with_capacity(8192);
+    source.push_str(include_str!("../../shaders/sky.wgsl"));
+    // Insert sky helpers at the first placeholder comment
+    if let Some(pos) = source.find("// --- Sky helpers (loaded from sky_helpers.wgsl at compile time) ---") {
+        source.replace_range(pos..pos + "// --- Sky helpers (loaded from sky_helpers.wgsl at compile time) ---".len(), SKY_HELPERS);
+    }
+    // Insert fog helper at its placeholder comment
+    if let Some(pos) = source.find("// --- Fog helpers (loaded from sky_helpers.wgsl at compile time) ---") {
+        // The fog helper is already in SKY_HELPERS, so we only need to remove the placeholder
+        source.replace_range(pos..pos + "// --- Fog helpers (loaded from sky_helpers.wgsl at compile time) ---".len(), "");
+    }
+    source
+}
+
 pub struct SkyPipeline {
     pub pipeline: RenderPipeline,
 }
@@ -12,7 +30,7 @@ impl SkyPipeline {
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("sky shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/sky.wgsl").into()),
+            source: ShaderSource::Wgsl(sky_shader_source().into()),
         });
 
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {

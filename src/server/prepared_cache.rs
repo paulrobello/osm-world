@@ -11,14 +11,19 @@ use super::types::{
 };
 use super::validate::validate_cache_key;
 
+/// Returns the prepared area directory under the shared cache root.
 pub(crate) fn prepared_area_dir() -> PathBuf {
     par_osm_rust::cache::shared_cache_root().join("prepared")
 }
 
+/// Returns the metadata sidecar path for a prepared `.osm` file (`.meta.json`).
 pub(crate) fn prepared_metadata_path(osm_path: &Path) -> PathBuf {
     osm_path.with_extension("meta.json")
 }
 
+/// Reads source status and warnings from prepared cache metadata.
+///
+/// Returns `("cached_unknown", [error message])` when the metadata is missing or unreadable.
 pub(crate) fn read_prepared_cache_metadata(metadata_path: &Path) -> (String, Vec<String>) {
     match read_prepared_cache_metadata_struct(metadata_path) {
         Ok(metadata) => (metadata.source_status, metadata.warnings),
@@ -26,6 +31,9 @@ pub(crate) fn read_prepared_cache_metadata(metadata_path: &Path) -> (String, Vec
     }
 }
 
+/// Reads and deserializes the prepared cache metadata struct from a `.meta.json` file.
+///
+/// Returns `Err(message)` with a human-readable description on read or parse failure.
 pub(crate) fn read_prepared_cache_metadata_struct(
     metadata_path: &Path,
 ) -> Result<PreparedCacheMetadata, String> {
@@ -47,6 +55,7 @@ pub(crate) fn read_prepared_cache_metadata_struct(
     }
 }
 
+/// Serializes and writes prepared cache metadata to disk atomically.
 pub(crate) fn write_prepared_cache_metadata(
     metadata_path: &Path,
     metadata: &PreparedCacheMetadata,
@@ -61,6 +70,8 @@ pub(crate) fn write_prepared_cache_metadata(
     })
 }
 
+/// Builds a `PreparedAreaEntry` from an `.osm` file path by reading its
+/// sidecar metadata and constructing the renderer launch command.
 pub(crate) fn prepared_entry_from_osm_path(
     project_root: &Path,
     osm_path: &Path,
@@ -116,6 +127,9 @@ pub(crate) fn prepared_entry_from_osm_path(
     })
 }
 
+/// Lists all prepared areas sorted by favorite status, display name, and cache key.
+///
+/// Returns an empty list when the prepared directory does not exist.
 pub(crate) fn list_prepared_areas(project_root: &Path) -> PrepareResult<Vec<PreparedAreaEntry>> {
     let prepared_dir = prepared_area_dir();
     let read_dir = match std::fs::read_dir(&prepared_dir) {
@@ -148,6 +162,9 @@ pub(crate) fn list_prepared_areas(project_root: &Path) -> PrepareResult<Vec<Prep
     Ok(entries)
 }
 
+/// Updates the display name and/or favorite flag of a prepared area.
+///
+/// Only provided fields are changed; the other fields remain unchanged.
 pub(crate) fn update_prepared_area_details(
     cache_key: &str,
     update: PreparedAreaUpdate,
@@ -179,6 +196,7 @@ pub(crate) fn update_prepared_area_details(
     prepared_entry_from_osm_path(project_root, &osm_path)
 }
 
+/// Deletes a prepared area's `.osm` file and its `.meta.json` sidecar.
 pub(crate) fn delete_prepared_area(cache_key: &str) -> PrepareResult<DeletePreparedAreaResponse> {
     validate_cache_key(cache_key)?;
     let osm_path = prepared_area_dir().join(format!("{cache_key}.osm"));

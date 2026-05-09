@@ -11,12 +11,16 @@ use super::types::{
 };
 use super::validate::{validate_extra_args, validate_spawn};
 
+/// Spawns the local renderer process for a prepared area.
+///
+/// Validates spawn coordinates and extra args, builds the command, and spawns
+/// the process in the project root directory.
 pub(crate) fn launch_renderer(
     project_root: &Path,
     req: &LaunchRendererRequest,
 ) -> PrepareResult<LaunchRendererResponse> {
     let command = renderer_launch_command(project_root, req)?;
-    let child = Command::new(&command.program)
+    Command::new(&command.program)
         .args(&command.args)
         .current_dir(project_root)
         .spawn()
@@ -29,11 +33,13 @@ pub(crate) fn launch_renderer(
 
     Ok(LaunchRendererResponse {
         status: "launched",
-        pid: child.id(),
-        command,
     })
 }
 
+/// Builds a `cargo run` command that launches the renderer for a prepared `.osm` file.
+///
+/// Validates the file extension, spawn coordinates, and extra args.
+/// Appends spawn, SRTM, and profile flags to the base command.
 pub(crate) fn renderer_launch_command(
     project_root: &Path,
     req: &LaunchRendererRequest,
@@ -78,6 +84,10 @@ pub(crate) fn renderer_launch_command(
     })
 }
 
+/// Writes a file atomically by writing to a temporary file first, then renaming.
+///
+/// Creates parent directories if needed. The temporary file uses a process-specific
+/// nonce to avoid collisions.
 pub(crate) fn write_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
     let parent = path
         .parent()
@@ -100,10 +110,12 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Converts a path to a lossy display string.
 pub(crate) fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().display().to_string()
 }
 
+/// Joins a program and arguments into a shell-escaped command string.
 pub(crate) fn shell_command(program: &str, args: &[String]) -> String {
     std::iter::once(shell_arg(program))
         .chain(args.iter().map(|arg| shell_arg(arg)))
@@ -111,6 +123,7 @@ pub(crate) fn shell_command(program: &str, args: &[String]) -> String {
         .join(" ")
 }
 
+/// Quotes a shell argument if it contains characters that require quoting.
 pub(crate) fn shell_arg(value: &str) -> String {
     if value.bytes().all(|b| {
         b.is_ascii_alphanumeric()
@@ -125,6 +138,7 @@ pub(crate) fn shell_arg(value: &str) -> String {
     }
 }
 
+/// Wraps a value in single quotes, escaping embedded single quotes using `'"'"'`.
 pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }

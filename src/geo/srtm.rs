@@ -72,11 +72,6 @@ pub fn download_tile(lat: i32, lon: i32, dest_dir: &Path) -> Result<bool> {
     let name = tile_name(lat, lon);
     let hgt_path = dest_dir.join(format!("{name}.hgt"));
 
-    if hgt_path.exists() {
-        log::debug!("Elevation tile {name} already exists -- skipping");
-        return Ok(false);
-    }
-
     // Build the directory component: e.g. "N48" or "S05"
     let ns = if lat >= 0 { 'N' } else { 'S' };
     let dir_part = format!("{ns}{:02}", lat.unsigned_abs());
@@ -108,17 +103,27 @@ pub fn download_tile(lat: i32, lon: i32, dest_dir: &Path) -> Result<bool> {
         .read_to_end(&mut hgt_data)
         .map_err(|e| anyhow::anyhow!("Gzip decompression failed for {name}: {e}"))?;
 
-    // Write to a temporary file first, then atomically rename into place.
-    let tmp_path = hgt_path.with_extension("hgt.tmp");
-    std::fs::write(&tmp_path, &hgt_data)
-        .map_err(|e| anyhow::anyhow!("Failed to write tmp file {}: {e}", tmp_path.display()))?;
-    std::fs::rename(&tmp_path, &hgt_path).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to rename {} -> {}: {e}",
-            tmp_path.display(),
-            hgt_path.display()
-        )
-    })?;
+    // Use create_new(true) for atomic check-and-create: fails if the file
+    // already exists, eliminating the TOCTOU race between exists() and write().
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&hgt_path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            log::debug!("Elevation tile {name} already exists -- skipping");
+            return Ok(false);
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Failed to create {}: {e}",
+                hgt_path.display()
+            ))
+        }
+    };
+    std::io::Write::write_all(&mut file, &hgt_data)
+        .map_err(|e| anyhow::anyhow!("Failed to write file {}: {e}", hgt_path.display()))?;
 
     log::info!(
         "Saved elevation tile {} ({:.1} MB)",

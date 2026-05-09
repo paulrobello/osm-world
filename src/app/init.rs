@@ -1,3 +1,9 @@
+//! WGPU initialization, scene loading, and camera placement logic.
+//!
+//! Contains [`init_wgpu`] which creates the window, GPU device, render pipelines,
+//! and loads the initial scene. Also provides [`load_scene_resources`] for
+//! hot-swapping the scene at runtime through the area-switch feature.
+
 use std::sync::Arc;
 use wgpu::*;
 
@@ -12,6 +18,10 @@ use crate::render::shadow_bind_group::ShadowBindGroup;
 use crate::render::shadow_pipeline::ShadowPipeline;
 use crate::render::sky_pipeline::SkyPipeline;
 
+/// Scene data produced after parsing and mesh generation.
+///
+/// Holds the GPU buffers alongside derived data for labels, search, inspection,
+/// and tile debug overlays.
 pub struct LoadedScene {
     pub scene: SceneBuffers,
     pub coord_converter: Option<crate::geo::CoordConverter>,
@@ -23,6 +33,8 @@ pub struct LoadedScene {
     pub tile_debug_entries: Vec<crate::stream::TileDebugEntry>,
 }
 
+/// Initialized WGPU state including device, surface, pipelines, scene buffers,
+/// camera, and UI-derived data.
 pub struct AppState {
     pub window: Arc<winit::window::Window>,
     pub device: Device,
@@ -51,6 +63,7 @@ pub struct AppState {
     pub tile_debug_tile_size: f32,
 }
 
+/// Options for WGPU initialization, passed from [`AppOptions`](super::AppOptions).
 pub struct InitWgpuOptions<'a> {
     pub window_width: f64,
     pub window_height: f64,
@@ -62,6 +75,11 @@ pub struct InitWgpuOptions<'a> {
     pub streaming: &'a crate::app::StreamingOptions,
 }
 
+/// Initializes the WGPU renderer: creates the window, GPU device, surface,
+/// depth buffer, all render pipelines, bind groups, and optionally loads a
+/// scene from an input file.
+///
+/// Returns the initialized [`AppState`] and egui integration state.
 pub fn init_wgpu(
     event_loop: &winit::event_loop::ActiveEventLoop,
     options: &InitWgpuOptions<'_>,
@@ -219,6 +237,9 @@ pub fn init_wgpu(
     ))
 }
 
+/// Loads scene resources from an input file at runtime.
+///
+/// Used by the area-switch feature to hot-swap the scene without restarting.
 pub fn load_scene_resources(
     device: &Device,
     input_path: &std::path::Path,
@@ -525,6 +546,7 @@ fn apply_explicit_camera_overrides(
     }
 }
 
+/// Creates a depth texture and view with `Depth32Float` format.
 pub fn create_depth_buffer(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
     let texture = device.create_texture(&TextureDescriptor {
         label: Some("depth texture"),

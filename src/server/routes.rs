@@ -27,9 +27,17 @@ use super::types::{
 use super::validate::{
     auth_middleware, classify_srtm_error, effective_overpass_url_for_prepare,
     is_degraded_overture_prepared_cache, parse_overture_themes_for_prepare, prepared_cache_key,
-    source_status_string, validate_bbox, validate_filter, validate_spawn, validate_srtm_tile_limit,
+    rate_limit_middleware, source_status_string, validate_bbox, validate_filter, validate_spawn,
+    validate_srtm_tile_limit,
 };
 
+/// Builds the Axum router with all API routes.
+///
+/// Routes are split into read-only endpoints (health, cache, prepared areas)
+/// and mutating endpoints (prepare, update, delete, launch). Mutating endpoints
+/// require authentication via `auth_middleware` when `OSM_WORLD_API_TOKEN` is set.
+///
+/// CORS is restricted to `localhost:8032` and `127.0.0.1:8032` for the Web Explorer.
 pub fn build_router(project_root: PathBuf) -> Router {
     let read_only = Router::new()
         .route("/health", get(health))
@@ -43,6 +51,7 @@ pub fn build_router(project_root: PathBuf) -> Router {
         )
         .route("/areas/prepare", post(prepare_area_handler))
         .route("/renderer/launch", post(launch_renderer_handler))
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::middleware::from_fn(auth_middleware));
 
     Router::new()
@@ -69,6 +78,10 @@ pub fn build_router(project_root: PathBuf) -> Router {
         )
 }
 
+/// Starts the Axum HTTP server on the given host and port.
+///
+/// Binds a TCP listener and serves the API router. Blocks until the server
+/// encounters an error or is shut down.
 pub async fn run(host: &str, port: u16, project_root: PathBuf) -> anyhow::Result<()> {
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -80,15 +93,8 @@ pub async fn run(host: &str, port: u16, project_root: PathBuf) -> anyhow::Result
         .context("running HTTP server")
 }
 
-async fn health() -> Result<Json<HealthResponse>, ApiError> {
-    task::spawn_blocking(|| HealthResponse {
-        status: "ok",
-        overpass_cache_dir: path_string(par_osm_rust::cache::overpass_cache_dir()),
-        srtm_cache_dir: path_string(par_osm_rust::cache::srtm_cache_dir()),
-    })
-    .await
-    .map(Json)
-    .map_err(|err| ApiError::internal(format!("health task failed: {err}")))
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
 }
 
 async fn cache_areas() -> Result<Json<Vec<par_osm_rust::osm_cache::CacheEntry>>, ApiError> {
@@ -168,6 +174,9 @@ async fn not_found() -> impl IntoResponse {
     )
 }
 
+/// Core area preparation logic: validates the request, resolves source controls,
+/// reuses or creates a prepared `.osm` file, optionally downloads SRTM tiles,
+/// writes metadata, and builds the renderer launch command.
 pub(crate) fn prepare_area(
     req: PrepareAreaRequest,
     project_root: &Path,

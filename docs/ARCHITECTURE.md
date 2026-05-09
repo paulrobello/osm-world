@@ -241,7 +241,212 @@ The prepare API accepts a bbox, feature filter, elevation toggle, force-refresh 
 | `POST` | `/areas/prepare` | Fetch or reuse source data, optionally download SRTM, and return renderer command data. |
 | `POST` | `/renderer/launch` | Spawn the local renderer process for a prepared area. |
 
-The router applies permissive Cross-Origin Resource Sharing (CORS) because it is designed for local development with a separate Next.js dev server.
+The router applies restricted Cross-Origin Resource Sharing (CORS) to `localhost:8032` and `127.0.0.1:8032`. Mutating endpoints require a Bearer token matching `OSM_WORLD_API_TOKEN` when that variable is set. Requests are rate-limited to 20 per minute per client IP.
+
+### API Endpoint Schemas
+
+#### `GET /health`
+
+Returns the API health status.
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "ok"
+}
+```
+
+#### `GET /cache/areas`
+
+Lists cached Overpass areas from the shared `par-osm-rust` cache.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "key": "<64-char-hex-cache-key>",
+    "bbox": [38.0, -121.0, 38.001, -120.999],
+    "created_at": "2026-05-09T12:00:00Z",
+    "size_bytes": 12345
+  }
+]
+```
+
+#### `GET /areas/prepared`
+
+Lists all prepared renderer input areas, sorted by favorite, display name, and cache key.
+
+**Response:** `200 OK` -- Array of `PreparedAreaEntry` objects (see `POST /areas/prepare` response for shared fields).
+
+```json
+[
+  {
+    "cache_key": "<64-char-hex>",
+    "display_name": "Downtown Sacramento",
+    "favorite": true,
+    "bbox": [38.568, -121.505, 38.592, -121.475],
+    "filter": { "roads": true, "buildings": true, "water": true, "landuse": true, "railways": true },
+    "use_elevation": false,
+    "overture": false,
+    "overture_themes": [],
+    "poi_source_mode": null,
+    "overture_failure_mode": null,
+    "overture_timeout": null,
+    "source_status": "osm_only",
+    "warnings": [],
+    "osm_path": "/home/user/.cache/par-osm-rust/prepared/<key>.osm",
+    "srtm_dir": null,
+    "spawn_lat": 38.5816,
+    "spawn_lon": -121.4944,
+    "command": "cargo run --manifest-path ... -- --input ...",
+    "command_cwd": "/path/to/osm-world",
+    "command_program": "cargo",
+    "command_args": ["run", "--manifest-path", "...", "--", "--input", "..."]
+  }
+]
+```
+
+#### `POST /areas/prepare`
+
+Fetches or reuses source data, optionally downloads SRTM tiles, and returns a renderer command.
+
+**Authentication:** Required when `OSM_WORLD_API_TOKEN` is set.
+
+**Request Body:**
+
+```json
+{
+  "bbox": [38.568, -121.505, 38.592, -121.475],
+  "filter": { "roads": true, "buildings": true, "water": true, "landuse": true, "railways": true },
+  "use_elevation": false,
+  "force_refresh": false,
+  "overpass_url": "https://overpass-api.de/api/interpreter",
+  "spawn_lat": 38.5816,
+  "spawn_lon": -121.4944,
+  "overture": false,
+  "overture_themes": ["address", "base", "building", "place", "transportation"],
+  "poi_source_mode": "osm_only",
+  "overture_failure_mode": "fallback_to_osm",
+  "overture_timeout": 120
+}
+```
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `bbox` | `[f64; 4]` | Yes | -- | `[south, west, north, east]` in degrees. Max span 0.5 degrees, max area 0.1 sq degrees. |
+| `filter` | `FeatureFilter` | No | All true | Toggle which OSM feature types to include. |
+| `use_elevation` | `bool` | No | `false` | Download SRTM elevation tiles. Max 16 tiles per request. |
+| `force_refresh` | `bool` | No | `false` | Re-fetch source data even if a prepared file exists. |
+| `overpass_url` | `string` | No | Default Overpass URL | Override the Overpass endpoint. Must be HTTPS. |
+| `spawn_lat`, `spawn_lon` | `f64` | No | `null` | Camera spawn coordinates. Must be inside bbox if provided. |
+| `overture` | `bool` | No | `false` | Enable Overture Maps data. |
+| `overture_themes` | `string[]` | No | All themes | Overture theme names to include. |
+| `poi_source_mode` | `PoiSourceMode` | No | `overture_preferred` | POI source selection strategy. |
+| `overture_failure_mode` | `OvertureFailureMode` | No | `fallback_to_osm` | Behavior when Overture fetch fails. |
+| `overture_timeout` | `u64` | No | `120` | Overture request timeout in seconds. |
+
+**Success Response:** `200 OK`
+
+```json
+{
+  "bbox": [38.568, -121.505, 38.592, -121.475],
+  "cache_key": "<64-char-hex>",
+  "cache_status": "prepared",
+  "source_status": "osm_only",
+  "warnings": [],
+  "osm_path": "/home/user/.cache/par-osm-rust/prepared/<key>.osm",
+  "srtm_dir": null,
+  "spawn_lat": 38.5816,
+  "spawn_lon": -121.4944,
+  "command": "cargo run --manifest-path '/path/Cargo.toml' -- --input '/cache/<key>.osm' --spawn-lat 38.5816 --spawn-lon -121.4944",
+  "command_cwd": "/path/to/osm-world",
+  "command_program": "cargo",
+  "command_args": ["run", "--manifest-path", "...", "--", "--input", "...", "--spawn-lat", "38.5816", "--spawn-lon", "-121.4944"]
+}
+```
+
+**Error Responses:**
+
+| Status | Cause | Example |
+| --- | --- | --- |
+| `400 Bad Request` | Invalid bbox, spawn, filter, or Overpass URL | `{"error": "invalid request"}` |
+| `401 Unauthorized` | Missing or incorrect Bearer token | `{"error": "unauthorized"}` |
+| `429 Too Many Requests` | Rate limit exceeded | `{"error": "rate limit exceeded"}` |
+| `502 Bad Gateway` | Upstream Overpass or Overture failure | `{"error": "failed to fetch map data"}` |
+| `500 Internal Server Error` | Filesystem or serialization failure | `{"error": "failed to prepare area"}` |
+
+#### `POST /areas/prepared/{cache_key}`
+
+Updates the display name or favorite flag of a prepared area.
+
+**Authentication:** Required when `OSM_WORLD_API_TOKEN` is set.
+
+**Request Body:**
+
+```json
+{
+  "display_name": "Downtown Sacramento",
+  "favorite": true
+}
+```
+
+**Success Response:** `200 OK` -- Updated `PreparedAreaEntry` (see `GET /areas/prepared`).
+
+**Error Responses:** `400 Bad Request`, `401 Unauthorized`, `500 Internal Server Error`.
+
+#### `DELETE /areas/prepared/{cache_key}`
+
+Deletes a prepared `.osm` file and its `.meta.json` sidecar.
+
+**Authentication:** Required when `OSM_WORLD_API_TOKEN` is set.
+
+**Success Response:** `200 OK`
+
+```json
+{
+  "status": "deleted",
+  "cache_key": "<64-char-hex>"
+}
+```
+
+**Error Responses:** `400 Bad Request`, `401 Unauthorized`, `500 Internal Server Error`.
+
+#### `POST /renderer/launch`
+
+Spawns the local renderer process for a prepared area.
+
+**Authentication:** Required when `OSM_WORLD_API_TOKEN` is set.
+
+**Request Body:**
+
+```json
+{
+  "osm_path": "/home/user/.cache/par-osm-rust/prepared/<key>.osm",
+  "srtm_dir": "/home/user/.cache/par-osm-rust/srtm",
+  "spawn_lat": 38.5816,
+  "spawn_lon": -121.4944,
+  "extra_args": ["--visual-preset", "showcase", "--time-of-day", "16.5"]
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `osm_path` | `string` | Yes | Path to a prepared `.osm` file. |
+| `srtm_dir` | `string` | No | SRTM cache directory. |
+| `spawn_lat`, `spawn_lon` | `f64` | No | Camera spawn coordinates. |
+| `extra_args` | `string[]` | No | Additional renderer flags. Validated against an allowlist. |
+
+**Success Response:** `200 OK`
+
+```json
+{
+  "status": "launched"
+}
+```
+
+**Error Responses:** `400 Bad Request` (invalid args or path), `401 Unauthorized`, `500 Internal Server Error`.
 
 ### Prepare Request Flow
 

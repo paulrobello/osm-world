@@ -1,18 +1,25 @@
+//! Per-frame rendering: shadow passes, main scene, minimap, contact shadows, and egui HUD.
+
 use wgpu::*;
 
 use super::AppState;
 use crate::camera::{
     SHADOW_CASCADE_BLEND_DISTANCE, SHADOW_CASCADE_COUNT, SHADOW_FAR_FADE_DISTANCE, SHADOW_MAP_SIZE,
 };
-use crate::render::buffers::RenderIndexBuffer;
+use crate::render::buffers::{RenderIndexBuffer, SceneBuffers};
 use crate::render::shadow_bind_group::LightUniforms;
 use crate::ui::EguiState;
 
+/// Borrowed references to UI and render state needed during the render pass.
+///
+/// Groups the mutable references to avoid passing 13+ individual parameters.
 pub struct RenderUiState<'a> {
     pub ui: &'a mut crate::app::AppUiState,
     pub render: &'a mut crate::app::AppRenderState,
 }
 
+/// Executes one frame of rendering: shadow cascades, main scene, minimap,
+/// contact-shadow composite, egui HUD, and optional screenshot capture.
 pub fn render(
     state: &mut AppState,
     egui_state: &mut EguiState,
@@ -156,18 +163,7 @@ pub fn render(
         pass.set_bind_group(0, &state.camera_bg.group, &[]);
         pass.set_bind_group(1, &state.shadow_bg.group, &[]);
         pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
-        pass.set_pipeline(&state.pipeline.pipeline);
-        draw_render_layer(&mut pass, &state.scene.terrain);
-        pass.set_pipeline(&state.pipeline.overlay_pipeline);
-        draw_render_layer(&mut pass, &state.scene.landuse);
-        draw_render_layer(&mut pass, &state.scene.landuse_overlay);
-        draw_render_layer(&mut pass, &state.scene.water);
-        draw_render_layer(&mut pass, &state.scene.road_path);
-        draw_render_layer(&mut pass, &state.scene.road);
-        draw_render_layer(&mut pass, &state.scene.railway);
-        draw_render_layer(&mut pass, &state.scene.road_marking);
-        pass.set_pipeline(&state.pipeline.pipeline);
-        draw_render_layer(&mut pass, &state.scene.solids);
+        draw_scene_layers(&mut pass, &state.scene, &state.pipeline);
     }
 
     // Minimap pass
@@ -222,18 +218,7 @@ pub fn render(
             minimap_pass.set_bind_group(0, &state.minimap_target.bind_group.group, &[]);
             minimap_pass.set_bind_group(1, &state.shadow_bg.group, &[]);
             minimap_pass.set_vertex_buffer(0, state.scene.vertex_buffer.slice(..));
-            minimap_pass.set_pipeline(&state.pipeline.pipeline);
-            draw_render_layer(&mut minimap_pass, &state.scene.terrain);
-            minimap_pass.set_pipeline(&state.pipeline.overlay_pipeline);
-            draw_render_layer(&mut minimap_pass, &state.scene.landuse);
-            draw_render_layer(&mut minimap_pass, &state.scene.landuse_overlay);
-            draw_render_layer(&mut minimap_pass, &state.scene.water);
-            draw_render_layer(&mut minimap_pass, &state.scene.road_path);
-            draw_render_layer(&mut minimap_pass, &state.scene.road);
-            draw_render_layer(&mut minimap_pass, &state.scene.railway);
-            draw_render_layer(&mut minimap_pass, &state.scene.road_marking);
-            minimap_pass.set_pipeline(&state.pipeline.pipeline);
-            draw_render_layer(&mut minimap_pass, &state.scene.solids);
+            draw_scene_layers(&mut minimap_pass, &state.scene, &state.pipeline);
         }
     }
 
@@ -441,12 +426,37 @@ pub fn render(
     }
 }
 
-fn draw_render_layer(pass: &mut RenderPass<'_>, layer: &RenderIndexBuffer) {
+fn draw_render_layer(pass: &mut RenderPass<'_>, layer: Option<&RenderIndexBuffer>) {
+    let layer = match layer {
+        Some(l) => l,
+        None => return,
+    };
     if layer.count == 0 {
         return;
     }
     pass.set_index_buffer(layer.buffer.slice(..), IndexFormat::Uint32);
     pass.draw_indexed(0..layer.count, 0, 0..1);
+}
+
+/// Draw all scene layers in the correct render order: terrain, then overlay
+/// surfaces (landuse, water, roads, railways), then solid geometry.
+fn draw_scene_layers(
+    pass: &mut RenderPass<'_>,
+    scene: &SceneBuffers,
+    pipeline: &crate::render::pipelines::CityPipeline,
+) {
+    pass.set_pipeline(&pipeline.pipeline);
+    draw_render_layer(pass, scene.terrain.as_ref());
+    pass.set_pipeline(&pipeline.overlay_pipeline);
+    draw_render_layer(pass, scene.landuse.as_ref());
+    draw_render_layer(pass, scene.landuse_overlay.as_ref());
+    draw_render_layer(pass, scene.water.as_ref());
+    draw_render_layer(pass, scene.road_path.as_ref());
+    draw_render_layer(pass, scene.road.as_ref());
+    draw_render_layer(pass, scene.railway.as_ref());
+    draw_render_layer(pass, scene.road_marking.as_ref());
+    pass.set_pipeline(&pipeline.pipeline);
+    draw_render_layer(pass, scene.solids.as_ref());
 }
 
 fn save_screenshot(

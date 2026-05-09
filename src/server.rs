@@ -7,18 +7,115 @@ use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{Path as AxumPath, State, rejection::JsonRejection},
-    http::StatusCode,
+    http::{HeaderValue, Method, StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use tokio::task;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 const MAX_BBOX_SPAN_DEGREES: f64 = 0.5;
 const MAX_BBOX_AREA_DEGREES: f64 = 0.10;
 const MAX_SRTM_TILE_COUNT: usize = 16;
 const OVERTURE_FALLBACK_TO_OSM_STATUS: &str = "overture_fallback_to_osm";
+
+/// Authentication token for mutating API endpoints.
+/// Read from the `OSM_WORLD_API_TOKEN` environment variable at server startup.
+/// If not set, mutating endpoints return 401 to all callers.
+fn api_auth_token() -> Option<&'static str> {
+    static TOKEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    TOKEN
+        .get_or_init(|| std::env::var("OSM_WORLD_API_TOKEN").ok())
+        .as_deref()
+}
+
+/// Allowlist of renderer flags that may appear in `extra_args`.
+/// Each entry is a flag name (with leading `--`). Flags that take values
+/// must have the value validated separately if they accept untrusted input.
+const ALLOWED_RENDERER_FLAGS: &[&str] = &[
+    "--screenshot",
+    "--screenshot-delay",
+    "--auto-exit",
+    "--width",
+    "--height",
+    "--cam-x",
+    "--cam-y",
+    "--cam-z",
+    "--cam-yaw",
+    "--cam-pitch",
+    "--show-settings",
+    "--time-of-day",
+    "--real-time-of-day",
+    "--hide-poi-labels",
+    "--hide-address-labels",
+    "--hide-street-sign-labels",
+    "--hide-minimap",
+    "--rotate-minimap",
+    "--debug-shadow-cascades",
+    "--visual-preset",
+    "--landmark-detail",
+    "--facade-variation",
+    "--roof-variation",
+    "--vegetation-density",
+    "--synthetic-tree-cap",
+    "--vegetation-distance",
+    "--no-streaming",
+    "--tile-size",
+    "--stream-radius",
+    "--upload-budget-mb",
+    "--max-uploaded-tiles",
+    "--max-uploaded-mb",
+];
+
+/// Validate that every flag in `extra_args` is in the allowlist.
+/// Returns an error listing any rejected flags.
+fn validate_extra_args(extra_args: &[String]) -> Result<(), anyhow::Error> {
+    let rejected: Vec<&str> = extra_args
+        .iter()
+        .filter(|arg| arg.starts_with('-') && !ALLOWED_RENDERER_FLAGS.contains(&arg.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    if rejected.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "unsupported renderer flag(s): {}. Allowed flags: {}",
+            rejected.join(", "),
+            ALLOWED_RENDERER_FLAGS.join(", ")
+        )
+    }
+}
+
+/// Axum middleware that rejects unauthenticated requests to mutating endpoints.
+/// Expects a `Bearer <token>` Authorization header matching `OSM_WORLD_API_TOKEN`.
+async fn auth_middleware(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> impl IntoResponse {
+    match api_auth_token() {
+        // No token configured -- allow all requests (local-only development).
+        None => next.run(request).await,
+        // Token configured -- require matching Bearer header.
+        Some(expected) => {
+            let provided = request
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "));
+            match provided {
+                Some(token) if token == expected => next.run(request).await,
+                _ => (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse {
+                        error: "unauthorized".to_string(),
+                    }),
+                )
+                    .into_response(),
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -279,19 +376,42 @@ impl PrepareAreaError {
 type PrepareResult<T> = Result<T, PrepareAreaError>;
 
 pub fn build_router(project_root: PathBuf) -> Router {
-    Router::new()
+    let read_only = Router::new()
         .route("/health", get(health))
         .route("/cache/areas", get(cache_areas))
-        .route("/areas/prepared", get(prepared_areas_handler))
+        .route("/areas/prepared", get(prepared_areas_handler));
+
+    let mutating = Router::new()
         .route(
             "/areas/prepared/{cache_key}",
             post(update_prepared_area_handler).delete(delete_prepared_area_handler),
         )
         .route("/areas/prepare", post(prepare_area_handler))
         .route("/renderer/launch", post(launch_renderer_handler))
+        .layer(axum::middleware::from_fn(auth_middleware));
+
+    Router::new()
+        .merge(read_only)
+        .merge(mutating)
         .fallback(not_found)
         .with_state(AppState { project_root })
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list([
+                    HeaderValue::from_static("http://localhost:8032"),
+                    HeaderValue::from_static("http://127.0.0.1:8032"),
+                ]))
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                ]),
+        )
 }
 
 pub async fn run(host: &str, port: u16, project_root: PathBuf) -> anyhow::Result<()> {
@@ -789,6 +909,7 @@ pub(crate) fn renderer_launch_command(
             args.push(srtm_dir.clone());
         }
     }
+    validate_extra_args(&req.extra_args).map_err(PrepareAreaError::bad_request)?;
     args.extend(req.extra_args.clone());
     let program = "cargo".to_string();
     let command = shell_command(&program, &args);

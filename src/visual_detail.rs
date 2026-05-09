@@ -1,23 +1,45 @@
+//! Visual detail presets and configurable renderer knobs.
+//!
+//! Controls landmark geometry detail, facade and roof color variation,
+//! vegetation density and distance, and bike/pedestrian overlays.
+//! Changes to some settings require a scene reload (tracked by `reload_required`).
+
+/// Named visual quality preset determining defaults for all visual detail knobs.
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, clap::ValueEnum,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum VisualPreset {
+    /// Reduced geometry and vegetation for faster rendering.
     Performance,
+    /// Moderate detail suitable for most scenes.
     Balanced,
+    /// Maximum detail: full landmark geometry, dense vegetation, rich variation.
     Showcase,
 }
 
+/// Level of detail for landmark POI geometry.
 #[derive(
     Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, clap::ValueEnum,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum LandmarkDetail {
+    /// No landmark geometry rendered.
     Off,
+    /// Simplified landmark shapes.
     Simple,
+    /// Full landmark geometry with detail.
     Showcase,
 }
 
+/// Configurable visual detail settings applied during mesh generation.
+///
+/// Valid ranges:
+/// - `facade_variation`: 0.0 to 1.0 (color randomization strength)
+/// - `roof_variation`: 0.0 to 1.0 (roof color randomization strength)
+/// - `vegetation_density`: 0.0 to 3.0 (tree scatter multiplier)
+/// - `synthetic_tree_cap`: >= 1 (maximum synthetic trees per tree area)
+/// - `vegetation_max_distance`: >= 0.0 (metres; trees beyond this are culled)
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualDetailSettings {
     pub preset: VisualPreset,
@@ -39,6 +61,7 @@ impl Default for VisualDetailSettings {
 }
 
 impl VisualDetailSettings {
+    /// Creates settings from a named preset with tuned defaults.
     pub fn from_preset(preset: VisualPreset) -> Self {
         match preset {
             VisualPreset::Performance => Self {
@@ -80,6 +103,7 @@ impl VisualDetailSettings {
         }
     }
 
+    /// Clamps all numeric fields to their valid ranges.
     pub fn clamp(&mut self) {
         self.facade_variation = clamp_finite(self.facade_variation, 0.0, 1.0);
         self.roof_variation = clamp_finite(self.roof_variation, 0.0, 1.0);
@@ -90,6 +114,7 @@ impl VisualDetailSettings {
         }
     }
 
+    /// Sets the `reload_required` flag, indicating the scene must be regenerated.
     pub fn with_reload_required(mut self) -> Self {
         self.reload_required = true;
         self

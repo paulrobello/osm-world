@@ -1,22 +1,28 @@
+//! Per-frame update: delta time, day cycle, camera movement, and area-switch handling.
+
 use super::App;
 
+/// Advances the application state by one frame.
+///
+/// Updates performance metrics, processes area-switch requests, advances the
+/// day cycle, moves the camera from input, and updates tile debug states.
 pub fn update(app: &mut App) {
     let now = std::time::Instant::now();
     let dt = (now - app.last_frame_time).as_secs_f32();
     app.last_frame_time = now;
-    app.performance.update(dt);
+    app.render.performance.update(dt);
 
-    if let Some(request) = app.area_switch.take_request() {
+    if let Some(request) = app.ui.area_switch.take_request() {
         load_requested_area(app, request);
     }
 
     if let Some(state) = &mut app.state {
-        app.day_cycle.update(dt);
+        app.render.day_cycle.update(dt);
         app.controller.update_camera(&mut state.camera, dt);
         let uniforms = state.camera.uniforms_with_visual_detail(
-            &app.day_cycle,
-            &app.atmosphere,
-            &app.visual_detail,
+            &app.render.day_cycle,
+            &app.render.atmosphere,
+            &app.render.visual_detail,
         );
         state.camera_bg.update(&state.queue, &uniforms);
         crate::stream::tile::update_loaded_tile_debug_states(
@@ -30,7 +36,7 @@ pub fn update(app: &mut App) {
 
 fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
     let Some(state) = &mut app.state else {
-        app.area_switch.status = "Renderer is not initialized yet.".to_string();
+        app.ui.area_switch.status = "Renderer is not initialized yet.".to_string();
         return;
     };
     let srtm_dir = request.srtm_dir.as_deref().map(std::path::Path::new);
@@ -38,7 +44,7 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
         &state.device,
         std::path::Path::new(&request.input_path),
         srtm_dir,
-        &app.visual_detail,
+        &app.render.visual_detail,
         &app.opts.streaming,
         state.camera.position,
     ) {
@@ -55,7 +61,7 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
             mark_area_load_success(app, request);
         }
         Err(err) => {
-            app.area_switch.status = format!("Failed to load prepared area: {err:#}");
+            app.ui.area_switch.status = format!("Failed to load prepared area: {err:#}");
         }
     }
 }
@@ -63,10 +69,10 @@ fn load_requested_area(app: &mut App, request: crate::app::AreaSwitchRequest) {
 fn mark_area_load_success(app: &mut App, request: crate::app::AreaSwitchRequest) {
     app.opts.input_path = Some(request.input_path.clone());
     app.opts.srtm_dir = request.srtm_dir.clone();
-    app.area_switch.input_path = request.input_path;
-    app.area_switch.srtm_dir = request.srtm_dir.unwrap_or_default();
-    app.area_switch.status = "Prepared area loaded.".to_string();
-    app.visual_detail.reload_required = false;
+    app.ui.area_switch.input_path = request.input_path;
+    app.ui.area_switch.srtm_dir = request.srtm_dir.unwrap_or_default();
+    app.ui.area_switch.status = "Prepared area loaded.".to_string();
+    app.render.visual_detail.reload_required = false;
 }
 
 #[cfg(test)]
@@ -111,9 +117,9 @@ mod tests {
 
         assert_eq!(app.opts.input_path.as_deref(), Some("/tmp/new-area.osm"));
         assert_eq!(app.opts.srtm_dir.as_deref(), Some("/tmp/srtm"));
-        assert_eq!(app.area_switch.input_path, "/tmp/new-area.osm");
-        assert_eq!(app.area_switch.srtm_dir, "/tmp/srtm");
-        assert_eq!(app.area_switch.status, "Prepared area loaded.");
-        assert!(!app.visual_detail.reload_required);
+        assert_eq!(app.ui.area_switch.input_path, "/tmp/new-area.osm");
+        assert_eq!(app.ui.area_switch.srtm_dir, "/tmp/srtm");
+        assert_eq!(app.ui.area_switch.status, "Prepared area loaded.");
+        assert!(!app.render.visual_detail.reload_required);
     }
 }

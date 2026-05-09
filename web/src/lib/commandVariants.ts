@@ -1,11 +1,19 @@
+/**
+ * Generates debug, release, screenshot, and no-streaming renderer command variants.
+ *
+ * @module commandVariants
+ */
+
 import type { PrepareAreaResponse } from './api';
 import type { RendererOptions } from './settingsProfiles';
 
+/** Subset of prepare response fields needed to build command variants. */
 export type CommandVariantInput = Pick<
   PrepareAreaResponse,
   'cache_key' | 'command_cwd' | 'command_program' | 'command_args'
 >;
 
+/** A single command variant with id, label, description, and shell command string. */
 export interface CommandVariant {
   id: 'debug' | 'release' | 'screenshot' | 'no-streaming';
   label: string;
@@ -33,6 +41,7 @@ function insertCargoRelease(args: string[]): string[] {
   return ['run', '--release', ...args.slice(1)];
 }
 
+/** Converts renderer options to an array of CLI flag strings. */
 export function rendererOptionArgs(renderer: RendererOptions): string[] {
   const args: string[] = [];
   args.push('--time-of-day', renderer.timeOfDay.toString());
@@ -67,6 +76,7 @@ export function rendererOptionArgs(renderer: RendererOptions): string[] {
   return args;
 }
 
+/** Builds all four command variants (debug, release, screenshot, no-streaming) from a prepare response. */
 export function buildCommandVariants(input: CommandVariantInput, renderer: RendererOptions): CommandVariant[] {
   const debugArgs = [...input.command_args, ...rendererOptionArgs(renderer)];
   const screenshotPath = `screenshots/osm-world-${input.cache_key.slice(0, 12)}.png`;

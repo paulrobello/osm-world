@@ -1,5 +1,12 @@
+/**
+ * Predefined bounding-box shortcuts for common test areas.
+ *
+ * @module bboxPresets
+ */
+
 import type { BBox, SpawnPoint } from '../components/MapPicker';
 
+/** A predefined bounding box with optional spawn point. */
 export type BboxPreset = {
   id: string;
   label: string;
@@ -8,6 +15,7 @@ export type BboxPreset = {
   spawnPoint?: SpawnPoint;
 };
 
+/** Built-in bbox presets for Sacramento Midtown and Woodland Downtown. */
 export const BBOX_PRESETS: BboxPreset[] = [
   {
     id: 'sacramento',
@@ -25,6 +33,7 @@ export const BBOX_PRESETS: BboxPreset[] = [
   },
 ];
 
+/** Finds a bbox preset by id. Returns `undefined` if not found. */
 export function findBboxPreset(id: string): BboxPreset | undefined {
   return BBOX_PRESETS.find((preset) => preset.id === id);
 }

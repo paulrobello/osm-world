@@ -1,3 +1,5 @@
+//! Winit event handling: window lifecycle, input routing, and resize.
+
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -15,8 +17,8 @@ impl ApplicationHandler for App {
                 input_path: self.opts.input_path.as_deref(),
                 srtm_dir: self.opts.srtm_dir.as_deref(),
                 cam_override: self.opts.cam_override.as_ref(),
-                persisted_camera: self.persisted_camera.as_ref(),
-                visual_detail: &self.visual_detail,
+                persisted_camera: self.view.persisted_camera.as_ref(),
+                visual_detail: &self.render.visual_detail,
                 streaming: &self.opts.streaming,
             };
             match init::init_wgpu(event_loop, &init_options) {
@@ -27,7 +29,7 @@ impl ApplicationHandler for App {
                     );
                     self.state = Some(state);
                     self.egui = Some(egui);
-                    self.render_start = Some(std::time::Instant::now());
+                    self.render.render_start = Some(std::time::Instant::now());
                 }
                 Err(e) => {
                     log::error!("Failed to initialize WGPU: {e}");
@@ -89,10 +91,10 @@ impl ApplicationHandler for App {
                         use winit::keyboard::KeyCode;
                         match key {
                             KeyCode::KeyP => {
-                                self.day_cycle.paused = !self.day_cycle.paused;
+                                self.render.day_cycle.paused = !self.render.day_cycle.paused;
                                 log::info!(
                                     "Day cycle {}",
-                                    if self.day_cycle.paused {
+                                    if self.render.day_cycle.paused {
                                         "paused"
                                     } else {
                                         "running"
@@ -100,18 +102,19 @@ impl ApplicationHandler for App {
                                 );
                             }
                             KeyCode::BracketLeft => {
-                                self.day_cycle.time_of_day =
-                                    (self.day_cycle.time_of_day - 0.01).rem_euclid(1.0);
+                                self.render.day_cycle.time_of_day =
+                                    (self.render.day_cycle.time_of_day - 0.01).rem_euclid(1.0);
                             }
                             KeyCode::BracketRight => {
-                                self.day_cycle.time_of_day =
-                                    (self.day_cycle.time_of_day + 0.01).rem_euclid(1.0);
+                                self.render.day_cycle.time_of_day =
+                                    (self.render.day_cycle.time_of_day + 0.01).rem_euclid(1.0);
                             }
                             KeyCode::KeyC => {
-                                self.atmosphere.clouds_enabled = !self.atmosphere.clouds_enabled;
+                                self.render.atmosphere.clouds_enabled =
+                                    !self.render.atmosphere.clouds_enabled;
                                 log::info!(
                                     "Clouds {}",
-                                    if self.atmosphere.clouds_enabled {
+                                    if self.render.atmosphere.clouds_enabled {
                                         "enabled"
                                     } else {
                                         "disabled"
@@ -119,26 +122,26 @@ impl ApplicationHandler for App {
                                 );
                             }
                             KeyCode::Minus => {
-                                self.atmosphere.fog_density =
-                                    (self.atmosphere.fog_density - 0.0005).max(0.0);
+                                self.render.atmosphere.fog_density =
+                                    (self.render.atmosphere.fog_density - 0.0005).max(0.0);
                             }
                             KeyCode::Equal => {
-                                self.atmosphere.fog_density =
-                                    (self.atmosphere.fog_density + 0.0005).min(0.05);
+                                self.render.atmosphere.fog_density =
+                                    (self.render.atmosphere.fog_density + 0.0005).min(0.05);
                             }
                             KeyCode::Digit9 => {
-                                self.atmosphere.cloud_coverage =
-                                    (self.atmosphere.cloud_coverage - 0.05).max(0.0);
+                                self.render.atmosphere.cloud_coverage =
+                                    (self.render.atmosphere.cloud_coverage - 0.05).max(0.0);
                             }
                             KeyCode::Digit0 => {
-                                self.atmosphere.cloud_coverage =
-                                    (self.atmosphere.cloud_coverage + 0.05).min(1.0);
+                                self.render.atmosphere.cloud_coverage =
+                                    (self.render.atmosphere.cloud_coverage + 0.05).min(1.0);
                             }
                             KeyCode::F1 => {
-                                self.show_settings = !self.show_settings;
+                                self.ui.show_settings = !self.ui.show_settings;
                             }
                             KeyCode::KeyM => {
-                                self.minimap.visible = !self.minimap.visible;
+                                self.ui.minimap.visible = !self.ui.minimap.visible;
                             }
                             _ => {}
                         }
@@ -146,7 +149,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.last_cursor_pos = Some(egui::pos2(position.x as f32, position.y as f32));
+                self.ui.last_cursor_pos = Some(egui::pos2(position.x as f32, position.y as f32));
             }
             WindowEvent::MouseInput {
                 button,
@@ -157,14 +160,15 @@ impl ApplicationHandler for App {
                 if button == winit::event::MouseButton::Left
                     && button_state == winit::event::ElementState::Pressed
                 {
-                    if let (Some(state), Some(cursor_pos)) = (&self.state, self.last_cursor_pos) {
+                    if let (Some(state), Some(cursor_pos)) = (&self.state, self.ui.last_cursor_pos)
+                    {
                         let scale = state.window.scale_factor() as f32;
                         let viewport_size = egui::vec2(
                             state.surface_config.width as f32 / scale,
                             state.surface_config.height as f32 / scale,
                         );
                         let click = egui::pos2(cursor_pos.x / scale, cursor_pos.y / scale);
-                        self.inspect.selected = crate::ui::inspect::pick_identifiable(
+                        self.ui.inspect.selected = crate::ui::inspect::pick_identifiable(
                             &state.identifiables,
                             &state.camera,
                             viewport_size,
@@ -185,26 +189,15 @@ impl ApplicationHandler for App {
                         egui,
                         screenshot_path.as_deref(),
                         render_loop::RenderUiState {
-                            atmosphere: &mut self.atmosphere,
-                            day_cycle: &mut self.day_cycle,
-                            show_settings: &mut self.show_settings,
-                            minimap: &mut self.minimap,
-                            settings_sections: &mut self.settings_sections,
-                            poi_labels: &mut self.poi_labels,
-                            address_labels: &mut self.address_labels,
-                            street_sign_labels: &mut self.street_sign_labels,
-                            search: &mut self.search,
-                            inspect: &mut self.inspect,
-                            performance: &mut self.performance,
-                            area_switch: &mut self.area_switch,
-                            visual_detail: &mut self.visual_detail,
+                            ui: &mut self.ui,
+                            render: &mut self.render,
                         },
                     );
                     self.persist_preferences_if_changed(false);
                 }
 
                 if screenshot_path.is_some() {
-                    self.screenshot_taken = true;
+                    self.render.screenshot_taken = true;
                 }
 
                 if self.check_auto_exit() {
@@ -241,11 +234,11 @@ impl ApplicationHandler for App {
 
 impl App {
     fn check_screenshot_cloned(&self) -> Option<String> {
-        if self.screenshot_taken {
+        if self.render.screenshot_taken {
             return None;
         }
         let path = self.opts.screenshot_path.as_ref()?;
-        let start = self.render_start?;
+        let start = self.render.render_start?;
         let elapsed = start.elapsed().as_secs_f32();
         if elapsed >= self.opts.screenshot_delay {
             Some(path.clone())
@@ -255,19 +248,20 @@ impl App {
     }
 
     fn persist_preferences_if_changed(&mut self, force: bool) {
-        let minimap = crate::app::prefs::MinimapPrefs::from_minimap_state(&self.minimap);
+        let minimap = crate::app::prefs::MinimapPrefs::from_minimap_state(&self.ui.minimap);
         let camera = self
             .state
             .as_ref()
             .map(|state| crate::app::prefs::CameraPrefs::from_camera(&state.camera))
-            .or_else(|| self.persisted_camera.clone());
-        let settings_sections = self.settings_sections.clone();
-        let visual_detail =
-            crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(&self.visual_detail);
-        let minimap_changed = minimap != self.persisted_minimap;
-        let camera_changed = camera != self.persisted_camera;
-        let settings_sections_changed = settings_sections != self.persisted_settings_sections;
-        let visual_detail_changed = visual_detail != self.persisted_visual_detail;
+            .or_else(|| self.view.persisted_camera.clone());
+        let settings_sections = self.ui.settings_sections.clone();
+        let visual_detail = crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(
+            &self.render.visual_detail,
+        );
+        let minimap_changed = minimap != self.view.persisted_minimap;
+        let camera_changed = camera != self.view.persisted_camera;
+        let settings_sections_changed = settings_sections != self.view.persisted_settings_sections;
+        let visual_detail_changed = visual_detail != self.view.persisted_visual_detail;
         if !minimap_changed
             && !camera_changed
             && !settings_sections_changed
@@ -280,7 +274,7 @@ impl App {
             && !settings_sections_changed
             && !visual_detail_changed
             && !force
-            && self.last_prefs_save.elapsed() < super::PREFS_SAVE_INTERVAL
+            && self.view.last_prefs_save.elapsed() < super::PREFS_SAVE_INTERVAL
         {
             return;
         }
@@ -293,18 +287,18 @@ impl App {
         };
         match crate::app::prefs::save_user_prefs(&prefs) {
             Ok(()) => {
-                self.persisted_minimap = minimap;
-                self.persisted_camera = camera;
-                self.persisted_settings_sections = settings_sections;
-                self.persisted_visual_detail = visual_detail;
-                self.last_prefs_save = std::time::Instant::now();
+                self.view.persisted_minimap = minimap;
+                self.view.persisted_camera = camera;
+                self.view.persisted_settings_sections = settings_sections;
+                self.view.persisted_visual_detail = visual_detail;
+                self.view.last_prefs_save = std::time::Instant::now();
             }
             Err(err) => log::warn!("Failed to save preferences: {err}"),
         }
     }
 
     fn check_auto_exit(&self) -> bool {
-        if let (Some(delay), Some(start)) = (self.opts.auto_exit_delay, self.render_start) {
+        if let (Some(delay), Some(start)) = (self.opts.auto_exit_delay, self.render.render_start) {
             let elapsed = start.elapsed().as_secs_f32();
             if elapsed >= delay {
                 log::info!("[AUTO-EXIT] Exiting after {:.2}s", elapsed);

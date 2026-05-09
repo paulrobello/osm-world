@@ -1,5 +1,13 @@
+/**
+ * Typed client for the osm-world Rust API server.
+ *
+ * @module api
+ */
+
+/** API base URL, read from `NEXT_PUBLIC_OSM_WORLD_API_URL` or defaulted to `http://127.0.0.1:3030`. */
 export const API_URL = process.env.NEXT_PUBLIC_OSM_WORLD_API_URL ?? 'http://127.0.0.1:3030';
 
+/** Feature type toggles controlling which OSM features are included in a prepare request. */
 export interface FeatureFilter {
   roads: boolean;
   buildings: boolean;
@@ -8,6 +16,7 @@ export interface FeatureFilter {
   railways: boolean;
 }
 
+/** Default feature filter with all feature types enabled. */
 export const defaultFilter: FeatureFilter = {
   roads: true,
   buildings: true,
@@ -16,9 +25,12 @@ export const defaultFilter: FeatureFilter = {
   railways: true,
 };
 
+/** POI source selection mode controlling whether OSM, Overture, or both are used. */
 export type PoiSourceMode = 'osm_only' | 'overture_only' | 'both' | 'overture_preferred';
+/** Behavior when Overture data fetch fails. */
 export type OvertureFailureMode = 'fallback_to_osm' | 'fail';
 
+/** Overture and POI source configuration for prepare requests. */
 export interface SourceControls {
   poi_source_mode: PoiSourceMode;
   overture_themes: string[];
@@ -26,6 +38,7 @@ export interface SourceControls {
   overture_timeout: number;
 }
 
+/** Default source controls: OSM only, all Overture themes, fallback on failure. */
 export const defaultSourceControls: SourceControls = {
   poi_source_mode: 'osm_only',
   overture_themes: ['address', 'base', 'building', 'place', 'transportation'],
@@ -33,6 +46,7 @@ export const defaultSourceControls: SourceControls = {
   overture_timeout: 120,
 };
 
+/** Cached Overpass area entry from the shared par-osm-rust cache. */
 export interface CacheEntry {
   key: string;
   bbox: [number, number, number, number];
@@ -40,6 +54,7 @@ export interface CacheEntry {
   size_bytes: number;
 }
 
+/** Response from `POST /areas/prepare` with prepared file paths and launch command. */
 export interface PrepareAreaResponse {
   bbox: [number, number, number, number];
   cache_key: string;
@@ -56,6 +71,7 @@ export interface PrepareAreaResponse {
   command_args: string[];
 }
 
+/** Prepared area entry from `GET /areas/prepared`, including display metadata. */
 export interface PreparedAreaEntry extends Omit<PrepareAreaResponse, 'cache_status'> {
   display_name: string | null;
   favorite: boolean;
@@ -68,11 +84,13 @@ export interface PreparedAreaEntry extends Omit<PrepareAreaResponse, 'cache_stat
   overture_timeout: number | null;
 }
 
+/** Response from `DELETE /areas/prepared/{cacheKey}`. */
 export interface DeletePreparedAreaResponse {
   status: string;
   cache_key: string;
 }
 
+/** Response from `POST /renderer/launch`. */
 export interface LaunchRendererResponse {
   status: string;
   pid: number;
@@ -82,6 +100,10 @@ export interface LaunchRendererResponse {
   command_cwd: string;
 }
 
+/**
+ * Internal fetch wrapper that throws on non-OK responses with the server error message.
+ * @typeParam T - Expected response type
+ */
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, init);
 
@@ -93,18 +115,22 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+/** Fetches the server health status. */
 export function fetchHealth(): Promise<{ status: string; overpass_cache_dir: string; srtm_cache_dir: string }> {
   return apiJson('/health');
 }
 
+/** Lists cached Overpass areas from the shared cache. */
 export function fetchCacheAreas(): Promise<CacheEntry[]> {
   return apiJson('/cache/areas');
 }
 
+/** Lists all prepared renderer input areas. */
 export function fetchPreparedAreas(): Promise<PreparedAreaEntry[]> {
   return apiJson('/areas/prepared');
 }
 
+/** Updates the display name or favorite flag of a prepared area. */
 export function updatePreparedArea(
   cacheKey: string,
   body: { display_name?: string; favorite?: boolean },
@@ -116,12 +142,14 @@ export function updatePreparedArea(
   });
 }
 
+/** Deletes a prepared area and its metadata. */
 export function deletePreparedArea(cacheKey: string): Promise<DeletePreparedAreaResponse> {
   return apiJson(`/areas/prepared/${cacheKey}`, {
     method: 'DELETE',
   });
 }
 
+/** Prepares an area by fetching source data, optionally downloading SRTM, and building a renderer command. */
 export function prepareArea(body: {
   bbox: [number, number, number, number];
   filter: FeatureFilter;
@@ -142,6 +170,7 @@ export function prepareArea(body: {
   });
 }
 
+/** Launches the local renderer process for a prepared area. */
 export function launchRenderer(body: {
   osm_path: string;
   srtm_dir?: string | null;

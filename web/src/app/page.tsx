@@ -32,6 +32,10 @@ import {
   type SettingsProfile,
 } from '@/lib/settingsProfiles';
 import type { BBox, SpawnPoint } from '@/components/MapPicker';
+import { ConfirmDialog, PromptDialog } from '@/components/Dialog';
+import { HelpOverlay } from '@/components/HelpOverlay';
+import { PreparedHistorySection } from '@/components/PreparedHistorySection';
+import { PreparedOutputSection } from '@/components/PreparedOutputSection';
 
 const MapPicker = dynamic(() => import('@/components/MapPicker'), {
   ssr: false,
@@ -62,7 +66,6 @@ const OVERTURE_THEME_LABELS: Array<[string, string]> = [
 ];
 
 const SETTINGS_PROFILE_STORAGE_KEY = 'osm-world-web-settings-profile';
-const HELP_OVERLAY_STORAGE_KEY = 'osm-world-web-help-seen';
 const VISUAL_PRESET_LABELS: Array<[RendererOptions['visualPreset'], string]> = [
   ['performance', 'Performance'],
   ['balanced', 'Balanced'],
@@ -100,10 +103,6 @@ function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB'];
   const power = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / 1024 ** power).toFixed(power === 0 ? 0 : 1)} ${units[power]}`;
-}
-
-function sourceStatusLabel(status: string): string {
-  return status.replaceAll('_', ' ');
 }
 
 function preparedEntryToResult(entry: PreparedAreaEntry): PrepareAreaResponse {
@@ -149,7 +148,6 @@ export default function Home() {
   const [profileName, setProfileName] = useState('Default renderer profile');
   const [profileJson, setProfileJson] = useState('');
   const [profileStatus, setProfileStatus] = useState<string | null>(null);
-  const [showHelpOverlay, setShowHelpOverlay] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [metaError, setMetaError] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
@@ -159,6 +157,8 @@ export default function Home() {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [launchStatus, setLaunchStatus] = useState<'idle' | 'launching' | 'launched' | 'failed'>('idle');
   const [launchMessage, setLaunchMessage] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<PreparedAreaEntry | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PreparedAreaEntry | null>(null);
 
   const selectedFeatureCount = useMemo(
     () => Object.values(filter).filter(Boolean).length,
@@ -253,12 +253,6 @@ export default function Home() {
   }, [loadMeta]);
 
   useEffect(() => {
-    if (window.localStorage.getItem(HELP_OVERLAY_STORAGE_KEY) !== 'true') {
-      setShowHelpOverlay(true);
-    }
-  }, []);
-
-  useEffect(() => {
     if (!selectedBbox) {
       return;
     }
@@ -336,11 +330,7 @@ export default function Home() {
     setLaunchMessage(null);
   };
 
-  const renamePreparedEntry = async (entry: PreparedAreaEntry) => {
-    const displayName = window.prompt('Name this prepared area', entry.display_name ?? '');
-    if (displayName === null) {
-      return;
-    }
+  const renamePreparedEntry = async (entry: PreparedAreaEntry, displayName: string) => {
     try {
       const updated = await updatePreparedArea(entry.cache_key, { display_name: displayName });
       setPreparedAreas((current) => current.map((area) => (area.cache_key === updated.cache_key ? updated : area)));
@@ -362,11 +352,6 @@ export default function Home() {
   };
 
   const deletePreparedEntry = async (entry: PreparedAreaEntry) => {
-    const label = entry.display_name || entry.cache_key.slice(0, 12);
-    if (!window.confirm(`Delete prepared area “${label}” from the shared cache?`)) {
-      return;
-    }
-
     try {
       await deletePreparedArea(entry.cache_key);
       setPreparedAreas((current) => current.filter((area) => area.cache_key !== entry.cache_key));
@@ -436,11 +421,6 @@ export default function Home() {
     } catch (error) {
       setProfileStatus(error instanceof Error ? error.message : 'Unable to load saved profile');
     }
-  };
-
-  const dismissHelpOverlay = () => {
-    window.localStorage.setItem(HELP_OVERLAY_STORAGE_KEY, 'true');
-    setShowHelpOverlay(false);
   };
 
   const handleBboxChange = (bbox: BBox) => {
@@ -655,37 +635,14 @@ export default function Home() {
             <output>{formatSpawnPoint(spawnPoint)}</output>
           </section>
 
-          <section className="control-group" aria-labelledby="history-title">
-            <div className="section-heading">
-              <h2 id="history-title">Prepared history</h2>
-              <span>{preparedAreas.length} cached</span>
-            </div>
-            {preparedAreas.length === 0 ? (
-              <p className="microcopy">Prepared areas will appear here after the first successful prepare request.</p>
-            ) : (
-              <div className="history-list">
-                {preparedAreas.map((entry) => (
-                  <article className="history-entry" key={entry.cache_key}>
-                    <button className="history-main" type="button" onClick={() => loadPreparedEntry(entry)} disabled={isPreparing}>
-                      <strong>{entry.display_name || entry.cache_key.slice(0, 10)}</strong>
-                      <span>{sourceStatusLabel(entry.source_status)} · {formatBbox(entry.bbox)}</span>
-                    </button>
-                    <div className="history-actions">
-                      <button className="mini-button" type="button" onClick={() => void togglePreparedFavorite(entry)}>
-                        {entry.favorite ? '★' : '☆'}
-                      </button>
-                      <button className="mini-button" type="button" onClick={() => void renamePreparedEntry(entry)}>
-                        Name
-                      </button>
-                      <button className="mini-button danger-mini-button" type="button" onClick={() => void deletePreparedEntry(entry)}>
-                        Delete
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
+          <PreparedHistorySection
+            entries={preparedAreas}
+            disabled={isPreparing}
+            onLoadEntry={loadPreparedEntry}
+            onToggleFavorite={(entry) => void togglePreparedFavorite(entry)}
+            onRename={setRenameTarget}
+            onDelete={setDeleteTarget}
+          />
 
           <section className="control-group" aria-labelledby="features-title">
             <div className="section-heading">
@@ -1076,95 +1033,21 @@ export default function Home() {
           </section>
 
           {preparedArea ? (
-            <section className="result-card" aria-labelledby="result-title">
-              <div className="section-heading">
-                <h2 id="result-title">Prepared output</h2>
-                <span>{preparedArea.cache_status}</span>
-              </div>
-              <dl className="result-list">
-                <div>
-                  <dt>OSM path</dt>
-                  <dd>{preparedArea.osm_path}</dd>
-                </div>
-                {preparedArea.srtm_dir ? (
-                  <div>
-                    <dt>SRTM dir</dt>
-                    <dd>{preparedArea.srtm_dir}</dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt>Cache key</dt>
-                  <dd>{preparedArea.cache_key}</dd>
-                </div>
-                <div>
-                  <dt>Source status</dt>
-                  <dd>{sourceStatusLabel(preparedArea.source_status)}</dd>
-                </div>
-                {preparedArea.spawn_lat !== null && preparedArea.spawn_lon !== null ? (
-                  <div>
-                    <dt>Spawn point</dt>
-                    <dd>{preparedArea.spawn_lat.toFixed(6)}, {preparedArea.spawn_lon.toFixed(6)}</dd>
-                  </div>
-                ) : null}
-              </dl>
-              {preparedArea.warnings.length > 0 ? (
-                <div className="warning-stack" role="status">
-                  {preparedArea.warnings.map((warning) => (
-                    <p className="status-line pending" key={warning}>{warning}</p>
-                  ))}
-                </div>
-              ) : null}
-              <div className="command-variant-stack" aria-label="Launch command variants">
-                {commandVariants.map((variant) => (
-                  <article className="command-variant" key={variant.id}>
-                    <label className="command-box">
-                      <span>{variant.label} command</span>
-                      <textarea readOnly value={variant.command} rows={3} />
-                    </label>
-                    <p className="microcopy">{variant.description}</p>
-                    <button className="ghost-button copy-button" type="button" onClick={() => void copyCommand(variant.id, variant.command)}>
-                      {copiedCommandVariant === variant.id ? `Copied ${variant.label}` : `Copy ${variant.label}`}
-                    </button>
-                  </article>
-                ))}
-              </div>
-              <div className="button-row result-actions">
-                <button className="ghost-button copy-button" type="button" onClick={() => void handleLaunchRenderer()} disabled={launchStatus === 'launching'}>
-                  {launchStatus === 'launching' ? 'Launching…' : 'Launch renderer'}
-                </button>
-              </div>
-              {copyStatus === 'failed' ? <p className="status-line error">Clipboard permission denied. Select the command manually.</p> : null}
-              {launchMessage ? (
-                <div className="status-stack">
-                  <p className={`status-line ${launchStatus === 'failed' ? 'error' : 'success'}`}>{launchMessage}</p>
-                  {launchStatus === 'failed' && errorHintForMessage(launchMessage) ? (
-                    <p className="status-line hint">{errorHintForMessage(launchMessage)}</p>
-                  ) : null}
-                </div>
-              ) : null}
-            </section>
+            <PreparedOutputSection
+              preparedArea={preparedArea}
+              commandVariants={commandVariants}
+              copiedCommandVariant={copiedCommandVariant}
+              copyStatus={copyStatus}
+              launchStatus={launchStatus}
+              launchMessage={launchMessage}
+              onCopyCommand={copyCommand}
+              onLaunchRenderer={handleLaunchRenderer}
+            />
           ) : null}
         </div>
       </section>
 
-      {showHelpOverlay ? (
-        <section className="help-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title">
-          <div className="help-card">
-            <p className="eyebrow">first run checklist</p>
-            <h2 id="help-title">Fly the city without guessing</h2>
-            <ul>
-              <li><strong>Flycam:</strong> WASD moves, mouse looks, Shift accelerates, Space/Ctrl changes altitude.</li>
-              <li><strong>Minimap:</strong> press M in the renderer to toggle it; rotation follows the camera heading.</li>
-              <li><strong>Settings:</strong> F1 opens lighting, labels, shadows, minimap, and performance controls.</li>
-              <li><strong>Screenshots:</strong> use the screenshot command variant for repeatable PNG captures.</li>
-              <li><strong>Labels:</strong> POI, address, and street-sign labels can be tuned from renderer settings.</li>
-            </ul>
-            <button className="primary-action" type="button" onClick={dismissHelpOverlay}>
-              Got it
-            </button>
-          </div>
-        </section>
-      ) : null}
+      <HelpOverlay />
 
       <MapPicker
         cachedAreas={cacheAreas}
@@ -1174,6 +1057,37 @@ export default function Home() {
         onSpawnChange={handleSpawnChange}
         spawnMode={spawnMode}
         disabled={isPreparing}
+      />
+
+      <PromptDialog
+        open={renameTarget !== null}
+        title="Name this prepared area"
+        defaultValue={renameTarget?.display_name ?? ''}
+        confirmLabel="Save"
+        onCancel={() => setRenameTarget(null)}
+        onConfirm={(name) => {
+          const entry = renameTarget;
+          setRenameTarget(null);
+          if (entry) {
+            void renamePreparedEntry(entry, name);
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete prepared area"
+        message={`Delete prepared area "${deleteTarget?.display_name || deleteTarget?.cache_key.slice(0, 12)}" from the shared cache?`}
+        confirmLabel="Delete"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          const entry = deleteTarget;
+          setDeleteTarget(null);
+          if (entry) {
+            void deletePreparedEntry(entry);
+          }
+        }}
+        dangerous
       />
     </main>
   );

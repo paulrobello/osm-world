@@ -1,3 +1,10 @@
+/**
+ * User-facing error hint lookup for common prepare and launch failures.
+ *
+ * @module errorHints
+ */
+
+/** Pattern-to-hint mapping for common API errors. */
 const HINTS: Array<{ patterns: RegExp[]; hint: string }> = [
   {
     patterns: [/spawn.*bbox/i],
@@ -25,6 +32,10 @@ const HINTS: Array<{ patterns: RegExp[]; hint: string }> = [
   },
 ];
 
+/**
+ * Returns a user-facing hint for a given error message, or `null` if no hint matches.
+ * @param message - The error message string from the API
+ */
 export function errorHintForMessage(message: string): string | null {
   const normalized = message.trim();
   if (!normalized) {

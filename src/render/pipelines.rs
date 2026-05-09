@@ -2,6 +2,26 @@ use wgpu::*;
 
 use super::vertex::Vertex;
 
+/// Concatenate sky_helpers.wgsl into a shader that uses `scene` uniform helpers.
+const SKY_HELPERS: &str = include_str!("../../shaders/sky_helpers.wgsl");
+
+fn city_shader_source() -> String {
+    let mut source = String::with_capacity(4096);
+    source.push_str(include_str!("../../shaders/city.wgsl"));
+    // Insert sky helpers at the placeholder comment
+    if let Some(pos) =
+        source.find("// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---")
+    {
+        source.replace_range(
+            pos..pos
+                + "// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---"
+                    .len(),
+            SKY_HELPERS,
+        );
+    }
+    source
+}
+
 pub struct CityPipeline {
     pub pipeline: RenderPipeline,
     pub overlay_pipeline: RenderPipeline,
@@ -17,7 +37,7 @@ impl CityPipeline {
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("city shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/city.wgsl").into()),
+            source: ShaderSource::Wgsl(city_shader_source().into()),
         });
 
         let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {

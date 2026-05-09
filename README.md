@@ -3,6 +3,7 @@
 ![Runs on Linux | MacOS | Windows](https://img.shields.io/badge/runs%20on-Linux%20%7C%20MacOS%20%7C%20Windows-blue)
 ![Arch x86-64 | ARM | AppleSilicon](https://img.shields.io/badge/arch-x86--64%20%7C%20ARM%20%7C%20AppleSilicon-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
 
 Render real-world cities in 3D from [OpenStreetMap](https://www.openstreetmap.org/) data. `osm-world` is a Rust and WGPU desktop renderer with optional SRTM elevation, OpenStreetMap/Overture-backed area preparation, and a browser-based Web Explorer for selecting areas and launching repeatable renderer commands.
 
@@ -26,7 +27,7 @@ Render real-world cities in 3D from [OpenStreetMap](https://www.openstreetmap.or
 
 ## Getting Started
 
-New to `osm-world`? These are the quickest paths to a rendered city:
+New to osm-world? Here are the quickest paths to a rendered city:
 
 - **[Installation](#installation)** — Build from source and install web dependencies
 - **[Quick Start](#quick-start)** — Open the renderer or load a local `.osm.pbf` / `.osm` file
@@ -39,7 +40,7 @@ New to `osm-world`? These are the quickest paths to a rendered city:
 
 - WGPU renderer with Winit desktop windowing
 - Flycam navigation with saved camera preferences and explicit spawn coordinates
-- Terrain, land use, water, roads, railways, buildings, transit paths, street signs, addresses, points of interest, and landmarks
+- Terrain, land use, closed water polygons, open waterway ribbons, roads, railways, buildings, transit paths, street signs, addresses, points of interest, and landmarks
 - Sky, day-cycle lighting, cascaded shadow maps, contact shadows, minimap rendering, and HUD overlays
 - Screenshot automation for repeatable visual checks
 
@@ -70,12 +71,13 @@ New to `osm-world`? These are the quickest paths to a rendered city:
 
 ### From Source
 
-Requires the Rust toolchain specified by `Cargo.toml`. The web UI requires Bun.
+Requires the Rust toolchain specified by `Cargo.toml`.
 
 ```bash
 git clone https://github.com/paulrobello/osm-world
 cd osm-world
 make build
+# binary at target/debug/osm-world
 ```
 
 The project currently uses a local path dependency on the sibling `par-osm-rust` repository:
@@ -91,6 +93,14 @@ Clone or keep that repository next to `osm-world` before building.
 ```bash
 make web-install
 ```
+
+### Prerequisites
+
+| Tool | Notes |
+| --- | --- |
+| Rust | Required for the renderer and API server. Use the toolchain specified by `Cargo.toml`. |
+| Bun | Required only for the Web Explorer. |
+| `par-osm-rust` | Required as a sibling checkout until the local path dependency is published or vendored. |
 
 ## Quick Start
 
@@ -216,6 +226,7 @@ Visit `http://localhost:8032` in a browser.
 - **[Streaming and LOD Design](docs/superpowers/specs/2026-05-02-phase3-streaming-lod-design.md)** — Tile streaming and level-of-detail direction
 - **[Shared Cache and Web Picker Design](docs/superpowers/specs/2026-05-03-shared-osm-cache-and-streaming-design.md)** — `par-osm-rust` cache contract and prepare workflow
 - **[Visual Detail Controls Design](docs/superpowers/specs/2026-05-06-osm-world-visual-detail-controls-design.md)** — Visual presets, landmarks, facade variation, vegetation, and screenshot validation
+- **[Documentation Style Guide](docs/DOCUMENTATION_STYLE_GUIDE.md)** — Formatting, structure, tone, and maintenance standards for project documentation
 
 ## Getting OSM Data
 
@@ -229,25 +240,18 @@ Small city extracts are the best starting point while tuning visuals and perform
 
 ## Architecture
 
-The core pipeline is:
+Parse source data → project coordinates → classify world features → build a capped startup mesh or no-streaming full mesh → validate and upload WGPU buffers → render the desktop scene.
 
-```text
-OSM / Overture / SRTM data
-  → shared cache and prepared .osm files
-  → OSM parser and geographic projection
-  → world feature classification
-  → CPU mesh generation
-  → WGPU buffers and render passes
-  → desktop renderer UI
-```
+The CLI also includes an Axum HTTP server powering the Web Explorer, with Overpass and Overture data fetching, disk caching, renderer launch, and SRTM elevation support.
 
-The project also includes an Axum API server and a Next.js Web Explorer. See **[Architecture](docs/ARCHITECTURE.md)** for the full module map, data flow, API surface, and current streaming boundaries.
+See **[Architecture](docs/ARCHITECTURE.md)** for the full module map, data flow, API surface, and current streaming boundaries.
 
 ## Known Limitations
 
 - **Projection model:** The renderer uses an equirectangular projection suited to city-scale areas; distortion increases across large regions and high latitudes.
 - **Prepared-area size:** The API validates bbox size and limits SRTM tile counts to keep local preparation practical.
-- **Streaming state:** The code includes tile, LOD, and debug-state helpers, but current scene upload still builds a full `SceneBuffers` mesh for loaded input.
+- **Streaming state:** Startup uses tile selection and GPU buffer caps, but runtime rendering still uploads one `SceneBuffers` allocation until incremental tile uploads are implemented.
+- **Large-region detail:** Distant startup tiles can be skipped when the selected mesh would exceed the GPU buffer budget. Use smaller areas or lower visual detail for dense regions.
 - **Local dependency:** `par-osm-rust` is currently expected as a sibling checkout.
 
 ## Contributing
@@ -255,11 +259,16 @@ The project also includes an Axum API server and a Next.js Web Explorer. See **[
 Before submitting changes, run the relevant checks:
 
 ```bash
-make fmt
-make typecheck
-make lint
-make test
-make checkall
+make build      # Debug build
+make test       # Run Rust tests
+make lint       # cargo clippy
+make fmt        # rustfmt check
+make typecheck  # cargo check
+make web-build  # Build the Next.js frontend
+make checkall   # fmt + typecheck + lint + test
+make clean      # cargo clean
+make dev        # Start both Rust API + Web Explorer
+make serve      # Start Rust API server only
 ```
 
 For web-only changes, also run:

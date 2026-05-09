@@ -221,7 +221,7 @@ sequenceDiagram
     Web->>API: POST /renderer/launch
     API->>Renderer: Spawn cargo run -- --input <prepared.osm>
     Renderer->>Loader: Parse input and classify features
-    Loader->>GPU: Upload scene buffers
+    Loader->>GPU: Generate startup mesh and upload scene buffers
     GPU-->>User: Interactive city scene
 ```
 
@@ -262,7 +262,7 @@ The server builds a command shaped like this:
 cargo run --manifest-path <project-root>/Cargo.toml -- --input <prepared.osm>
 ```
 
-When present, the server appends `--spawn-lat`, `--spawn-lon`, and `--srtm-dir`. The Web Explorer adds renderer-profile flags client-side to create debug, release, screenshot, and no-streaming variants.
+When present, the server appends `--spawn-lat`, `--spawn-lon`, and `--srtm-dir`. `/renderer/launch` also accepts `extra_args`, which the Web Explorer uses to forward selected renderer-profile flags such as visual presets, time of day, streaming budgets, label settings, and minimap settings. The copyable command variants add release, screenshot, and no-streaming forms client-side.
 
 ## Renderer Architecture
 
@@ -293,7 +293,7 @@ When present, the server appends `--spawn-lat`, `--spawn-lon`, and `--srtm-dir`.
 - occlusion query resources;
 - minimap render target.
 
-When an input path is provided, initialization loads the world source, derives labels/search/inspection/tile-debug data, generates the CPU mesh, and uploads it into `SceneBuffers`.
+When an input path is provided, initialization loads the world source, derives labels/search/inspection/tile-debug data, generates the CPU mesh, validates GPU buffer sizes against device limits, and uploads it into `SceneBuffers`. With streaming enabled, startup generation selects nearby tiles around the effective camera position and rebuilds with fewer tiles if the mesh would exceed the GPU buffer budget.
 
 ### Render Passes
 
@@ -326,7 +326,8 @@ The render loop updates camera, lighting, and visual-detail uniforms, then rende
 - roads;
 - railways;
 - transit routes;
-- waters;
+- closed water polygons;
+- open waterway ribbons;
 - land uses;
 - point features;
 - address points;
@@ -340,7 +341,7 @@ The current full-scene mesh generator appends geometry in a deliberate order:
 
 1. terrain with tunnel portal cuts;
 2. land-use polygons;
-3. water polygons;
+3. closed water polygons and uncovered open waterway ribbons;
 4. roads, road markings, road caps, bridges, tunnels, and related structures;
 5. transit route overlays;
 6. railway tracks;
@@ -358,11 +359,11 @@ The `stream` module defines tile and level-of-detail primitives:
 | --- | --- |
 | `TileCoord` | Converts world X/Z coordinates to tile coordinates and tile rectangles. |
 | `TileDebugState` | Tracks queued, generating, uploaded, visible, culled, evicted, and failed states for UI/debug overlays. |
-| `TileFeatureRefs` | Stores feature indices assigned to a tile. |
+| `TileFeatureRefs` | Stores feature indices assigned to a tile, including closed water polygons and open waterways. |
 | `LodConfig` | Selects `Near`, `Mid`, or `Far` with hysteresis to prevent threshold flicker. |
 | `TileLod` | Controls terrain spacing for tile mesh generation helpers. |
 
-> **Note:** The codebase contains tile mesh and LOD helpers, but the current loaded scene still uploads one full `SceneBuffers` mesh for the selected input. The streaming module is the boundary for incremental runtime streaming and tile-specific GPU upload work.
+> **Note:** The current renderer uses the streaming primitives to build a capped startup mesh around the effective camera position. It still uploads that result as one `SceneBuffers` allocation; the streaming module remains the boundary for future incremental runtime tile uploads.
 
 Default LOD behavior uses three tiers:
 
@@ -398,11 +399,11 @@ The frontend reads `NEXT_PUBLIC_OSM_WORLD_API_URL` and defaults to `http://127.0
 | **Prepared `.osm` files** | Gives the renderer a deterministic local input and makes command variants copyable. | Prepared files can become stale if source settings change without a refresh. |
 | **Equirectangular projection** | Fast and adequate for city-scale scenes. | Not suitable for very large regions or high-precision geodesic analysis. |
 | **Layer-specific index buffers** | Makes draw ordering and shadow inclusion explicit without duplicating vertices. | Adds CPU-side index partitioning when scene buffers are built. |
-| **Current full-scene upload with streaming boundaries** | Keeps the renderer working while tile, LOD, and debug abstractions mature. | Large inputs can still require substantial CPU/GPU memory until incremental upload is completed. |
+| **Capped startup mesh with streaming boundaries** | Avoids oversized startup GPU buffers while keeping tile, LOD, and debug abstractions reusable. | Runtime movement still uses one uploaded `SceneBuffers` allocation until incremental tile upload is completed. |
 
 ## Known Risks and Boundaries
 
-- **Input size:** Large prepared regions can create large CPU meshes and GPU buffers because the current scene path uploads a full mesh.
+- **Input size:** Large prepared regions still create large CPU meshes during startup selection, and runtime rendering still uses one uploaded scene buffer allocation.
 - **Source availability:** Overpass, Overture, and SRTM workflows depend on network availability unless data already exists in cache.
 - **Local launch trust boundary:** `/renderer/launch` spawns a local process. Keep the API bound to a trusted local interface unless you intentionally harden it for remote use.
 - **Projection accuracy:** The coordinate system is optimized for city-scale visualization, not surveying or continental-scale rendering.

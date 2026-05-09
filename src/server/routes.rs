@@ -15,14 +15,15 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use super::prepared_cache::{
     delete_prepared_area, list_prepared_areas, prepared_metadata_path,
-    read_prepared_cache_metadata, read_prepared_cache_metadata_struct, update_prepared_area_details,
-    write_prepared_cache_metadata,
+    read_prepared_cache_metadata, read_prepared_cache_metadata_struct,
+    update_prepared_area_details, write_prepared_cache_metadata,
 };
 use super::shell::{launch_renderer, path_string, renderer_launch_command};
 use super::types::{
     ApiError, AppState, DeletePreparedAreaResponse, ErrorResponse, HealthResponse,
-    LaunchRendererRequest, LaunchRendererResponse, PrepareAreaRequest, PrepareAreaResponse,
-    PreparedAreaEntry, PreparedAreaUpdate, PreparedCacheMetadata, PrepareAreaError, PrepareResult,
+    LaunchRendererRequest, LaunchRendererResponse, PrepareAreaError, PrepareAreaRequest,
+    PrepareAreaResponse, PrepareResult, PreparedAreaEntry, PreparedAreaUpdate,
+    PreparedCacheMetadata,
 };
 use super::validate::{
     auth_middleware, classify_srtm_error, effective_overpass_url_for_prepare,
@@ -65,12 +66,7 @@ pub fn build_router(project_root: PathBuf) -> Router {
                     HeaderValue::from_static("http://localhost:8032"),
                     HeaderValue::from_static("http://127.0.0.1:8032"),
                 ]))
-                .allow_methods([
-                    Method::GET,
-                    Method::POST,
-                    Method::DELETE,
-                    Method::OPTIONS,
-                ])
+                .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::AUTHORIZATION,

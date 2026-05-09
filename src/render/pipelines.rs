@@ -9,8 +9,15 @@ fn city_shader_source() -> String {
     let mut source = String::with_capacity(4096);
     source.push_str(include_str!("../../shaders/city.wgsl"));
     // Insert sky helpers at the placeholder comment
-    if let Some(pos) = source.find("// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---") {
-        source.replace_range(pos..pos + "// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---".len(), SKY_HELPERS);
+    if let Some(pos) =
+        source.find("// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---")
+    {
+        source.replace_range(
+            pos..pos
+                + "// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---"
+                    .len(),
+            SKY_HELPERS,
+        );
     }
     source
 }

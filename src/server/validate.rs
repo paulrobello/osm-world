@@ -4,11 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use axum::{
-    Json,
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Json, http::StatusCode, response::IntoResponse};
 
 use super::types::{ErrorResponse, PrepareAreaError, PrepareResult};
 
@@ -293,7 +289,9 @@ pub fn is_degraded_overture_prepared_cache(overture_enabled: bool, source_status
 ///
 /// Uses the provided URL if present, otherwise falls back to the default.
 /// Validates against the Overpass URL allowlist and parses as a valid URL.
-pub(crate) fn effective_overpass_url_for_prepare(overpass_url: Option<&str>) -> PrepareResult<String> {
+pub(crate) fn effective_overpass_url_for_prepare(
+    overpass_url: Option<&str>,
+) -> PrepareResult<String> {
     let url = match overpass_url {
         Some(url) => url,
         None => par_osm_rust::overpass::default_overpass_url(),
@@ -429,12 +427,12 @@ impl RateLimiter {
     fn check(&self, client_ip: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
         let now = Instant::now();
         let mut buckets = self.buckets.lock().unwrap();
-        let bucket = buckets.entry(client_ip.to_string()).or_insert_with(|| {
-            ClientBucket {
+        let bucket = buckets
+            .entry(client_ip.to_string())
+            .or_insert_with(|| ClientBucket {
                 count: 0,
                 window_start: now,
-            }
-        });
+            });
 
         let elapsed = now.duration_since(bucket.window_start).as_secs();
         if elapsed >= RATE_LIMIT_WINDOW_SECS {

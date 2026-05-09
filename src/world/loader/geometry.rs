@@ -163,10 +163,10 @@ pub fn bbox_intersects_rect(
     min_x < rect.max_x && max_x > rect.min_x && min_z < rect.max_z && max_z > rect.min_z
 }
 
-pub fn containing_building_name<'a>(
+pub fn containing_building_name(
     point: (f32, f32),
-    buildings: &'a [super::ResolvedFeature],
-) -> Option<&'a str> {
+    buildings: &[super::ResolvedFeature],
+) -> Option<&str> {
     buildings
         .iter()
         .find(|building| point_in_polygon(point, &building.points))?
@@ -188,10 +188,7 @@ pub fn move_point_outside_containing_building(
         .unwrap_or(point)
 }
 
-pub fn move_point_outside_polygon(
-    point: (f32, f32),
-    polygon: &[(f32, f32)],
-) -> Option<(f32, f32)> {
+pub fn move_point_outside_polygon(point: (f32, f32), polygon: &[(f32, f32)]) -> Option<(f32, f32)> {
     let nearest = nearest_point_on_polygon_edges(point, polygon)?;
     let to_edge = glam::vec2(nearest.0 - point.0, nearest.1 - point.1);
     let fallback = {

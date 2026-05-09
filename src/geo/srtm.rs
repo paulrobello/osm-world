@@ -119,7 +119,7 @@ pub fn download_tile(lat: i32, lon: i32, dest_dir: &Path) -> Result<bool> {
             return Err(anyhow::anyhow!(
                 "Failed to create {}: {e}",
                 hgt_path.display()
-            ))
+            ));
         }
     };
     std::io::Write::write_all(&mut file, &hgt_data)

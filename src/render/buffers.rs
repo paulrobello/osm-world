@@ -147,7 +147,11 @@ struct RenderLayerIndexData {
     solids: Vec<u32>,
 }
 
-fn create_render_index_buffer(device: &Device, label: &str, indices: &[u32]) -> Option<RenderIndexBuffer> {
+fn create_render_index_buffer(
+    device: &Device,
+    label: &str,
+    indices: &[u32],
+) -> Option<RenderIndexBuffer> {
     if indices.is_empty() {
         return None;
     }

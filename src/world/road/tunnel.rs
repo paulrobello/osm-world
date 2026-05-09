@@ -7,8 +7,8 @@
 use crate::mesh::Vertex;
 
 use super::{
-    ROAD_Y_OFFSET, SegmentStripBox,
-    segment_frame, append_segment_strip_box, append_box, bounds2d, same_point,
+    ROAD_Y_OFFSET, SegmentStripBox, append_box, append_segment_strip_box, bounds2d, same_point,
+    segment_frame,
 };
 
 pub const TUNNEL_PORTAL_DEPTH: f32 = 1.0;

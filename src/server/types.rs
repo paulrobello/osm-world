@@ -2,11 +2,7 @@
 
 use std::path::PathBuf;
 
-use axum::{
-    Json,
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Json, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
 /// Shared application state passed to all Axum route handlers.

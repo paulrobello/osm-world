@@ -51,7 +51,8 @@ pub fn render(
     );
     state.camera_bg.update(&state.queue, &camera_uniforms);
 
-    let light_dir = crate::atmosphere::dominant_light_direction(ui_state.render.day_cycle.time_of_day);
+    let light_dir =
+        crate::atmosphere::dominant_light_direction(ui_state.render.day_cycle.time_of_day);
     let cascades = if ui_state.render.day_cycle.real_clock || !ui_state.render.day_cycle.paused {
         state.camera.shadow_cascades_for_dynamic_light(light_dir)
     } else {
@@ -280,21 +281,21 @@ pub fn render(
             ctx,
             &state.camera,
             &state.poi_labels,
-            &mut ui_state.ui.poi_labels,
+            &ui_state.ui.poi_labels,
             viewport_size,
         );
         crate::ui::poi_labels::draw_addresses(
             ctx,
             &state.camera,
             &state.address_labels,
-            &mut ui_state.ui.address_labels,
+            &ui_state.ui.address_labels,
             viewport_size,
         );
         crate::ui::poi_labels::draw_street_signs(
             ctx,
             &state.camera,
             &state.street_sign_labels,
-            &mut ui_state.ui.street_sign_labels,
+            &ui_state.ui.street_sign_labels,
             viewport_size,
         );
         if ui_state.ui.show_settings {

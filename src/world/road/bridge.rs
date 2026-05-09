@@ -6,10 +6,7 @@
 
 use crate::mesh::Vertex;
 
-use super::{
-    ROAD_Y_OFFSET, SegmentStripBox,
-    segment_frame, append_segment_strip_box, append_box,
-};
+use super::{ROAD_Y_OFFSET, SegmentStripBox, append_box, append_segment_strip_box, segment_frame};
 
 pub const BRIDGE_BEAM_THICKNESS: f32 = 0.6;
 pub const BRIDGE_BEAM_TOP_CLEARANCE: f32 = 0.85;
@@ -262,6 +259,12 @@ fn append_sloped_segment_strip_box(
     idxs: &mut Vec<u32>,
 ) {
     super::append_sloped_segment_strip_box(
-        strip, start_min_y, start_max_y, end_min_y, end_max_y, verts, idxs,
+        strip,
+        start_min_y,
+        start_max_y,
+        end_min_y,
+        end_max_y,
+        verts,
+        idxs,
     );
 }

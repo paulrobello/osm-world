@@ -31,9 +31,7 @@ pub(crate) fn launch_renderer(
             )
         })?;
 
-    Ok(LaunchRendererResponse {
-        status: "launched",
-    })
+    Ok(LaunchRendererResponse { status: "launched" })
 }
 
 /// Builds a `cargo run` command that launches the renderer for a prepared `.osm` file.

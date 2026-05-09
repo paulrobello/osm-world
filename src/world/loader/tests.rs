@@ -290,8 +290,7 @@ fn poi_node_inside_named_building_inherits_building_name_when_unnamed() {
         Some("Woodland Public Library")
     );
     assert_eq!(
-        crate::world::point_feature::point_feature_label(&source.point_features[0].tags)
-            .as_deref(),
+        crate::world::point_feature::point_feature_label(&source.point_features[0].tags).as_deref(),
         Some("Woodland Public Library")
     );
 }
@@ -735,9 +734,11 @@ fn world_mesh_with_landmark_detail_off_suppresses_landmark_geometry() {
 
     let mesh = generate_world_mesh_with_visual_detail(&source, &visual);
 
-    assert!(mesh.vertices.iter().all(|vertex| {
-        vertex.feature_type != crate::render::vertex::feature::POINT_FEATURE
-    }));
+    assert!(
+        mesh.vertices
+            .iter()
+            .all(|vertex| { vertex.feature_type != crate::render::vertex::feature::POINT_FEATURE })
+    );
 }
 
 #[test]
@@ -768,9 +769,11 @@ fn tile_mesh_with_landmark_detail_off_suppresses_landmark_geometry() {
     );
 
     let near_vertices = &mesh.lods[crate::stream::TileLod::Near as usize].vertices;
-    assert!(near_vertices.iter().all(|vertex| {
-        vertex.feature_type != crate::render::vertex::feature::POINT_FEATURE
-    }));
+    assert!(
+        near_vertices
+            .iter()
+            .all(|vertex| { vertex.feature_type != crate::render::vertex::feature::POINT_FEATURE })
+    );
 }
 
 #[test]
@@ -975,8 +978,7 @@ fn tile_mesh_emits_open_waterway_ribbon_geometry() {
 }
 
 #[test]
-fn streamed_startup_mesh_emits_water_intersecting_selected_tile_even_when_owner_is_unselected()
-{
+fn streamed_startup_mesh_emits_water_intersecting_selected_tile_even_when_owner_is_unselected() {
     let mut source = empty_source();
     source.waters.push(feature(
         "natural",
@@ -998,8 +1000,7 @@ fn streamed_startup_mesh_emits_water_intersecting_selected_tile_even_when_owner_
         .collect();
     assert!(!water_vertices.is_empty());
     assert!(water_vertices.iter().all(|vertex| {
-        (0.0..=100.0).contains(&vertex.position[0])
-            && (-100.0..=0.0).contains(&vertex.position[2])
+        (0.0..=100.0).contains(&vertex.position[0]) && (-100.0..=0.0).contains(&vertex.position[2])
     }));
 }
 

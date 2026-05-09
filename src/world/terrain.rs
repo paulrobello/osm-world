@@ -74,14 +74,7 @@ pub fn generate_terrain(
     ctx: &TerrainContext<'_>,
     output: &mut MeshOutput<'_>,
 ) {
-    generate_terrain_with_cuts(
-        min_lat,
-        min_lon,
-        max_lat,
-        max_lon,
-        ctx,
-        output,
-    );
+    generate_terrain_with_cuts(min_lat, min_lon, max_lat, max_lon, ctx, output);
 }
 
 pub fn generate_terrain_with_cuts(
@@ -106,15 +99,7 @@ pub fn generate_terrain_with_cuts(
     let (min_x, min_z) = ctx.conv.to_world_xz(max_lat, min_lon);
     let (_max_x, _max_z) = ctx.conv.to_world_xz(min_lat, max_lon);
 
-    append_terrain_grid(
-        min_x,
-        min_z,
-        cols,
-        rows,
-        GRID_SPACING,
-        ctx,
-        output,
-    );
+    append_terrain_grid(min_x, min_z, cols, rows, GRID_SPACING, ctx, output);
 }
 
 /// Generate a terrain heightfield mesh for the given world-space rectangle.
@@ -158,15 +143,7 @@ pub fn generate_terrain_for_world_rect_with_cuts(
         return;
     }
 
-    append_terrain_grid(
-        min_x,
-        min_z,
-        cols,
-        rows,
-        grid_spacing,
-        ctx,
-        output,
-    );
+    append_terrain_grid(min_x, min_z, cols, rows, grid_spacing, ctx, output);
 }
 
 fn append_terrain_grid(
@@ -193,7 +170,8 @@ fn append_terrain_grid(
             let metres_per_deg_lon = 111_320.0 * ctx.conv.origin_lat.to_radians().cos();
             let lon = ctx.conv.origin_lon + (x as f64) / metres_per_deg_lon;
 
-            let mut h = ctx.elevation
+            let mut h = ctx
+                .elevation
                 .and_then(|e| e.elevation_at(lat, lon))
                 .unwrap_or(0.0) as f32;
             for cut in ctx.cuts {
@@ -286,13 +264,18 @@ mod tests {
     #[test]
     fn tile_terrain_generates_grid_for_bounds() {
         let conv = CoordConverter::new(38.0, -122.0);
-        let ctx = TerrainContext { conv: &conv, elevation: None, cuts: &[] };
+        let ctx = TerrainContext {
+            conv: &conv,
+            elevation: None,
+            cuts: &[],
+        };
         let mut verts = Vec::new();
         let mut idxs = Vec::new();
-        let mut output = MeshOutput { vertices: &mut verts, indices: &mut idxs };
-        generate_terrain_for_world_rect(
-            0.0, -100.0, 100.0, 0.0, 50.0, &ctx, &mut output,
-        );
+        let mut output = MeshOutput {
+            vertices: &mut verts,
+            indices: &mut idxs,
+        };
+        generate_terrain_for_world_rect(0.0, -100.0, 100.0, 0.0, 50.0, &ctx, &mut output);
         assert_eq!(verts.len(), 9);
         assert_eq!(idxs.len(), 24);
     }
@@ -307,14 +290,19 @@ mod tests {
             floor_y: -4.8,
             blend_width: 8.0,
         }];
-        let ctx = TerrainContext { conv: &conv, elevation: None, cuts: &cuts };
+        let ctx = TerrainContext {
+            conv: &conv,
+            elevation: None,
+            cuts: &cuts,
+        };
         let mut verts = Vec::new();
         let mut idxs = Vec::new();
-        let mut output = MeshOutput { vertices: &mut verts, indices: &mut idxs };
+        let mut output = MeshOutput {
+            vertices: &mut verts,
+            indices: &mut idxs,
+        };
 
-        generate_terrain_for_world_rect_with_cuts(
-            0.0, -40.0, 80.0, 40.0, 10.0, &ctx, &mut output,
-        );
+        generate_terrain_for_world_rect_with_cuts(0.0, -40.0, 80.0, 40.0, 10.0, &ctx, &mut output);
 
         let centre = verts
             .iter()

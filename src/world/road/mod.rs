@@ -857,7 +857,11 @@ pub(super) fn segment_frame(a: Point2, b: Point2) -> Option<SegmentFrame> {
     }
 }
 
-pub(super) fn append_segment_strip_box(strip: SegmentStripBox, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+pub(super) fn append_segment_strip_box(
+    strip: SegmentStripBox,
+    verts: &mut Vec<Vertex>,
+    idxs: &mut Vec<u32>,
+) {
     let min_y = strip.min_y;
     let max_y = strip.max_y;
     append_sloped_segment_strip_box(strip, min_y, max_y, min_y, max_y, verts, idxs);
@@ -1359,7 +1363,13 @@ mod tests {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        tunnel::append_tunnel_structure(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+        tunnel::append_tunnel_structure(
+            &points,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
 
         assert!(!vertices.is_empty());
         assert!(!indices.is_empty());
@@ -1378,7 +1388,13 @@ mod tests {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        tunnel::append_tunnel_structure(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+        tunnel::append_tunnel_structure(
+            &points,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
 
         assert!(!vertices.is_empty());
         assert!(!indices.is_empty());
@@ -1397,7 +1413,13 @@ mod tests {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        tunnel::append_tunnel_structure(&points, &road_elevations, 6.0, &mut vertices, &mut indices);
+        tunnel::append_tunnel_structure(
+            &points,
+            &road_elevations,
+            6.0,
+            &mut vertices,
+            &mut indices,
+        );
 
         assert!(vertices.is_empty());
         assert!(indices.is_empty());

@@ -4,9 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::render::vertex::Vertex;
 
-use super::source::{
-    CpuMesh, ResolvedFeature, TileMeshSet, WorldMesh, WorldSource,
-};
+use super::source::{CpuMesh, ResolvedFeature, TileMeshSet, WorldMesh, WorldSource};
 
 pub fn same_road_point(a: (f32, f32), b: (f32, f32)) -> bool {
     (a.0 - b.0).abs() <= 0.05 && (a.1 - b.1).abs() <= 0.05
@@ -113,7 +111,9 @@ fn bridge_endpoint_ramps_for_road(
     let Some(road) = source.roads.get(road_index) else {
         return crate::world::road::BridgeEndpointRamps::default();
     };
-    if crate::world::road::road_profile(&road.tags).kind != crate::world::road::RoadProfileKind::Bridge {
+    if crate::world::road::road_profile(&road.tags).kind
+        != crate::world::road::RoadProfileKind::Bridge
+    {
         return crate::world::road::BridgeEndpointRamps::default();
     }
 
@@ -136,7 +136,8 @@ fn has_connected_bridge_road_at(
 ) -> bool {
     source.roads.iter().enumerate().any(|(other_index, other)| {
         other_index != road_index
-            && crate::world::road::road_profile(&other.tags).kind == crate::world::road::RoadProfileKind::Bridge
+            && crate::world::road::road_profile(&other.tags).kind
+                == crate::world::road::RoadProfileKind::Bridge
             && other
                 .points
                 .iter()
@@ -160,7 +161,8 @@ fn terrain_cuts_for_road_refs(
 }
 
 fn terrain_cuts_for_road(road: &ResolvedFeature) -> Vec<crate::world::terrain::TerrainCut> {
-    if crate::world::road::road_profile(&road.tags).kind != crate::world::road::RoadProfileKind::Tunnel
+    if crate::world::road::road_profile(&road.tags).kind
+        != crate::world::road::RoadProfileKind::Tunnel
         || road.points.len() < 2
         || road.points.len() != road.elevations.len()
     {
@@ -936,7 +938,10 @@ fn is_minor_highway(tags: &std::collections::HashMap<String, String>) -> bool {
 }
 
 /// Load and process OSM data, generating all meshes.
-pub fn load_world(pbf_path: &std::path::Path, srtm_dir: Option<&std::path::Path>) -> anyhow::Result<WorldMesh> {
+pub fn load_world(
+    pbf_path: &std::path::Path,
+    srtm_dir: Option<&std::path::Path>,
+) -> anyhow::Result<WorldMesh> {
     let source = super::source::load_world_source(pbf_path, srtm_dir)?;
     Ok(generate_world_mesh(&source))
 }

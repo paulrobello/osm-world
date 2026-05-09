@@ -81,7 +81,9 @@ impl WorldSource {
         let mut index = HashMap::new();
 
         if let Some((min_x, min_z, max_x, max_z)) = self.world_bbox() {
-            for coord in super::geometry::tiles_for_half_open_bbox(min_x, min_z, max_x, max_z, tile_size) {
+            for coord in
+                super::geometry::tiles_for_half_open_bbox(min_x, min_z, max_x, max_z, tile_size)
+            {
                 index
                     .entry(coord)
                     .or_insert_with(crate::stream::tile::TileFeatureRefs::default);
@@ -287,7 +289,9 @@ pub fn load_world_source_with_visual_detail(
         // (road, railway). At most one clone is needed: when both a polygon
         // category and an independent category match. When only the independent
         // categories match, resolved is moved into the last one.
-        let matched_polygon = is_building || is_water || is_landuse
+        let matched_polygon = is_building
+            || is_water
+            || is_landuse
             || (crate::world::water::is_renderable_waterway(tags) && resolved.points.len() >= 2);
 
         if is_building {
@@ -304,9 +308,17 @@ pub fn load_world_source_with_visual_detail(
             roads.push(resolved.clone());
             railways.push(resolved);
         } else if is_road {
-            roads.push(if matched_polygon { resolved.clone() } else { resolved });
+            roads.push(if matched_polygon {
+                resolved.clone()
+            } else {
+                resolved
+            });
         } else if is_railway {
-            railways.push(if matched_polygon { resolved.clone() } else { resolved });
+            railways.push(if matched_polygon {
+                resolved.clone()
+            } else {
+                resolved
+            });
         }
     }
 
@@ -423,7 +435,8 @@ pub fn load_world_source_with_visual_detail(
         if crate::world::point_feature::point_feature_style(&node.tags).is_some() {
             let mut tags = node.tags.clone();
             if !tags.contains_key("name") {
-                if let Some(name) = super::geometry::containing_building_name(raw_point, &buildings) {
+                if let Some(name) = super::geometry::containing_building_name(raw_point, &buildings)
+                {
                     tags.insert("name".to_string(), name.to_string());
                 }
             }

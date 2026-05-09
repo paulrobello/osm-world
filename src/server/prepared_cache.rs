@@ -6,8 +6,8 @@ use anyhow::Context;
 
 use super::shell::{path_string, renderer_launch_command};
 use super::types::{
-    LaunchRendererRequest, PreparedAreaEntry, PreparedAreaUpdate, PreparedCacheMetadata,
-    PrepareAreaError, PrepareResult, DeletePreparedAreaResponse,
+    DeletePreparedAreaResponse, LaunchRendererRequest, PrepareAreaError, PrepareResult,
+    PreparedAreaEntry, PreparedAreaUpdate, PreparedCacheMetadata,
 };
 use super::validate::validate_cache_key;
 

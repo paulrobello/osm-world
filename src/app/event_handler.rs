@@ -110,7 +110,8 @@ impl ApplicationHandler for App {
                                     (self.render.day_cycle.time_of_day + 0.01).rem_euclid(1.0);
                             }
                             KeyCode::KeyC => {
-                                self.render.atmosphere.clouds_enabled = !self.render.atmosphere.clouds_enabled;
+                                self.render.atmosphere.clouds_enabled =
+                                    !self.render.atmosphere.clouds_enabled;
                                 log::info!(
                                     "Clouds {}",
                                     if self.render.atmosphere.clouds_enabled {
@@ -159,7 +160,8 @@ impl ApplicationHandler for App {
                 if button == winit::event::MouseButton::Left
                     && button_state == winit::event::ElementState::Pressed
                 {
-                    if let (Some(state), Some(cursor_pos)) = (&self.state, self.ui.last_cursor_pos) {
+                    if let (Some(state), Some(cursor_pos)) = (&self.state, self.ui.last_cursor_pos)
+                    {
                         let scale = state.window.scale_factor() as f32;
                         let viewport_size = egui::vec2(
                             state.surface_config.width as f32 / scale,
@@ -253,8 +255,9 @@ impl App {
             .map(|state| crate::app::prefs::CameraPrefs::from_camera(&state.camera))
             .or_else(|| self.view.persisted_camera.clone());
         let settings_sections = self.ui.settings_sections.clone();
-        let visual_detail =
-            crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(&self.render.visual_detail);
+        let visual_detail = crate::app::prefs::VisualDetailPrefs::from_visual_detail_settings(
+            &self.render.visual_detail,
+        );
         let minimap_changed = minimap != self.view.persisted_minimap;
         let camera_changed = camera != self.view.persisted_camera;
         let settings_sections_changed = settings_sections != self.view.persisted_settings_sections;

@@ -21,17 +21,19 @@ enum FeatureLayer {
 
 impl FeatureLayer {
     fn from_f32(feature_type: f32) -> Self {
-        // Exact-match only: layered variants (ROAD_LAYERED, ROAD_MARKING_LAYERED)
-        // deliberately fall through to Solids, matching the original if/else chain.
         match feature_type {
             _ if feature_type == feature::TERRAIN => Self::Terrain,
             _ if feature_type == feature::LANDUSE => Self::Landuse,
             _ if feature_type == feature::LANDUSE_OVERLAY => Self::LanduseOverlay,
             _ if feature_type == feature::WATER => Self::Water,
             _ if feature_type == feature::ROAD_PATH => Self::RoadPath,
-            _ if feature_type == feature::ROAD => Self::Road,
+            _ if feature_type == feature::ROAD || feature_type == feature::ROAD_LAYERED => Self::Road,
             _ if feature_type == feature::RAILWAY => Self::Railway,
-            _ if feature_type == feature::ROAD_MARKING => Self::RoadMarking,
+            _ if feature_type == feature::ROAD_MARKING
+                || feature_type == feature::ROAD_MARKING_LAYERED =>
+            {
+                Self::RoadMarking
+            }
             _ => Self::Solids,
         }
     }
@@ -447,10 +449,10 @@ mod tests {
         assert_eq!(layers.landuse_overlay, vec![6, 7, 8]);
         assert_eq!(layers.water, vec![9, 10, 11]);
         assert_eq!(layers.road_path, vec![12, 13, 14]);
-        assert_eq!(layers.road, vec![15, 16, 17]);
+        assert_eq!(layers.road, vec![15, 16, 17, 24, 25, 26]);
         assert_eq!(layers.railway, vec![18, 19, 20]);
-        assert_eq!(layers.road_marking, vec![21, 22, 23]);
-        assert_eq!(layers.solids, vec![24, 25, 26, 27, 28, 29, 30, 31, 32]);
+        assert_eq!(layers.road_marking, vec![21, 22, 23, 27, 28, 29]);
+        assert_eq!(layers.solids, vec![30, 31, 32]);
     }
 
     #[test]

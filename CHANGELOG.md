@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Security: Added auth middleware for mutating API endpoints (`OSM_WORLD_API_TOKEN`)
+- Security: Replaced permissive CORS with explicit localhost allowlist
+- Security: Added renderer flag allowlist validation for `extra_args`
+- Security: Updated Next.js to 16.2.3 (DoS fix), PostCSS to >=8.5.10 (XSS fix)
+- Security: Removed filesystem paths from health endpoint, PID from launch response
+- Security: Fixed TOCTOU race in SRTM tile download, added rate limiting middleware
+- Architecture: Split `loader.rs` (3,452 lines) into focused sub-modules
+- Architecture: Split `server.rs` (2,017 lines) into focused sub-modules
+- Architecture: Split `road.rs` (2,030 lines) into bridge/tunnel sub-modules
+- Architecture: Vendored `par-osm-rust` into workspace for independent builds
+- Architecture: Refactored `App` struct into sub-structs (`AppUiState`, `AppRenderState`, `AppViewState`)
+- Architecture: Added `FeatureLayer` enum for type-safe layer dispatch
+- Architecture: Moved `Vertex` to shared `src/mesh.rs` to fix upward dependency
+- Architecture: Added `Option<RenderIndexBuffer>` to skip empty GPU layers
+- Architecture: Derived `Default` on `AppOptions` for cleaner test construction
+- Architecture: Added GitHub Actions CI workflow
+- Quality: Extracted 2,500+ lines of inline tests into dedicated test modules
+- Quality: Deduplicated WGSL shader functions into shared `sky_helpers.wgsl`
+- Quality: Extracted React components from page.tsx God Component
+- Quality: Replaced `window.prompt`/`window.confirm` with custom modal dialogs
+- Quality: Extracted `SourceConfig` struct to deduplicate server request/response types
+- Quality: Replaced 8 identical iteration blocks with `index_features!` macro
+- Quality: Reduced excessive `clone()` calls with ownership transfer patterns
+- Quality: Added SAFETY comments to all `unsafe` blocks in tests
+- Documentation: Added CHANGELOG.md, CONTRIBUTING.md, troubleshooting guide
+- Documentation: Added ~120 docstrings across server, app, atmosphere, visual_detail modules
+- Documentation: Added API reference with request/response schemas to architecture docs
+- Documentation: Added JSDoc to all web frontend library modules
+- Documentation: Created superpowers spec index with implementation status
+
 ## [0.1.0] - 2026-05-09
 
 ### Added

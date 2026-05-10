@@ -132,7 +132,7 @@ impl WorldSource {
         index
     }
 
-    fn world_bbox(&self) -> Option<(f32, f32, f32, f32)> {
+    pub fn world_bbox(&self) -> Option<(f32, f32, f32, f32)> {
         let (x0, z0) = self.conv.to_world_xz(self.max_lat, self.min_lon);
         let (x1, z1) = self.conv.to_world_xz(self.min_lat, self.max_lon);
         let min_x = x0.min(x1);

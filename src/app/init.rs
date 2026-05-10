@@ -178,6 +178,7 @@ pub fn init_wgpu(
                 &mut camera,
                 options.persisted_camera,
                 options.cam_override,
+                source.world_bbox(),
             );
             if let Some((spawn_lat, spawn_lon)) = spawn_lat_lon {
                 apply_spawn_camera_location(&mut camera, &source.conv, spawn_lat, spawn_lon);
@@ -486,13 +487,39 @@ fn apply_persisted_camera_if_allowed(
     camera: &mut Flycam,
     persisted_camera: Option<&crate::app::prefs::CameraPrefs>,
     cam_override: Option<&crate::camera::CameraOverride>,
+    world_bbox: Option<(f32, f32, f32, f32)>,
 ) {
     if has_camera_override(cam_override) {
         return;
     }
-    if let Some(persisted_camera) = persisted_camera {
-        persisted_camera.apply_to_camera(camera);
+    let Some(persisted_camera) = persisted_camera else {
+        return;
+    };
+    if let Some((min_x, min_z, max_x, max_z)) = world_bbox {
+        // Persisted coords are dataset-relative. If the saved position is far
+        // outside the current dataset's bounds, the prefs were saved for a
+        // different dataset — keep the default camera instead.
+        const BUFFER: f32 = 5_000.0;
+        let in_range = persisted_camera.x >= min_x - BUFFER
+            && persisted_camera.x <= max_x + BUFFER
+            && persisted_camera.z >= min_z - BUFFER
+            && persisted_camera.z <= max_z + BUFFER;
+        if !in_range {
+            log::info!(
+                "Persisted camera ({:.0}, {:.0}, {:.0}) is outside current dataset bounds \
+                 ({:.0}..{:.0}, {:.0}..{:.0}); using default camera",
+                persisted_camera.x,
+                persisted_camera.y,
+                persisted_camera.z,
+                min_x,
+                max_x,
+                min_z,
+                max_z,
+            );
+            return;
+        }
     }
+    persisted_camera.apply_to_camera(camera);
 }
 
 fn has_camera_override(cam_override: Option<&crate::camera::CameraOverride>) -> bool {
@@ -618,11 +645,56 @@ mod tests {
             pitch: -0.5,
         };
 
-        apply_persisted_camera_if_allowed(&mut camera, Some(&prefs), None);
+        apply_persisted_camera_if_allowed(&mut camera, Some(&prefs), None, None);
 
         assert_eq!(camera.position, glam::vec3(10.0, 20.0, 30.0));
         assert_eq!(camera.yaw, 1.0);
         assert_eq!(camera.pitch, -0.5);
+    }
+
+    #[test]
+    fn persisted_camera_outside_dataset_bounds_is_skipped() {
+        let mut camera = Flycam::new(1.0);
+        apply_default_input_camera(&mut camera);
+        let default_position = camera.position;
+        let prefs = crate::app::prefs::CameraPrefs {
+            x: 50_000.0,
+            y: 122.8,
+            z: -50_000.0,
+            yaw: 0.0,
+            pitch: 0.0,
+        };
+
+        apply_persisted_camera_if_allowed(
+            &mut camera,
+            Some(&prefs),
+            None,
+            Some((0.0, -10_000.0, 5_000.0, 0.0)),
+        );
+
+        assert_eq!(camera.position, default_position);
+    }
+
+    #[test]
+    fn persisted_camera_inside_dataset_bounds_applies() {
+        let mut camera = Flycam::new(1.0);
+        apply_default_input_camera(&mut camera);
+        let prefs = crate::app::prefs::CameraPrefs {
+            x: 2_000.0,
+            y: 122.8,
+            z: -3_000.0,
+            yaw: 1.0,
+            pitch: -0.5,
+        };
+
+        apply_persisted_camera_if_allowed(
+            &mut camera,
+            Some(&prefs),
+            None,
+            Some((0.0, -10_000.0, 5_000.0, 0.0)),
+        );
+
+        assert_eq!(camera.position, glam::vec3(2_000.0, 122.8, -3_000.0));
     }
 
     #[test]
@@ -647,7 +719,12 @@ mod tests {
             spawn_lon: Some(-121.72179),
         };
 
-        apply_persisted_camera_if_allowed(&mut camera, Some(&prefs), Some(&override_with_spawn));
+        apply_persisted_camera_if_allowed(
+            &mut camera,
+            Some(&prefs),
+            Some(&override_with_spawn),
+            None,
+        );
 
         assert_eq!(camera.position, before);
     }

@@ -315,7 +315,7 @@ fn append_ground_plane(verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>, size: f32) 
             feature_type: feature::TERRAIN,
         },
     ]);
-    idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    idxs.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
 }
 
 #[allow(clippy::too_many_arguments)]

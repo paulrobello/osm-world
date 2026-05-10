@@ -1,5 +1,5 @@
 run-sacramento:
-	cargo run -- --input ../osm-to-bedrock/map_exports/planet_-121.7526,38.63863_-121.72179,38.65671.osm.pbf --srtm-dir ~/.cache/par-osm-rust/srtm
+	cargo run --manifest-path /Users/probello/Repos/osm-world/Cargo.toml -- --input /Users/probello/.cache/par-osm-rust/prepared/7da37d40d6fc8fda7fd51113f7c06c6d5f3c1bfe32b74633bb5e808fe32c0890.osm --spawn-lat 38.5816 --spawn-lon -121.4944 --srtm-dir /Users/probello/.cache/par-osm-rust/srtm
 
 run-woodland:
 	cargo run --manifest-path /Users/probello/Repos/osm-world/Cargo.toml -- --input /Users/probello/.cache/par-osm-rust/prepared/6bc9f48dfcde8a8b07942340e536fb11f4401f2dded11d162c51f790205e43fe.osm --spawn-lat 38.67727858898496 --spawn-lon -121.75359597904097 --srtm-dir /Users/probello/.cache/par-osm-rust/srtm

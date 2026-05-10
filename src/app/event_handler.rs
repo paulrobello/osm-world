@@ -59,29 +59,29 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
-                if let Some(state) = &mut self.state {
-                    if physical_size.width > 0 && physical_size.height > 0 {
-                        state.surface_config.width = physical_size.width;
-                        state.surface_config.height = physical_size.height;
-                        state
-                            .surface
-                            .configure(&state.device, &state.surface_config);
-                        let (dt, dv) = init::create_depth_buffer(
-                            &state.device,
-                            physical_size.width,
-                            physical_size.height,
-                        );
-                        state.depth_texture = dt;
-                        state.depth_view = dv;
-                        state.contact_shadow.resize(
-                            &state.device,
-                            physical_size.width,
-                            physical_size.height,
-                            &state.depth_view,
-                        );
-                        state.camera.aspect =
-                            physical_size.width as f32 / physical_size.height as f32;
-                    }
+                if let Some(state) = &mut self.state
+                    && physical_size.width > 0
+                    && physical_size.height > 0
+                {
+                    state.surface_config.width = physical_size.width;
+                    state.surface_config.height = physical_size.height;
+                    state
+                        .surface
+                        .configure(&state.device, &state.surface_config);
+                    let (dt, dv) = init::create_depth_buffer(
+                        &state.device,
+                        physical_size.width,
+                        physical_size.height,
+                    );
+                    state.depth_texture = dt;
+                    state.depth_view = dv;
+                    state.contact_shadow.resize(
+                        &state.device,
+                        physical_size.width,
+                        physical_size.height,
+                        &state.depth_view,
+                    );
+                    state.camera.aspect = physical_size.width as f32 / physical_size.height as f32;
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -159,23 +159,21 @@ impl ApplicationHandler for App {
                 self.controller.process_mouse_button(button, button_state);
                 if button == winit::event::MouseButton::Left
                     && button_state == winit::event::ElementState::Pressed
+                    && let (Some(state), Some(cursor_pos)) = (&self.state, self.ui.last_cursor_pos)
                 {
-                    if let (Some(state), Some(cursor_pos)) = (&self.state, self.ui.last_cursor_pos)
-                    {
-                        let scale = state.window.scale_factor() as f32;
-                        let viewport_size = egui::vec2(
-                            state.surface_config.width as f32 / scale,
-                            state.surface_config.height as f32 / scale,
-                        );
-                        let click = egui::pos2(cursor_pos.x / scale, cursor_pos.y / scale);
-                        self.ui.inspect.selected = crate::ui::inspect::pick_identifiable(
-                            &state.identifiables,
-                            &state.camera,
-                            viewport_size,
-                            click,
-                            18.0,
-                        );
-                    }
+                    let scale = state.window.scale_factor() as f32;
+                    let viewport_size = egui::vec2(
+                        state.surface_config.width as f32 / scale,
+                        state.surface_config.height as f32 / scale,
+                    );
+                    let click = egui::pos2(cursor_pos.x / scale, cursor_pos.y / scale);
+                    self.ui.inspect.selected = crate::ui::inspect::pick_identifiable(
+                        &state.identifiables,
+                        &state.camera,
+                        viewport_size,
+                        click,
+                        18.0,
+                    );
                 }
             }
             WindowEvent::RedrawRequested => {

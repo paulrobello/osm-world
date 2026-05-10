@@ -365,18 +365,18 @@ pub fn load_world_source_with_visual_detail(
         let mut count = 0usize;
 
         for member in &rel.members {
-            if let Some(&way_idx) = osm_data.ways_by_id.get(&member.way_id) {
-                if member.role == "outer" {
-                    let way = &osm_data.ways[way_idx];
-                    for &node_id in &way.node_refs {
-                        if let Some(node) = osm_data.nodes.get(&node_id) {
-                            let (x, z) = conv.to_world_xz(node.lat, node.lon);
-                            all_points.push((x, z));
-                            elevations.push(elev(node.lat, node.lon));
-                            sum_lat += node.lat;
-                            sum_lon += node.lon;
-                            count += 1;
-                        }
+            if let Some(&way_idx) = osm_data.ways_by_id.get(&member.way_id)
+                && member.role == "outer"
+            {
+                let way = &osm_data.ways[way_idx];
+                for &node_id in &way.node_refs {
+                    if let Some(node) = osm_data.nodes.get(&node_id) {
+                        let (x, z) = conv.to_world_xz(node.lat, node.lon);
+                        all_points.push((x, z));
+                        elevations.push(elev(node.lat, node.lon));
+                        sum_lat += node.lat;
+                        sum_lon += node.lon;
+                        count += 1;
                     }
                 }
             }
@@ -434,11 +434,10 @@ pub fn load_world_source_with_visual_detail(
         let point = super::geometry::move_point_outside_containing_building(raw_point, &buildings);
         if crate::world::point_feature::point_feature_style(&node.tags).is_some() {
             let mut tags = node.tags.clone();
-            if !tags.contains_key("name") {
-                if let Some(name) = super::geometry::containing_building_name(raw_point, &buildings)
-                {
-                    tags.insert("name".to_string(), name.to_string());
-                }
+            if !tags.contains_key("name")
+                && let Some(name) = super::geometry::containing_building_name(raw_point, &buildings)
+            {
+                tags.insert("name".to_string(), name.to_string());
             }
             point_features.push(ResolvedPointFeature {
                 tags,

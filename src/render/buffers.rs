@@ -27,7 +27,9 @@ impl FeatureLayer {
             _ if feature_type == feature::LANDUSE_OVERLAY => Self::LanduseOverlay,
             _ if feature_type == feature::WATER => Self::Water,
             _ if feature_type == feature::ROAD_PATH => Self::RoadPath,
-            _ if feature_type == feature::ROAD || feature_type == feature::ROAD_LAYERED => Self::Road,
+            _ if feature_type == feature::ROAD || feature_type == feature::ROAD_LAYERED => {
+                Self::Road
+            }
             _ if feature_type == feature::RAILWAY => Self::Railway,
             _ if feature_type == feature::ROAD_MARKING
                 || feature_type == feature::ROAD_MARKING_LAYERED =>

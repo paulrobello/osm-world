@@ -422,10 +422,10 @@ pub fn render(
     state.queue.submit(std::iter::once(encoder.finish()));
     output.present();
 
-    if let Some(path) = screenshot_path {
-        if let Some((buffer, width, height, padded_bytes_per_row)) = screenshot_buffer {
-            save_screenshot(state, &buffer, width, height, padded_bytes_per_row, path);
-        }
+    if let Some(path) = screenshot_path
+        && let Some((buffer, width, height, padded_bytes_per_row)) = screenshot_buffer
+    {
+        save_screenshot(state, &buffer, width, height, padded_bytes_per_row, path);
     }
 }
 

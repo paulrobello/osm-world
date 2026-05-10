@@ -769,8 +769,18 @@ pub fn overture_cache_dir() -> PathBuf {
 pub fn overture_cache_key(bbox: (f64, f64, f64, f64), cli_type: &str) -> String {
     let (s, w, n, e) = bbox;
     let canonical = format!("overture|{s:.4},{w:.4},{n:.4},{e:.4}|{cli_type}");
-    let hash = Sha256::digest(canonical.as_bytes());
-    format!("{hash:x}")
+    sha256_hex(canonical.as_bytes())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let hash = Sha256::digest(bytes);
+    let mut encoded = Vec::with_capacity(hash.len() * 2);
+    for byte in hash {
+        encoded.push(HEX[(byte >> 4) as usize]);
+        encoded.push(HEX[(byte & 0x0f) as usize]);
+    }
+    String::from_utf8(encoded).expect("SHA-256 hex output is valid UTF-8")
 }
 
 /// Return cached GeoJSON for `key`, or `None` if absent or unreadable.

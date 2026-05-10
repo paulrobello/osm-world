@@ -64,11 +64,11 @@ pub(crate) fn renderer_launch_command(
         args.push("--spawn-lon".to_string());
         args.push(lon.to_string());
     }
-    if let Some(srtm_dir) = &req.srtm_dir {
-        if !srtm_dir.trim().is_empty() {
-            args.push("--srtm-dir".to_string());
-            args.push(srtm_dir.clone());
-        }
+    if let Some(srtm_dir) = &req.srtm_dir
+        && !srtm_dir.trim().is_empty()
+    {
+        args.push("--srtm-dir".to_string());
+        args.push(srtm_dir.clone());
     }
     validate_extra_args(&req.extra_args).map_err(PrepareAreaError::bad_request)?;
     args.extend(req.extra_args.clone());

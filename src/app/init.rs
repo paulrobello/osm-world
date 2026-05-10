@@ -299,9 +299,8 @@ fn scene_buffers_from_source(
             streaming_mesh_for_camera(source, visual_detail, streaming, camera_position, device);
         if result.0.is_empty() {
             log::warn!("Streaming selected 0 tiles near camera — falling back to full mesh");
-            let world = crate::world::loader::generate_world_mesh_with_visual_detail(
-                source, visual_detail,
-            );
+            let world =
+                crate::world::loader::generate_world_mesh_with_visual_detail(source, visual_detail);
             let debug_entries = tile_debug_entries_from_source(source, streaming.tile_size);
             (world.vertices, world.indices, debug_entries)
         } else {

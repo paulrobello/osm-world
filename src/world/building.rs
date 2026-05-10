@@ -17,10 +17,10 @@ pub fn parse_building_height(tags: &HashMap<String, String>) -> f32 {
             return v;
         }
     }
-    if let Some(levels) = tags.get("building:levels") {
-        if let Ok(v) = levels.trim().parse::<f32>() {
-            return v * 3.0;
-        }
+    if let Some(levels) = tags.get("building:levels")
+        && let Ok(v) = levels.trim().parse::<f32>()
+    {
+        return v * 3.0;
     }
     10.0
 }

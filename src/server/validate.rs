@@ -368,7 +368,6 @@ pub fn prepared_cache_key(
     failure_mode: par_osm_rust::sources::OvertureFailureMode,
     overpass_url: &str,
 ) -> String {
-    use sha2::{Digest, Sha256};
     let (effective_themes, effective_poi_source_mode, effective_failure_mode) = if overture {
         (
             canonical_overture_theme_names_for_key(themes),
@@ -392,8 +391,20 @@ pub fn prepared_cache_key(
         "failure_mode": effective_failure_mode,
         "overpass_url": overpass_url,
     });
-    let hash = Sha256::digest(payload.to_string().as_bytes());
-    format!("{hash:x}")
+    sha256_hex(payload.to_string().as_bytes())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let hash = Sha256::digest(bytes);
+    let mut encoded = Vec::with_capacity(hash.len() * 2);
+    for byte in hash {
+        encoded.push(HEX[(byte >> 4) as usize]);
+        encoded.push(HEX[(byte & 0x0f) as usize]);
+    }
+    String::from_utf8(encoded).expect("SHA-256 hex output is valid UTF-8")
 }
 
 // -- Rate Limiting -----------------------------------------------------------

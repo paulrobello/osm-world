@@ -9,23 +9,23 @@ on:
 env:
   CARGO_TERM_COLOR: always
   # Minimum Rust version from Cargo.toml rust-version field
-  RUST_VERSION: "1.87"
+  RUST_VERSION: "1.92"
 
 jobs:
   checkall:
     name: Format + Typecheck + Lint + Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
 
       - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
 
       - name: Install system dependencies (GPU simulation)
         run: |

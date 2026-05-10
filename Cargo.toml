@@ -2,7 +2,7 @@
 name = "osm-world"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.92"
 description = "3D city renderer using OpenStreetMap data and WGPU"
 authors = ["Paul Robello <probello@gmail.com>"]
 license = "MIT"
@@ -12,10 +12,10 @@ members = ["crates/par-osm-rust"]
 
 [dependencies]
 par-osm-rust = { path = "crates/par-osm-rust" }
-axum = "0.8.8"
-tokio = { version = "1.50.0", features = ["full"] }
-tower-http = { version = "0.6.8", features = ["cors"] }
-wgpu = "29.0.1"
+axum = "0.8.9"
+tokio = { version = "1.52.3", features = ["full"] }
+tower-http = { version = "0.6.10", features = ["cors"] }
+wgpu = "29.0.3"
 winit = "0.30.13"
 glam = "0.32.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
@@ -27,15 +27,15 @@ clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 image = "0.25"
 osmpbf = "0.3.8"
-earcutr = "0.4"
+earcutr = "0.5"
 memmap2 = "0.9"
 flate2 = "1.1"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.13", features = ["blocking"] }
 urlencoding = "2.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
-quick-xml = "0.39.2"
+sha2 = "0.11"
+quick-xml = "0.39.4"
 egui = "0.34"
 egui-wgpu = "0.34"
 egui-winit = "0.34"
@@ -47,5 +47,5 @@ opt-level = 1
 opt-level = 3
 
 [dev-dependencies]
-naga = { version = "29.0.1", features = ["wgsl-in"] }
+naga = { version = "29.0.3", features = ["wgsl-in"] }
 tempfile = "3.27.0"

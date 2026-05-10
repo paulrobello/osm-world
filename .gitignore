@@ -42,3 +42,4 @@ graphify-out/
 statusline-*.json
 .superpowers/
 .worktrees/
+.claude/scheduled_tasks.lock

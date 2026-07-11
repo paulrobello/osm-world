@@ -19,6 +19,11 @@ run:
 run-release:
 	cargo run --release
 
+# Launch via a throwaway macOS .app bundle so keyboard/mouse focus works,
+# including from inside tmux (raw binaries never become the key window there).
+run-app:
+	./scripts/run-app.sh
+
 web-install:
 	cd web && bun install
 

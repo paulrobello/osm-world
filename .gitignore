@@ -3,6 +3,9 @@
 debug/
 *.pdb
 
+# Throwaway .app bundle produced by scripts/run-app.sh (make run-app)
+.dev/
+
 # Rust
 **/*.rs.bk
 *.rlib

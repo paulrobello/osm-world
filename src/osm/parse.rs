@@ -168,8 +168,8 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
     // per-thread `OsmData` and reduce via `OsmData::merge`, plus downstream
     // callers and tests would have to stop assuming encounter-order indexing
     // (e.g. `parse_xml_poi_nodes_collected` checks `poi_nodes[0]`). The
-    // refactor is non-trivial and no benchmark exists to size the win; see
-    // AUDIT.md QA-008. Revisit when parse time shows up in a real workload.
+    // refactor is non-trivial and no benchmark exists to size the win.
+    // Revisit when parse time shows up in a real workload.
     reader
         .for_each(|element| match element {
             Element::Node(n) => {

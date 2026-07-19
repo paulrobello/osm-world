@@ -7,5 +7,3 @@ preferences, and conventions live in the user-level `CLAUDE.md`.
   preferences, and verification gates that apply to every session in this repo.
 - Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for project-specific build, test,
   lint, and pull-request workflow.
-- Read [`AUDIT.md`](AUDIT.md) for the open audit findings and the remediation
-  status across phases.

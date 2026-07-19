@@ -60,7 +60,7 @@ fn main() {
         panic!(
             "Feature-type constants drifted between src/mesh.rs and shaders/features.wgsl.\n\
              Fix one side to match the other:\n{}\n\
-             Both files document the slot-reservation convention; see also ARC-006 in AUDIT.md.",
+             Both files document the slot-reservation convention.",
             mismatches.join("\n")
         );
     }

@@ -6,7 +6,7 @@ import { fetchHealth, type LaunchRendererResponse } from './api';
  *
  * These assertions pin the response shapes the server actually emits, so a
  * future change that re-adds a removed field (e.g. `pid`, `overpass_cache_dir`)
- * has to update this test in the same change. See ARC-002 in AUDIT.md.
+ * has to update this test in the same change.
  */
 describe('API response contracts', () => {
   test('LaunchRendererResponse only exposes the status string', () => {

@@ -33,6 +33,9 @@ Thumbs.db
 .env
 .env.*
 
+# Local Makefile overrides (maintainer run targets with absolute paths)
+Makefile.local
+
 # Test images
 test_images/
 

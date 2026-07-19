@@ -34,6 +34,141 @@ impl Vertex {
     ];
 }
 
+/// Axis-aligned box primitive emitted as 24 vertices (4 per face × 6 faces)
+/// and 36 triangle-list indices (2 triangles × 6 faces). UVs are zeroed.
+///
+/// Consolidated (ARC-016) from three previously duplicate local impls in
+/// `render::buffers`, `world::point_feature`, and `world::road`. The actual
+/// box-building algorithm now lives in one place; callers that need a
+/// domain-specific default `feature_type` keep a thin local wrapper that
+/// delegates here.
+#[derive(Copy, Clone, Debug)]
+pub struct BoxSpec {
+    /// Minimum corner (inclusive).
+    pub min: [f32; 3],
+    /// Maximum corner (inclusive).
+    pub max: [f32; 3],
+    /// Flat color applied to every vertex.
+    pub color: [f32; 3],
+    /// Feature-type discriminant written to `Vertex::feature_type`.
+    pub feature_type: f32,
+}
+
+impl BoxSpec {
+    /// Build a `BoxSpec` from a center point on the XZ plane with the base
+    /// sitting at `base_y` and the top at `base_y + height`. Matches the
+    /// point-feature placement style; the X/Z extents are `±half_extents`
+    /// around `center`.
+    pub fn centered(
+        center: (f32, f32),
+        base_y: f32,
+        half_extents: (f32, f32),
+        height: f32,
+        color: [f32; 3],
+        feature_type: f32,
+    ) -> Self {
+        let (half_x, half_z) = half_extents;
+        Self {
+            min: [center.0 - half_x, base_y, center.1 - half_z],
+            max: [center.0 + half_x, base_y + height, center.1 + half_z],
+            color,
+            feature_type,
+        }
+    }
+}
+
+/// Append an axis-aligned box (24 verts + 36 indices) to `verts` and `idxs`.
+///
+/// Degenerate axes (where `max[i] - min[i]` is below `1e-4`) are inflated by
+/// `±0.05` so slab-like boxes used by road bridge/tunnel geometry remain
+/// visible from both sides. Callers that already provide a full 3D box are
+/// unaffected.
+pub fn append_box(spec: BoxSpec, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
+    let mut min = spec.min;
+    let mut max = spec.max;
+    for axis in 0..3 {
+        if (max[axis] - min[axis]).abs() < 1e-4 {
+            min[axis] -= 0.05;
+            max[axis] += 0.05;
+        }
+    }
+
+    let mut push_face = |positions: [[f32; 3]; 4], normal: [f32; 3]| {
+        let base = verts.len() as u32;
+        for position in positions {
+            verts.push(Vertex {
+                position,
+                normal,
+                color: spec.color,
+                uv: [0.0, 0.0],
+                feature_type: spec.feature_type,
+            });
+        }
+        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+
+    // Back (z-)
+    push_face(
+        [
+            [min[0], min[1], min[2]],
+            [min[0], max[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], min[1], min[2]],
+        ],
+        [0.0, 0.0, -1.0],
+    );
+    // Front (z+)
+    push_face(
+        [
+            [min[0], min[1], max[2]],
+            [max[0], min[1], max[2]],
+            [max[0], max[1], max[2]],
+            [min[0], max[1], max[2]],
+        ],
+        [0.0, 0.0, 1.0],
+    );
+    // Left (x-)
+    push_face(
+        [
+            [min[0], min[1], min[2]],
+            [min[0], min[1], max[2]],
+            [min[0], max[1], max[2]],
+            [min[0], max[1], min[2]],
+        ],
+        [-1.0, 0.0, 0.0],
+    );
+    // Right (x+)
+    push_face(
+        [
+            [max[0], min[1], min[2]],
+            [max[0], max[1], min[2]],
+            [max[0], max[1], max[2]],
+            [max[0], min[1], max[2]],
+        ],
+        [1.0, 0.0, 0.0],
+    );
+    // Bottom (y-)
+    push_face(
+        [
+            [min[0], min[1], min[2]],
+            [max[0], min[1], min[2]],
+            [max[0], min[1], max[2]],
+            [min[0], min[1], max[2]],
+        ],
+        [0.0, -1.0, 0.0],
+    );
+    // Top (y+)
+    push_face(
+        [
+            [min[0], max[1], min[2]],
+            [min[0], max[1], max[2]],
+            [max[0], max[1], max[2]],
+            [max[0], max[1], min[2]],
+        ],
+        [0.0, 1.0, 0.0],
+    );
+}
+
 pub mod feature {
     //! Per-vertex feature-type discriminant, written into `Vertex::feature_type`
     //! and read by both the WGSL fragment shader (see `shaders/features.wgsl`)
@@ -92,5 +227,43 @@ mod tests {
     fn vertex_layout_includes_uvs() {
         assert_eq!(std::mem::size_of::<Vertex>(), 48);
         assert_eq!(Vertex::ATTRIBUTES.len(), 5);
+    }
+
+    #[test]
+    fn append_box_emits_six_quads_with_inflation_safety() {
+        let mut verts = Vec::new();
+        let mut idxs = Vec::new();
+        // Slab: zero extent on Y — degenerate-axis inflation must kick in.
+        append_box(
+            BoxSpec {
+                min: [-1.0, 0.0, -1.0],
+                max: [1.0, 0.0, 1.0],
+                color: [1.0; 3],
+                feature_type: feature::BUILDING,
+            },
+            &mut verts,
+            &mut idxs,
+        );
+
+        assert_eq!(verts.len(), 24);
+        assert_eq!(idxs.len(), 36);
+        // Every triangle index must be in range.
+        assert!(idxs.iter().all(|&i| (i as usize) < verts.len()));
+        // All vertices carry the spec's feature_type.
+        assert!(verts.iter().all(|v| v.feature_type == feature::BUILDING));
+    }
+
+    #[test]
+    fn box_spec_centered_places_base_at_base_y() {
+        let spec = BoxSpec::centered(
+            (5.0, -3.0),
+            10.0,
+            (1.0, 2.0),
+            4.0,
+            [0.5; 3],
+            feature::BUILDING,
+        );
+        assert_eq!(spec.min, [4.0, 10.0, -5.0]);
+        assert_eq!(spec.max, [6.0, 14.0, -1.0]);
     }
 }

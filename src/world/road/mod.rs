@@ -734,87 +734,25 @@ fn append_cap(
 
 // --- Shared geometry helpers used by bridge and tunnel sub-modules ---
 
+/// Thin delegate over [`crate::mesh::append_box`] (ARC-016). Road structure
+/// geometry (bridge piers, tunnel portals, abutments) is tagged
+/// `feature::BUILDING` so it routes through the shadow-casting solids layer.
 pub(super) fn append_box(
-    mut min: [f32; 3],
-    mut max: [f32; 3],
+    min: [f32; 3],
+    max: [f32; 3],
     color: [f32; 3],
     verts: &mut Vec<Vertex>,
     idxs: &mut Vec<u32>,
 ) {
-    for axis in 0..3 {
-        if (max[axis] - min[axis]).abs() < 1e-4 {
-            min[axis] -= 0.05;
-            max[axis] += 0.05;
-        }
-    }
-
-    let mut push_face = |positions: [[f32; 3]; 4], normal: [f32; 3]| {
-        let base = verts.len() as u32;
-        for position in positions {
-            verts.push(Vertex {
-                position,
-                normal,
-                color,
-                uv: [0.0, 0.0],
-                feature_type: feature::BUILDING,
-            });
-        }
-        idxs.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    };
-
-    push_face(
-        [
-            [min[0], min[1], min[2]],
-            [min[0], max[1], min[2]],
-            [max[0], max[1], min[2]],
-            [max[0], min[1], min[2]],
-        ],
-        [0.0, 0.0, -1.0],
-    );
-    push_face(
-        [
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
-            [max[0], max[1], max[2]],
-            [min[0], max[1], max[2]],
-        ],
-        [0.0, 0.0, 1.0],
-    );
-    push_face(
-        [
-            [min[0], min[1], min[2]],
-            [min[0], min[1], max[2]],
-            [min[0], max[1], max[2]],
-            [min[0], max[1], min[2]],
-        ],
-        [-1.0, 0.0, 0.0],
-    );
-    push_face(
-        [
-            [max[0], min[1], min[2]],
-            [max[0], max[1], min[2]],
-            [max[0], max[1], max[2]],
-            [max[0], min[1], max[2]],
-        ],
-        [1.0, 0.0, 0.0],
-    );
-    push_face(
-        [
-            [min[0], min[1], min[2]],
-            [max[0], min[1], min[2]],
-            [max[0], min[1], max[2]],
-            [min[0], min[1], max[2]],
-        ],
-        [0.0, -1.0, 0.0],
-    );
-    push_face(
-        [
-            [min[0], max[1], min[2]],
-            [min[0], max[1], max[2]],
-            [max[0], max[1], max[2]],
-            [max[0], max[1], min[2]],
-        ],
-        [0.0, 1.0, 0.0],
+    crate::mesh::append_box(
+        crate::mesh::BoxSpec {
+            min,
+            max,
+            color,
+            feature_type: feature::BUILDING,
+        },
+        verts,
+        idxs,
     );
 }
 

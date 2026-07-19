@@ -2,6 +2,8 @@ use wgpu::util::DeviceExt;
 use wgpu::*;
 
 use super::vertex::{Vertex, feature};
+#[cfg(any(test, feature = "dev_scene"))]
+use crate::mesh::{BoxSpec, append_box};
 
 /// Render layer classification for triangle batching.
 ///
@@ -275,16 +277,14 @@ fn generate_test_scene() -> (Vec<Vertex>, Vec<u32>) {
 
     append_ground_plane(&mut verts, &mut idxs, 2000.0);
     append_box(
+        BoxSpec {
+            min: [-10.0, 0.0, -15.0],
+            max: [10.0, 15.0, 15.0],
+            color: [0.85, 0.78, 0.65],
+            feature_type: feature::BUILDING,
+        },
         &mut verts,
         &mut idxs,
-        -10.0,
-        10.0,
-        0.0,
-        15.0,
-        -15.0,
-        15.0,
-        [0.85, 0.78, 0.65],
-        feature::BUILDING,
     );
 
     (verts, idxs)
@@ -327,78 +327,6 @@ fn append_ground_plane(verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>, size: f32) 
         },
     ]);
     idxs.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
-}
-
-#[cfg(any(test, feature = "dev_scene"))]
-#[allow(clippy::too_many_arguments)]
-fn append_box(
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-    x0: f32,
-    x1: f32,
-    y0: f32,
-    y1: f32,
-    z0: f32,
-    z1: f32,
-    color: [f32; 3],
-    feature_type: f32,
-) {
-    let base = verts.len() as u32;
-    let v = |px: f32, py: f32, pz: f32, nx: f32, ny: f32, nz: f32| Vertex {
-        position: [px, py, pz],
-        normal: [nx, ny, nz],
-        color,
-        uv: [0.0, 0.0],
-        feature_type,
-    };
-
-    // Front (z+)
-    verts.extend_from_slice(&[
-        v(x0, y0, z1, 0.0, 0.0, 1.0),
-        v(x1, y0, z1, 0.0, 0.0, 1.0),
-        v(x1, y1, z1, 0.0, 0.0, 1.0),
-        v(x0, y1, z1, 0.0, 0.0, 1.0),
-    ]);
-    // Back (z-)
-    verts.extend_from_slice(&[
-        v(x1, y0, z0, 0.0, 0.0, -1.0),
-        v(x0, y0, z0, 0.0, 0.0, -1.0),
-        v(x0, y1, z0, 0.0, 0.0, -1.0),
-        v(x1, y1, z0, 0.0, 0.0, -1.0),
-    ]);
-    // Right (x+)
-    verts.extend_from_slice(&[
-        v(x1, y0, z1, 1.0, 0.0, 0.0),
-        v(x1, y0, z0, 1.0, 0.0, 0.0),
-        v(x1, y1, z0, 1.0, 0.0, 0.0),
-        v(x1, y1, z1, 1.0, 0.0, 0.0),
-    ]);
-    // Left (x-)
-    verts.extend_from_slice(&[
-        v(x0, y0, z0, -1.0, 0.0, 0.0),
-        v(x0, y0, z1, -1.0, 0.0, 0.0),
-        v(x0, y1, z1, -1.0, 0.0, 0.0),
-        v(x0, y1, z0, -1.0, 0.0, 0.0),
-    ]);
-    // Top (y+)
-    verts.extend_from_slice(&[
-        v(x0, y1, z1, 0.0, 1.0, 0.0),
-        v(x1, y1, z1, 0.0, 1.0, 0.0),
-        v(x1, y1, z0, 0.0, 1.0, 0.0),
-        v(x0, y1, z0, 0.0, 1.0, 0.0),
-    ]);
-    // Bottom (y-)
-    verts.extend_from_slice(&[
-        v(x0, y0, z0, 0.0, -1.0, 0.0),
-        v(x1, y0, z0, 0.0, -1.0, 0.0),
-        v(x1, y0, z1, 0.0, -1.0, 0.0),
-        v(x0, y0, z1, 0.0, -1.0, 0.0),
-    ]);
-
-    for face in 0..6u32 {
-        let b = base + face * 4;
-        idxs.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
-    }
 }
 
 #[cfg(test)]

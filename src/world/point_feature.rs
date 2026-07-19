@@ -716,6 +716,8 @@ fn append_transit_marker(
     );
 }
 
+/// Parameter bundle for the centered-box call sites below. Delegates to the
+/// shared [`crate::mesh::append_box`] (ARC-016) — no local geometry algorithm.
 struct BoxSpec {
     point: (f32, f32),
     base_y: f32,
@@ -725,72 +727,18 @@ struct BoxSpec {
 }
 
 fn append_box(spec: BoxSpec, verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>) {
-    let (x, z) = spec.point;
-    let (half_x, half_z) = spec.half_extents;
-    let min_x = x - half_x;
-    let max_x = x + half_x;
-    let min_z = z - half_z;
-    let max_z = z + half_z;
-    let top_y = spec.base_y + spec.height;
-
-    for face in [
-        QuadFace {
-            positions: [
-                [min_x, spec.base_y, min_z],
-                [max_x, spec.base_y, min_z],
-                [max_x, top_y, min_z],
-                [min_x, top_y, min_z],
-            ],
-            normal: [0.0, 0.0, -1.0],
-        },
-        QuadFace {
-            positions: [
-                [max_x, spec.base_y, max_z],
-                [min_x, spec.base_y, max_z],
-                [min_x, top_y, max_z],
-                [max_x, top_y, max_z],
-            ],
-            normal: [0.0, 0.0, 1.0],
-        },
-        QuadFace {
-            positions: [
-                [min_x, spec.base_y, max_z],
-                [min_x, spec.base_y, min_z],
-                [min_x, top_y, min_z],
-                [min_x, top_y, max_z],
-            ],
-            normal: [-1.0, 0.0, 0.0],
-        },
-        QuadFace {
-            positions: [
-                [max_x, spec.base_y, min_z],
-                [max_x, spec.base_y, max_z],
-                [max_x, top_y, max_z],
-                [max_x, top_y, min_z],
-            ],
-            normal: [1.0, 0.0, 0.0],
-        },
-        QuadFace {
-            positions: [
-                [min_x, top_y, min_z],
-                [max_x, top_y, min_z],
-                [max_x, top_y, max_z],
-                [min_x, top_y, max_z],
-            ],
-            normal: [0.0, 1.0, 0.0],
-        },
-        QuadFace {
-            positions: [
-                [min_x, spec.base_y, max_z],
-                [max_x, spec.base_y, max_z],
-                [max_x, spec.base_y, min_z],
-                [min_x, spec.base_y, min_z],
-            ],
-            normal: [0.0, -1.0, 0.0],
-        },
-    ] {
-        append_quad(face, spec.color, verts, idxs);
-    }
+    crate::mesh::append_box(
+        crate::mesh::BoxSpec::centered(
+            spec.point,
+            spec.base_y,
+            spec.half_extents,
+            spec.height,
+            spec.color,
+            feature::POINT_FEATURE,
+        ),
+        verts,
+        idxs,
+    );
 }
 
 fn append_pyramid(

@@ -14,19 +14,22 @@
 | Phase | Status | Agent(s) | Issues Targeted | Resolved | Partial | Manual/Deferred |
 |-------|--------|----------|:---------------:|:--------:|:-------:|:---------------:|
 | 1 — Critical Security | ✅ | fix-security (opus) | 5 | 5 | 0 | 0 |
-| 2 — Critical Architecture | ✅ | fix-architecture (opus) | 4 | 2 | 0 | 2 (ARC-003, ARC-004) |
+| 2 — Critical Architecture | ✅ | fix-architecture (opus) | 4 | 2 | 0 | 1 (ARC-004) |
 | 3a — Security (remaining) | ✅ | fix-security (opus) | 5 + ARC-010 | 6 | 0 | 0 |
 | 3b — Architecture (remaining) | ✅ | fix-architecture (opus) | 9 + 4 QA + DOC-005-mesh | 13 | 1 (ARC-016) | 3 (ARC-012, QA-001, QA-007) |
 | 3c — Code Quality (all) | ✅ | fix-code-quality (sonnet) | 5 + ARC-010-web | 6 | 0 | 0 |
 | 3d — Documentation (all) | ✅ | fix-documentation (sonnet) | 14 | 14 | 0 | 0 |
 | Cleanup | ✅ | inline | ARC-014, ARC-018 | 2 | 0 | 0 |
+| ARC-003 follow-up | ✅ | fix-architecture (opus) | ARC-003 (crates.io 0.3.0) | 1 | 0 | 0 |
 | 4 — Verification | ✅ | orchestrator | — | — | — | — |
 
-**Overall**: of 55 unique issues — **47 resolved**, **2 partial**, **5 deferred (require manual/cross-repo work)**, **1 accepted as-is (optional per audit)**. The full project gate (`make checkall` = Rust fmt + typecheck + clippy `-D warnings` + test + security-audit, plus the new `web-checkall`) is green with zero test failures.
+**Overall**: of 55 unique issues — **48 resolved**, **2 partial**, **4 deferred (require manual/cross-repo work)**, **1 accepted as-is (optional per audit)**. The full project gate (`make checkall` = Rust fmt + typecheck + clippy `-D warnings` + test + security-audit, plus the new `web-checkall`) is green with zero test failures.
 
 ### Remediation commits (on `fix/audit-remediation`)
 
 ```
+722e677 fix(architecture): ARC-003 — switch par-osm-rust to crates.io 0.3.0; fix upstream API breaking changes
+4e085c2 docs(audit): add Phase 5 remediation report (AUDIT-REMEDIATION.md)
 d752c4e fix: ARC-014/018 — Makefile.local + stream module doc
 6add176 fix: Phase 3 Wave 2 — architecture refactors + code quality
 fde7e14 fix: Phase 3 Wave 1 — security hardening + documentation
@@ -52,13 +55,14 @@ fde7e14 fix: Phase 3 Wave 1 — security hardening + documentation
 - **[SEC-009]** Rate-limiter `Mutex::lock` poisoning recovered via `into_inner()`.
 - **[SEC-010]** Rate-limit layer moved to the merged router (read-only routes covered).
 
-### Architecture (13 resolved, 1 partial, 3 deferred, 1 accepted)
+### Architecture (14 resolved, 1 partial, 2 deferred, 1 accepted)
 - **[ARC-001]** `Cargo.lock` committed; removed from `.gitignore`.
 - **[ARC-002] / [DOC-003]** TS trimmed to match Rust: `LaunchRendererResponse` and `fetchHealth` reduced to `{ status }`; `page.tsx` ghost-field JSX removed; `web/src/lib/api.test.ts` fixture pins the shapes.
+- **[ARC-003]** Switched `par-osm-rust` from the vendored path dependency to **crates.io `0.3.0`** (user decision); deleted the entire vendored `crates/par-osm-rust/` (~7,000 lines). Adapted every breaking call site: `BBox` newtype constructed at the validated boundary (`BBox::from_unchecked`, safe because `validate_bbox` ran); `tiles_for_bbox` `Result` propagated as `PrepareAreaError::bad_request`; `SourceOptions.extra_allowed_hosts = Vec::new()`; `OvertureParams.cache_ttl_secs = None` (upstream's ~30-day default, matching prior behavior); `default_overpass_url()` `Cow` handled; `Key` newtype + `ProgressFn` callback adapted. `make checkall` green (316 tests; the ~98 vendored-crate tests now live upstream).
 - **[ARC-005]** Client auth: `setApiToken`/`getApiToken`/`clearApiToken` + `Authorization: Bearer` injection in `apiJson`; 401 hint in `errorHints.ts` (backward-compatible signature; settings UI deferred).
 - **[ARC-006]** `build.rs` cross-checks `src/mesh.rs::feature` ↔ `shaders/features.wgsl` (panics on drift); named `FEATURE_*` constants in `city.wgsl`; `tests/shader_source_test.rs` rewritten with a real Rust↔WGSL cross-check + naga parse.
 - **[ARC-007]** Shader helpers now concatenated unconditionally (placeholder string-replace removed).
-- **[ARC-008]** `crates/par-osm-rust/` gained `README.md`, `CHANGELOG.md`, and a network-free `tests/osm_parse.rs` integration test.
+- **[ARC-008]** Initially added `README.md`/`CHANGELOG.md`/`tests/` to the vendored crate (Wave 2); those in-tree artifacts were then **removed when ARC-003 deleted the vendored crate** — the docs/tests now belong to the upstream published crate (crates.io `par-osm-rust` carries its own README/tests). Intent satisfied upstream.
 - **[ARC-009]** 13 shared deps promoted to `[workspace.dependencies]`; `[workspace.lints.clippy] all = "deny"` codifies the `-D warnings` gate.
 - **[ARC-010]** CORS origins from `OSM_WORLD_CORS_ORIGINS` env (server) + dev/start port from `PORT` env default 8032 (web).
 - **[ARC-011]** Env-mutating test helpers extracted into `mod test_support` with a documented `# Safety` contract.
@@ -100,11 +104,8 @@ fde7e14 fix: Phase 3 Wave 1 — security hardening + documentation
 
 ## Requires Manual Intervention 🔧
 
-### [ARC-003] Switch `par-osm-rust` to a git dependency — BLOCKED on upstream API reconciliation
-- **Decision made**: consume upstream `paulrobello/par-osm-rust` via git+tag, delete the vendored copy (your choice).
-- **Why blocked**: upstream `v0.3.0` has drifted substantially from the vendored 0.1.0 copy. A trial switch produced 8 compile errors: new `BBox` newtype (`fetch_map_data`, `download_tiles_for_bbox`, `tiles_for_bbox` now take `&BBox`); `SourceOptions.extra_allowed_hosts` and `OvertureParams.cache_ttl_secs` now required; `tiles_for_bbox` now returns `Result`; `default_overpass_url()` now returns `Cow`; `osm.rs` restructured into an `osm/` module. (Upstream already ships `quick-xml 0.41`, so SEC-001 will not regress.)
-- **Recommended approach** (mechanical once semantics are decided): (a) construct `BBox` at the handler boundary via `BBox::from_unchecked` (validate.rs has already validated); (b) pick a `cache_ttl_secs` (look at upstream's default); (c) pass `extra_allowed_hosts: Vec::new()` unless an env-knob is wanted; (d) propagate the new `Result` from `tiles_for_bbox` with a `BadRequest` mapping; (e) `&default_overpass_url()` to deref the `Cow`. Then bump the git-dep tag, remove `crates/par-osm-rust` from workspace members, `git rm -r crates/par-osm-rust`.
-- **Estimated effort**: medium (one focused session). Tree currently builds green with the vendored copy still active, so this is not urgent.
+### [ARC-003] Switch `par-osm-rust` to a published dependency — ✅ RESOLVED
+- **Final decision**: consume the **crates.io published version `0.3.0`** (not git+tag). The vendored `crates/par-osm-rust/` directory was deleted entirely (~7,000 lines) and all upstream 0.3.0 API breaking changes were adapted. See the Architecture section above for the full list of fixes. `make checkall` green, 316 tests.
 
 ### [ARC-004] Consolidate duplicated OSM/elevation/SRTM parsers — DEFERRED
 - **Why**: requires ARC-003 first, then an upstream PR adding the tagged-node parse API the renderer needs (`OsmNode` carrying `tags: HashMap`; the library's current node is `Copy` without tags), a new upstream release tag, then this repo switches the renderer to `par_osm_rust::osm::parse_osm_file` and deletes `src/osm/parse.rs` (686 LOC), `src/geo/elevation.rs`, and most of `src/geo/srtm.rs`.
@@ -150,7 +151,8 @@ No regressions introduced. The web `lint` script went from `next build` (QA-002)
 
 ## Next Steps
 
-1. **Review the 5 deferred/partial items** above and decide ordering. ARC-003 is the highest-leverage (unblocks ARC-004, ARC-008-upstream, ARC-009-cleanup, QA-003/008-lib).
+1. **Review the 4 deferred/partial items** above. ARC-004 is now the lead (needs an upstream PR to add the tagged-node parse API the renderer wants, then this repo can delete `src/osm/parse.rs`/`src/geo/elevation.rs`/`src/geo/srtm.rs` and consume the published crate from the renderer too — currently only the server consumes it).
 2. **Decide on the god-file decomposition** (ARC-012 / QA-001 / QA-007): recommend a dedicated follow-up with par-mem back online + Playwright screenshot tests for `page.tsx`.
-3. **Re-run `/audit`** after merging to get an updated AUDIT.md reflecting current state (the deferred items will remain; everything else should clear).
-4. **Merge `fix/audit-remediation` → main** after review (5 atomic commits, each a clean rollback point). The branch has not been pushed or merged.
+3. **Product knobs to consider** (flagged inline by the ARC-003 migration): `OvertureParams.cache_ttl_secs` is currently `None` (upstream ~30-day default) and `SourceOptions.extra_allowed_hosts` is empty — both are commented as candidates for an env-knob if an operator needs a different Overture refresh cadence or a non-default Overpass mirror.
+4. **Re-run `/audit`** after merging to get an updated AUDIT.md reflecting current state (the deferred items will remain; everything else should clear).
+5. **Merge `fix/audit-remediation` → main** after review (7 atomic commits, each a clean rollback point). The branch has not been pushed or merged.

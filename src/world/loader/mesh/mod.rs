@@ -1,10 +1,29 @@
 //! Mesh generation from world source data.
+//!
+//! Sub-modules (split, ARC-012, from a single 960-line file):
+//! - `terrain_cuts` -- tunnel-portal terrain depressions
+//! - `water`        -- clipped water-area + uncovered-waterway emission
+//! - `roads`        -- per-road ramps/structures + dead-end cap placement,
+//!   including the shared tile/world cap collector
+//!
+//! `mod.rs` keeps the entry points and the two top-level orchestrators
+//! (`append_world_mesh`, `append_tile_features_mesh`) that sequence every
+//! per-feature mesh builder. The previous road-cap duplication between those
+//! two orchestrators now routes through [`roads::emit_world_road_caps`] and
+//! [`roads::append_tile_roads_mesh`].
 
-use std::collections::{HashMap, HashSet};
+mod roads;
+mod terrain_cuts;
+mod water;
 
 use crate::render::vertex::Vertex;
+use crate::world::loader::source::{CpuMesh, TileMeshSet, WorldMesh, WorldSource};
 
-use super::source::{CpuMesh, ResolvedFeature, TileMeshSet, WorldMesh, WorldSource};
+// Test-facing re-export: loader tests reach into the tile-road builder through
+// `mesh::append_tile_roads_mesh`. Kept `pub(crate)` to match the original
+// visibility of the function before the split.
+#[cfg(test)]
+pub(crate) use roads::append_tile_roads_mesh;
 
 pub fn same_road_point(a: (f32, f32), b: (f32, f32)) -> bool {
     (a.0 - b.0).abs() <= 0.05 && (a.1 - b.1).abs() <= 0.05
@@ -43,182 +62,6 @@ pub fn generate_world_mesh_with_visual_detail(
     }
 }
 
-fn append_road_feature_mesh_with_ramps(
-    road: &ResolvedFeature,
-    endpoint_ramps: crate::world::road::BridgeEndpointRamps,
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) -> (Vec<f32>, f32, [f32; 3]) {
-    let width = crate::world::color::road_width(&road.tags);
-    let color = crate::world::color::road_color(&road.tags);
-    let profile = crate::world::road::road_profile(&road.tags);
-    let render_path = crate::world::road::road_render_path_with_bridge_endpoint_ramps(
-        &road.tags,
-        &road.points,
-        &road.elevations,
-        endpoint_ramps,
-    );
-
-    let is_surface = profile.kind == crate::world::road::RoadProfileKind::Surface;
-    let feature_type = if !is_surface {
-        crate::render::vertex::feature::ROAD_LAYERED
-    } else if crate::world::color::is_sidewalk_like_road(&road.tags) {
-        crate::render::vertex::feature::ROAD_PATH
-    } else {
-        crate::render::vertex::feature::ROAD
-    };
-    let marking_feature_type = if is_surface {
-        crate::render::vertex::feature::ROAD_MARKING
-    } else {
-        crate::render::vertex::feature::ROAD_MARKING_LAYERED
-    };
-    crate::world::road::generate_road_with_elevations_and_feature_type(
-        &render_path.points,
-        &render_path.road_elevations,
-        width,
-        color,
-        feature_type,
-        verts,
-        idxs,
-    );
-    crate::world::road::append_road_centerline_dashes_with_feature_type(
-        &render_path.points,
-        &render_path.road_elevations,
-        width,
-        marking_feature_type,
-        verts,
-        idxs,
-    );
-    crate::world::road::append_road_structures(
-        &road.tags,
-        &render_path.points,
-        &render_path.terrain_elevations,
-        &render_path.road_elevations,
-        width,
-        verts,
-        idxs,
-    );
-
-    let cap_elevations =
-        crate::world::road::road_render_elevations(&road.tags, &road.points, &road.elevations);
-    (cap_elevations, width, color)
-}
-
-fn bridge_endpoint_ramps_for_road(
-    source: &WorldSource,
-    road_index: usize,
-) -> crate::world::road::BridgeEndpointRamps {
-    let Some(road) = source.roads.get(road_index) else {
-        return crate::world::road::BridgeEndpointRamps::default();
-    };
-    if crate::world::road::road_profile(&road.tags).kind
-        != crate::world::road::RoadProfileKind::Bridge
-    {
-        return crate::world::road::BridgeEndpointRamps::default();
-    }
-
-    crate::world::road::BridgeEndpointRamps {
-        start: road
-            .points
-            .first()
-            .is_none_or(|&point| !has_connected_bridge_road_at(source, road_index, point)),
-        end: road
-            .points
-            .last()
-            .is_none_or(|&point| !has_connected_bridge_road_at(source, road_index, point)),
-    }
-}
-
-fn has_connected_bridge_road_at(
-    source: &WorldSource,
-    road_index: usize,
-    point: (f32, f32),
-) -> bool {
-    source.roads.iter().enumerate().any(|(other_index, other)| {
-        other_index != road_index
-            && crate::world::road::road_profile(&other.tags).kind
-                == crate::world::road::RoadProfileKind::Bridge
-            && other
-                .points
-                .iter()
-                .any(|&other_point| same_road_point(other_point, point))
-    })
-}
-
-fn terrain_cuts_for_roads(roads: &[ResolvedFeature]) -> Vec<crate::world::terrain::TerrainCut> {
-    roads.iter().flat_map(terrain_cuts_for_road).collect()
-}
-
-fn terrain_cuts_for_road_refs(
-    source: &WorldSource,
-    road_refs: &[usize],
-) -> Vec<crate::world::terrain::TerrainCut> {
-    road_refs
-        .iter()
-        .filter_map(|&feature_idx| source.roads.get(feature_idx))
-        .flat_map(terrain_cuts_for_road)
-        .collect()
-}
-
-fn terrain_cuts_for_road(road: &ResolvedFeature) -> Vec<crate::world::terrain::TerrainCut> {
-    if crate::world::road::road_profile(&road.tags).kind
-        != crate::world::road::RoadProfileKind::Tunnel
-        || road.points.len() < 2
-        || road.points.len() != road.elevations.len()
-    {
-        return Vec::new();
-    }
-
-    let road_elevations =
-        crate::world::road::road_render_elevations(&road.tags, &road.points, &road.elevations);
-    if road_elevations.len() != road.points.len() {
-        return Vec::new();
-    }
-
-    let width = crate::world::color::road_width(&road.tags);
-    let mut cuts = Vec::with_capacity(2);
-    if let Some(cut) =
-        tunnel_portal_terrain_cut(road.points[0], road.points[1], road_elevations[0], width)
-    {
-        cuts.push(cut);
-    }
-    let last = road.points.len() - 1;
-    if let Some(cut) = tunnel_portal_terrain_cut(
-        road.points[last],
-        road.points[last - 1],
-        road_elevations[last],
-        width,
-    ) {
-        cuts.push(cut);
-    }
-    cuts
-}
-
-fn tunnel_portal_terrain_cut(
-    point: (f32, f32),
-    next: (f32, f32),
-    road_elevation: f32,
-    width: f32,
-) -> Option<crate::world::terrain::TerrainCut> {
-    let dx = next.0 - point.0;
-    let dz = next.1 - point.1;
-    let len = (dx * dx + dz * dz).sqrt();
-    if len < 1e-6 {
-        return None;
-    }
-
-    let dir_x = dx / len;
-    let dir_z = dz / len;
-    let cut_length = 18.0_f32.min(len.max(8.0));
-    Some(crate::world::terrain::TerrainCut {
-        start: point,
-        end: (point.0 + dir_x * cut_length, point.1 + dir_z * cut_length),
-        half_width: width * 0.5 + 4.0,
-        floor_y: road_elevation + crate::world::road::ROAD_Y_OFFSET + 0.25,
-        blend_width: 12.0,
-    })
-}
-
 fn append_world_mesh(
     source: &WorldSource,
     visual_detail: &crate::visual_detail::VisualDetailSettings,
@@ -228,7 +71,7 @@ fn append_world_mesh(
     // Generate meshes in order: terrain, landuse, water, roads, railways, point features, street signs, buildings
 
     // Terrain
-    let terrain_cuts = terrain_cuts_for_roads(&source.roads);
+    let terrain_cuts = terrain_cuts::terrain_cuts_for_roads(&source.roads);
     let terrain_ctx = crate::world::terrain::TerrainContext {
         conv: &source.conv,
         elevation: source.elevation.as_ref(),
@@ -266,83 +109,10 @@ fn append_world_mesh(
         crate::world::water::generate_water_with_elevations(&w.points, &w.elevations, verts, idxs);
     }
     let all_waterway_refs: Vec<_> = (0..source.waterways.len()).collect();
-    append_uncovered_waterway_meshes(source, &all_waterway_refs, verts, idxs);
+    water::append_uncovered_waterway_meshes(source, &all_waterway_refs, verts, idxs);
 
-    // Roads
-    type RoadPointKey = (i32, i32);
-    struct RoadCap {
-        point: (f32, f32),
-        elevation: f32,
-        width: f32,
-        radius_scale: f32,
-        color: [f32; 3],
-    }
-
-    let road_key = |point: (f32, f32)| -> RoadPointKey {
-        (
-            (point.0 * 10.0).round() as i32,
-            (point.1 * 10.0).round() as i32,
-        )
-    };
-    let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
-    for r in &source.roads {
-        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
-        let count_len = if is_closed {
-            r.points.len() - 1
-        } else {
-            r.points.len()
-        };
-        for &point in &r.points[..count_len] {
-            *road_point_counts.entry(road_key(point)).or_default() += 1;
-        }
-    }
-
-    let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
-    for (road_index, r) in source.roads.iter().enumerate() {
-        let ramps = bridge_endpoint_ramps_for_road(source, road_index);
-        let (road_elevations, width, color) =
-            append_road_feature_mesh_with_ramps(r, ramps, verts, idxs);
-
-        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
-        for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
-            let key = road_key(point);
-            let count = road_point_counts.get(&key).copied().unwrap_or(0);
-            let is_dead_end = !is_closed && (i == 0 || i + 1 == r.points.len()) && count == 1;
-            if !is_dead_end {
-                continue;
-            }
-
-            let radius_scale = crate::world::road::ROAD_CAP_RADIUS_SCALE;
-
-            road_caps
-                .entry(key)
-                .and_modify(|cap| {
-                    cap.elevation = cap.elevation.max(elevation);
-                    if width < cap.width {
-                        cap.width = width;
-                        cap.color = color;
-                    }
-                })
-                .or_insert(RoadCap {
-                    point,
-                    elevation,
-                    width,
-                    radius_scale,
-                    color,
-                });
-        }
-    }
-    for (_key, cap) in road_caps {
-        crate::world::road::append_road_cap_with_radius_scale(
-            cap.point,
-            cap.elevation,
-            cap.width,
-            cap.radius_scale,
-            cap.color,
-            verts,
-            idxs,
-        );
-    }
+    // Roads (ribbons + structures + dead-end caps)
+    roads::emit_world_road_caps(source, verts, idxs);
 
     for route in &source.transit_routes {
         crate::world::road::generate_road_with_elevations_and_feature_type(
@@ -482,7 +252,7 @@ pub fn generate_streamed_startup_mesh(
 
     let rects: Vec<_> = coords.iter().map(|coord| coord.rect(tile_size)).collect();
     let road_refs = super::geometry::feature_indices_intersecting_tiles(&source.roads, &rects);
-    let terrain_cuts = terrain_cuts_for_road_refs(source, &road_refs);
+    let terrain_cuts = terrain_cuts::terrain_cuts_for_road_refs(source, &road_refs);
 
     let terrain_ctx = crate::world::terrain::TerrainContext {
         conv: &source.conv,
@@ -507,7 +277,7 @@ pub fn generate_streamed_startup_mesh(
     }
 
     let water_refs = super::geometry::feature_indices_intersecting_tiles(&source.waters, &rects);
-    append_clipped_water_meshes(source, &water_refs, &rects, &mut vertices, &mut indices);
+    water::append_clipped_water_meshes(source, &water_refs, &rects, &mut vertices, &mut indices);
 
     let refs = crate::stream::tile::TileFeatureRefs {
         buildings: super::geometry::feature_indices_intersecting_tiles(&source.buildings, &rects),
@@ -560,40 +330,6 @@ pub fn generate_streamed_startup_mesh(
     CpuMesh { vertices, indices }
 }
 
-fn append_clipped_water_meshes(
-    source: &WorldSource,
-    water_refs: &[usize],
-    rects: &[crate::stream::TileRect],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
-    for &feature_idx in water_refs {
-        let Some(water) = source.waters.get(feature_idx) else {
-            continue;
-        };
-        let Some(bbox) = super::geometry::feature_bbox(water) else {
-            continue;
-        };
-        for &rect in rects {
-            if !super::geometry::bbox_intersects_rect(bbox, rect) {
-                continue;
-            }
-            let clipped = super::geometry::clip_polygon_to_rect(&water.points, rect);
-            if clipped.len() < 3 {
-                continue;
-            }
-            let elevations: Vec<_> = clipped
-                .iter()
-                .map(|&(x, z)| {
-                    let (lat, lon) = source.conv.world_xz_to_lat_lon(x, z);
-                    source.elevation_at(lat, lon)
-                })
-                .collect();
-            crate::world::water::generate_water_with_elevations(&clipped, &elevations, verts, idxs);
-        }
-    }
-}
-
 fn aabb_for_lods(
     coord: crate::stream::TileCoord,
     tile_size: f32,
@@ -633,7 +369,7 @@ fn generate_tile_lod_mesh(
     let mut indices = Vec::new();
     let rect = coord.rect(tile_size);
 
-    let terrain_cuts = terrain_cuts_for_road_refs(source, &refs.roads);
+    let terrain_cuts = terrain_cuts::terrain_cuts_for_road_refs(source, &refs.roads);
     let terrain_ctx = crate::world::terrain::TerrainContext {
         conv: &source.conv,
         elevation: source.elevation.as_ref(),
@@ -663,73 +399,6 @@ fn generate_tile_lod_mesh(
     );
 
     CpuMesh { vertices, indices }
-}
-
-fn append_uncovered_waterway_meshes(
-    source: &WorldSource,
-    waterway_refs: &[usize],
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
-    let mut emitted_segments = HashSet::new();
-    for &feature_idx in waterway_refs {
-        let Some(waterway) = source.waterways.get(feature_idx) else {
-            continue;
-        };
-        if waterway.points.len() != waterway.elevations.len() {
-            continue;
-        }
-        for segment_idx in 0..waterway.points.len().saturating_sub(1) {
-            let a = waterway.points[segment_idx];
-            let b = waterway.points[segment_idx + 1];
-            if same_road_point(a, b) {
-                continue;
-            }
-            let key = normalized_segment_key(a, b);
-            if !emitted_segments.insert(key) {
-                continue;
-            }
-            let midpoint = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
-            if point_is_inside_any_water_area(source, midpoint) {
-                continue;
-            }
-            crate::world::water::generate_waterway_with_elevations(
-                &[a, b],
-                &[
-                    waterway.elevations[segment_idx],
-                    waterway.elevations[segment_idx + 1],
-                ],
-                &waterway.tags,
-                verts,
-                idxs,
-            );
-        }
-    }
-}
-
-fn normalized_segment_key(a: (f32, f32), b: (f32, f32)) -> ((i32, i32), (i32, i32)) {
-    let qa = quantized_point_key(a);
-    let qb = quantized_point_key(b);
-    if qa <= qb { (qa, qb) } else { (qb, qa) }
-}
-
-fn quantized_point_key(point: (f32, f32)) -> (i32, i32) {
-    (
-        (point.0 * 10.0).round() as i32,
-        (point.1 * 10.0).round() as i32,
-    )
-}
-
-fn point_is_inside_any_water_area(source: &WorldSource, point: (f32, f32)) -> bool {
-    source.waters.iter().any(|water| {
-        super::geometry::feature_bbox(water).is_some_and(|bbox| {
-            point.0 >= bbox.0
-                && point.0 <= bbox.2
-                && point.1 >= bbox.1
-                && point.1 <= bbox.3
-                && super::geometry::point_in_polygon(point, &water.points)
-        })
-    })
 }
 
 fn append_tile_features_mesh(
@@ -765,9 +434,9 @@ fn append_tile_features_mesh(
         };
         crate::world::water::generate_water_with_elevations(&w.points, &w.elevations, verts, idxs);
     }
-    append_uncovered_waterway_meshes(source, &refs.waterways, verts, idxs);
+    water::append_uncovered_waterway_meshes(source, &refs.waterways, verts, idxs);
 
-    append_tile_roads_mesh(source, &refs.roads, lod, verts, idxs);
+    roads::append_tile_roads_mesh(source, &refs.roads, lod, verts, idxs);
 
     for &feature_idx in &refs.railways {
         let Some(railway) = source.railways.get(feature_idx) else {
@@ -831,110 +500,8 @@ fn append_tile_features_mesh(
     }
 }
 
-pub(crate) fn append_tile_roads_mesh(
-    source: &WorldSource,
-    road_refs: &[usize],
-    lod: crate::stream::TileLod,
-    verts: &mut Vec<Vertex>,
-    idxs: &mut Vec<u32>,
-) {
-    type RoadPointKey = (i32, i32);
-    struct RoadCap {
-        point: (f32, f32),
-        elevation: f32,
-        width: f32,
-        radius_scale: f32,
-        color: [f32; 3],
-    }
-
-    let road_key = |point: (f32, f32)| -> RoadPointKey {
-        (
-            (point.0 * 10.0).round() as i32,
-            (point.1 * 10.0).round() as i32,
-        )
-    };
-
-    let selected_roads: Vec<(usize, &ResolvedFeature)> = road_refs
-        .iter()
-        .filter_map(|&feature_idx| {
-            source
-                .roads
-                .get(feature_idx)
-                .map(|road| (feature_idx, road))
-        })
-        .filter(|(_, road)| lod != crate::stream::TileLod::Far || !is_minor_highway(&road.tags))
-        .collect();
-
-    let mut road_point_counts: HashMap<RoadPointKey, usize> = HashMap::new();
-    for r in &source.roads {
-        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
-        let count_len = if is_closed {
-            r.points.len() - 1
-        } else {
-            r.points.len()
-        };
-        for &point in &r.points[..count_len] {
-            *road_point_counts.entry(road_key(point)).or_default() += 1;
-        }
-    }
-
-    let mut road_caps: HashMap<RoadPointKey, RoadCap> = HashMap::new();
-    for (road_index, r) in selected_roads {
-        let ramps = bridge_endpoint_ramps_for_road(source, road_index);
-        let (road_elevations, width, color) =
-            append_road_feature_mesh_with_ramps(r, ramps, verts, idxs);
-
-        let is_closed = r.points.len() >= 4 && r.points.first() == r.points.last();
-        for (i, (&point, &elevation)) in r.points.iter().zip(&road_elevations).enumerate() {
-            let key = road_key(point);
-            let count = road_point_counts.get(&key).copied().unwrap_or(0);
-            let is_dead_end = !is_closed && (i == 0 || i + 1 == r.points.len()) && count == 1;
-            if !is_dead_end {
-                continue;
-            }
-
-            let radius_scale = crate::world::road::ROAD_CAP_RADIUS_SCALE;
-
-            road_caps
-                .entry(key)
-                .and_modify(|cap| {
-                    cap.elevation = cap.elevation.max(elevation);
-                    if width < cap.width {
-                        cap.width = width;
-                        cap.color = color;
-                    }
-                })
-                .or_insert(RoadCap {
-                    point,
-                    elevation,
-                    width,
-                    radius_scale,
-                    color,
-                });
-        }
-    }
-    for (_key, cap) in road_caps {
-        crate::world::road::append_road_cap_with_radius_scale(
-            cap.point,
-            cap.elevation,
-            cap.width,
-            cap.radius_scale,
-            cap.color,
-            verts,
-            idxs,
-        );
-    }
-}
-
 fn is_green_landuse_overlay(tags: &std::collections::HashMap<String, String>) -> bool {
     crate::world::landuse::landuse_y_offset(tags) > crate::world::landuse::LANDUSE_Y_OFFSET
-}
-
-fn is_minor_highway(tags: &std::collections::HashMap<String, String>) -> bool {
-    matches!(
-        tags.get("highway").map(String::as_str),
-        Some("footway" | "path" | "cycleway" | "steps")
-    )
 }
 
 /// Load and process OSM data, generating all meshes.

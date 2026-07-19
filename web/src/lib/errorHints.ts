@@ -4,6 +4,15 @@
  * @module errorHints
  */
 
+/**
+ * Hint returned when the API rejects a request with HTTP 401. The server
+ * returns 401 on every mutating endpoint whenever `OSM_WORLD_API_TOKEN` is set
+ * and the request lacks a matching bearer token; the web client stores the
+ * token via `setApiToken` in `./api`.
+ */
+const UNAUTHORIZED_HINT =
+  'The server requires an API token. Open the settings dialog and paste your OSM_WORLD_API_TOKEN, then retry.';
+
 /** Pattern-to-hint mapping for common API errors. */
 const HINTS: Array<{ patterns: RegExp[]; hint: string }> = [
   {
@@ -30,13 +39,26 @@ const HINTS: Array<{ patterns: RegExp[]; hint: string }> = [
     patterns: [/invalid request/i],
     hint: 'Check that bbox values are finite, ordered as south/west/north/east, and that spawn latitude/longitude are provided together.',
   },
+  {
+    patterns: [/^HTTP 401$/i, /\bunauthorized\b/i],
+    hint: UNAUTHORIZED_HINT,
+  },
 ];
 
 /**
- * Returns a user-facing hint for a given error message, or `null` if no hint matches.
+ * Returns a user-facing hint for a given error, or `null` if no hint matches.
+ *
+ * Pass the HTTP status code from an `ApiError` when available so auth failures
+ * are recognized even when the server-supplied message is generic.
+ *
  * @param message - The error message string from the API
+ * @param status - Optional HTTP status code (e.g. from `ApiError.status`)
  */
-export function errorHintForMessage(message: string): string | null {
+export function errorHintForMessage(message: string, status?: number): string | null {
+  if (status === 401) {
+    return UNAUTHORIZED_HINT;
+  }
+
   const normalized = message.trim();
   if (!normalized) {
     return null;

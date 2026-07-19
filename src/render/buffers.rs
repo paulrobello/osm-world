@@ -65,7 +65,14 @@ pub struct SceneBuffers {
 
 impl SceneBuffers {
     pub fn new(device: &Device) -> Self {
+        // The dev/test fallback scene (one box on a ground plane) is only
+        // compiled under `cfg(test)` or the `dev_scene` feature. In a plain
+        // release build `--input` is expected, so an empty buffer here is the
+        // correct fallback rather than shipping test geometry in the binary.
+        #[cfg(any(test, feature = "dev_scene"))]
         let (vertices, indices) = generate_test_scene();
+        #[cfg(not(any(test, feature = "dev_scene")))]
+        let (vertices, indices): (Vec<Vertex>, Vec<u32>) = (Vec::new(), Vec::new());
         Self::from_data(device, vertices, indices)
     }
 
@@ -261,6 +268,7 @@ fn shadow_casting_indices(vertices: &[Vertex], indices: &[u32]) -> Vec<u32> {
         .collect()
 }
 
+#[cfg(any(test, feature = "dev_scene"))]
 fn generate_test_scene() -> (Vec<Vertex>, Vec<u32>) {
     let mut verts = Vec::new();
     let mut idxs = Vec::new();
@@ -282,6 +290,7 @@ fn generate_test_scene() -> (Vec<Vertex>, Vec<u32>) {
     (verts, idxs)
 }
 
+#[cfg(any(test, feature = "dev_scene"))]
 fn append_ground_plane(verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>, size: f32) {
     let base = verts.len() as u32;
     let h = size / 2.0;
@@ -320,6 +329,7 @@ fn append_ground_plane(verts: &mut Vec<Vertex>, idxs: &mut Vec<u32>, size: f32) 
     idxs.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
 }
 
+#[cfg(any(test, feature = "dev_scene"))]
 #[allow(clippy::too_many_arguments)]
 fn append_box(
     verts: &mut Vec<Vertex>,

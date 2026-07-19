@@ -1,36 +1,10 @@
 // Analytic sky shader — ported from voxel-world sky.glsl
 // Renders as fullscreen triangle (no vertex buffer, 3 vertices via @builtin(vertex_index))
-
-struct SceneUniforms {
-    view_proj: mat4x4<f32>,
-    inv_view_proj: mat4x4<f32>,
-    camera_pos: vec3<f32>,
-    _pad0: f32,
-    time_of_day: f32,
-    animation_time: f32,
-    ambient_light: f32,
-    _pad1: f32,
-    sun_direction: vec3<f32>,
-    _pad2: f32,
-    light_direction: vec3<f32>,
-    light_intensity: f32,
-    fog_density: f32,
-    fog_start: f32,
-    _pad3: vec2<f32>,
-    sky_zenith: vec3<f32>,
-    _pad4: f32,
-    sky_horizon: vec3<f32>,
-    _pad5: f32,
-    cloud_speed: f32,
-    cloud_coverage: f32,
-    _pad6: vec2<f32>,
-    cloud_color: vec3<f32>,
-    clouds_enabled: u32,
-    ground_color: vec3<f32>,
-    _pad7: f32,
-};
-
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+//
+// SceneUniforms struct + binding and sky/fog helpers are prepended at compile
+// time by `src/render/sky_pipeline.rs` from `scene_uniforms.wgsl` and
+// `sky_helpers.wgsl` respectively. The full SceneUniforms (including
+// `visual_params`, which this shader does not read) is shared with city.wgsl.
 
 // --- Vertex/Fragment IO ---
 
@@ -70,7 +44,8 @@ fn fbm(p: vec2<f32>) -> f32 {
     return value;
 }
 
-// --- Sky helpers (loaded from sky_helpers.wgsl at compile time) ---
+// --- Sun / moon / stars (helpers from sky_helpers.wgsl are prepended at
+// --- compile time by src/render/sky_pipeline.rs) ---
 
 fn get_sun(ray: vec3<f32>) -> vec3<f32> {
     let sun = scene.sun_direction;
@@ -188,8 +163,6 @@ fn get_clouds(ray: vec3<f32>) -> vec3<f32> {
     let cloud_color = mix(scene.cloud_color, vec3<f32>(0.6, 0.6, 0.7), (1.0 - daylight) * 0.5);
     return cloud_color * density * fade * horizon_fade;
 }
-
-// --- Fog helpers (loaded from sky_helpers.wgsl at compile time) ---
 
 // --- Vertex shader: fullscreen triangle ---
 

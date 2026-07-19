@@ -2,24 +2,27 @@ use wgpu::*;
 
 use super::vertex::Vertex;
 
-/// Concatenate sky_helpers.wgsl into a shader that uses `scene` uniform helpers.
+/// Feature-type constants (`shaders/features.wgsl`), mirrored from
+/// `src/mesh.rs::feature`. Cross-checked against the Rust source by `build.rs`
+/// at compile time and by `tests/shader_source_test.rs` at test time.
+const FEATURES: &str = include_str!("../../shaders/features.wgsl");
+
+/// Shared `SceneUniforms` struct + binding (`shaders/scene_uniforms.wgsl`).
+const SCENE_UNIFORMS: &str = include_str!("../../shaders/scene_uniforms.wgsl");
+
+/// Sky color and fog helpers (`shaders/sky_helpers.wgsl`).
 const SKY_HELPERS: &str = include_str!("../../shaders/sky_helpers.wgsl");
 
-fn city_shader_source() -> String {
-    let mut source = String::with_capacity(4096);
-    source.push_str(include_str!("../../shaders/city.wgsl"));
-    // Insert sky helpers at the placeholder comment
-    if let Some(pos) =
-        source.find("// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---")
-    {
-        source.replace_range(
-            pos..pos
-                + "// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---"
-                    .len(),
-            SKY_HELPERS,
-        );
-    }
-    source
+/// Returns the WGSL source for the city shader: feature constants, the shared
+/// `SceneUniforms`, sky helpers, and the city shader body, concatenated
+/// unconditionally so a missing include or renamed comment cannot silently
+/// drop a section. Exposed publicly so `tests/shader_source_test.rs` sees the
+/// same source the renderer compiles.
+pub fn city_shader_source() -> String {
+    format!(
+        "{FEATURES}\n{SCENE_UNIFORMS}\n{SKY_HELPERS}\n{}",
+        include_str!("../../shaders/city.wgsl")
+    )
 }
 
 pub struct CityPipeline {

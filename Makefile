@@ -33,6 +33,19 @@ web-dev:
 web-build:
 	cd web && bun run build
 
+# Web lint + typecheck + tests. Mirror of the Rust `checkall` for the web tree.
+# Pre-commit hook runs this on `web/**` changes (see .pre-commit-config.yaml).
+web-lint:
+	cd web && bun run lint
+
+web-typecheck:
+	cd web && bun run typecheck
+
+web-test:
+	cd web && bun test
+
+web-checkall: web-lint web-typecheck web-test
+
 serve:
 	cargo run -- --serve --host 127.0.0.1 --port 3030
 
@@ -93,7 +106,7 @@ security-audit:
 	# moves to quick-xml >=0.41.
 	cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
-checkall: fmt typecheck lint test security-audit
+checkall: fmt typecheck lint test security-audit web-checkall
 
 clean:
 	cargo clean

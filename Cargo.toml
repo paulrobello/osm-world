@@ -7,8 +7,47 @@ description = "3D city renderer using OpenStreetMap data and WGPU"
 authors = ["Paul Robello <probello@gmail.com>"]
 license = "MIT"
 
+[features]
+# Compiles the dev/test fallback scene (a single textured box on a ground
+# plane) so `osm-world` can be launched without `--input`. Off by default so
+# the test-scene geometry does not ship in release binaries; `cargo test`
+# still gets it via `#[cfg(test)]`. Enable explicitly for local dev runs
+# without source data: `cargo run --features dev_scene`.
+default = []
+dev_scene = []
+
 [workspace]
 members = ["crates/par-osm-rust"]
+resolver = "2"
+
+[workspace.dependencies]
+# Crates used by both `osm-world` and the vendored `par-osm-rust` library.
+# Pinned consistently so a `cargo update` cannot desync the two manifests; the
+# audit flagged this as ARC-009.
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+flate2 = "1.1"
+log = "0.4"
+memmap2 = "0.9"
+osmpbf = "0.3.8"
+quick-xml = "0.41"
+reqwest = { version = "0.13", features = ["blocking"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11"
+tempfile = "3.27.0"
+urlencoding = "2.1"
+
+[workspace.lints.clippy]
+# Codify the project's standing `cargo clippy -- -D warnings` gate so the
+# standard lint set is enforced even when the user runs a plain `cargo clippy`.
+# `all = "deny"` denies the default warn-level lints (the same set that
+# `-D warnings` would promote). Pedantic/nursery groups are intentionally left
+# unset so existing well-considered patterns are not newly flagged.
+all = { level = "deny", priority = -1 }
+
+[lints]
+workspace = true
 
 [dependencies]
 par-osm-rust = { path = "crates/par-osm-rust" }
@@ -20,22 +59,22 @@ winit = "0.30.13"
 glam = "0.32.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 pollster = "0.4"
-anyhow = "1.0"
-log = "0.4"
+anyhow.workspace = true
+log.workspace = true
 env_logger = "0.11"
 clap = { version = "4", features = ["derive"] }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { workspace = true }
 image = "0.25"
-osmpbf = "0.3.8"
+osmpbf.workspace = true
 earcutr = "0.5"
-memmap2 = "0.9"
-flate2 = "1.1"
-reqwest = { version = "0.13", features = ["blocking"] }
-urlencoding = "2.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha2 = "0.11"
-quick-xml = "0.41"
+memmap2.workspace = true
+flate2.workspace = true
+reqwest.workspace = true
+urlencoding.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+quick-xml.workspace = true
 subtle = "2"
 egui = "0.34"
 egui-wgpu = "0.34"
@@ -49,4 +88,4 @@ opt-level = 3
 
 [dev-dependencies]
 naga = { version = "29.0.3", features = ["wgsl-in"] }
-tempfile = "3.27.0"
+tempfile.workspace = true

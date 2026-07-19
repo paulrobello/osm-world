@@ -382,8 +382,7 @@ pub fn render(
     let screenshot_buffer = if screenshot_path.is_some() {
         let width = state.surface_config.width;
         let height = state.surface_config.height;
-        let unpadded_bytes_per_row = width * 4;
-        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(256) * 256;
+        let padded_bytes_per_row = screenshot_padded_bytes_per_row(width);
 
         let buffer = state.device.create_buffer(&BufferDescriptor {
             label: Some("screenshot buffer"),
@@ -487,14 +486,91 @@ fn save_screenshot(
     drop(data);
     buffer.unmap();
 
-    // Swap B and R channels (BGRA -> RGBA)
-    for chunk in pixels.chunks_exact_mut(4) {
-        chunk.swap(0, 2);
-    }
+    swap_bgra_to_rgba(&mut pixels);
     if let Some(img) = image::RgbaImage::from_raw(width, height, pixels) {
         match img.save(path) {
             Ok(()) => log::info!("[SCREENSHOT] Saved {}x{} to {}", width, height, path),
             Err(e) => log::error!("[SCREENSHOT] Failed to write {}: {}", path, e),
         }
+    }
+}
+
+/// Bytes-per-row WGPU requires for screenshot buffers: 4 bytes per pixel
+/// (BGRA8), padded up to a multiple of 256. Used both when allocating the
+/// readback buffer (`render`) and when stripping padding per row
+/// (`save_screenshot`); centralizing it keeps the two call sites in sync.
+fn screenshot_padded_bytes_per_row(width: u32) -> u32 {
+    let unpadded_bytes_per_row = width * 4;
+    unpadded_bytes_per_row.div_ceil(256) * 256
+}
+
+/// Swap B and R channels in place: WGPU copies framebuffers as BGRA, but
+/// `image::RgbaImage` expects RGBA. Length must be a multiple of 4; callers
+/// always pass full pixel buffers, so `chunks_exact_mut(4)` silently drops
+/// any trailing partial pixel rather than panicking.
+fn swap_bgra_to_rgba(pixels: &mut [u8]) {
+    for chunk in pixels.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn screenshot_padded_bytes_per_row_is_multiple_of_256() {
+        for width in [1u32, 32, 64, 100, 1920, 3840, 4096, 9999] {
+            let padded = screenshot_padded_bytes_per_row(width);
+            assert_eq!(
+                padded % 256,
+                0,
+                "padded stride must be a multiple of 256 for width {width}"
+            );
+            assert!(
+                padded >= width * 4,
+                "padded stride {padded} must be at least width*4 ({})",
+                width * 4
+            );
+            assert!(
+                padded < width * 4 + 256,
+                "padded stride {padded} must be less than one padding step above width*4 ({})",
+                width * 4
+            );
+        }
+    }
+
+    #[test]
+    fn screenshot_padded_bytes_per_row_known_values() {
+        // 64 px × 4 B = 256 B → already aligned, no extra padding.
+        assert_eq!(screenshot_padded_bytes_per_row(64), 256);
+        // 65 px × 4 B = 260 B → rounds up to 512.
+        assert_eq!(screenshot_padded_bytes_per_row(65), 512);
+        // 1920 px × 4 B = 7680 B = 30 × 256 → already aligned.
+        assert_eq!(screenshot_padded_bytes_per_row(1920), 7680);
+    }
+
+    #[test]
+    fn swap_bgra_to_rgba_swaps_only_first_and_third_channels() {
+        let mut pixels = [10u8, 20, 30, 40, 50, 60, 70, 80];
+        swap_bgra_to_rgba(&mut pixels);
+        // BGRA (B, G, R, A) → RGBA (R, G, B, A): index 0 ↔ index 2.
+        assert_eq!(pixels, [30, 20, 10, 40, 70, 60, 50, 80]);
+    }
+
+    #[test]
+    fn swap_bgra_to_rgba_is_noop_on_empty() {
+        let mut pixels: [u8; 0] = [];
+        swap_bgra_to_rgba(&mut pixels);
+    }
+
+    #[test]
+    fn swap_bgra_to_rgba_ignores_trailing_partial_pixel() {
+        // 4-byte pixel followed by 2 dangling bytes (shouldn't happen in
+        // practice — framebuffers are whole-pixel — but the helper must not
+        // panic on it).
+        let mut pixels = [1u8, 2, 3, 4, 5, 6];
+        swap_bgra_to_rgba(&mut pixels);
+        assert_eq!(pixels, [3, 2, 1, 4, 5, 6]);
     }
 }

@@ -159,6 +159,17 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
     let mut max_lat = f64::MIN;
     let mut max_lon = f64::MIN;
 
+    // Sequential iteration. `osmpbf::ElementReader::par_map_reduce` exists
+    // (rayon is a non-optional transitive dep) and could parallelize block
+    // decode across cores. We keep `for_each` because the loop body updates
+    // seven shared accumulators including three order-sensitive Vecs
+    // (`ways`, `relations`, and indirectly `ways_by_id` whose indices depend
+    // on push order). A parallel version would need each task to build a
+    // per-thread `OsmData` and reduce via `OsmData::merge`, plus downstream
+    // callers and tests would have to stop assuming encounter-order indexing
+    // (e.g. `parse_xml_poi_nodes_collected` checks `poi_nodes[0]`). The
+    // refactor is non-trivial and no benchmark exists to size the win; see
+    // AUDIT.md QA-008. Revisit when parse time shows up in a real workload.
     reader
         .for_each(|element| match element {
             Element::Node(n) => {
@@ -193,12 +204,8 @@ pub fn parse_pbf(path: &Path) -> Result<OsmData> {
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect();
                 let node_refs: Vec<i64> = w.refs().collect();
-                let way = OsmWay {
-                    tags: tags.clone(),
-                    node_refs: node_refs.clone(),
-                };
                 let idx = ways.len();
-                ways.push(way);
+                ways.push(OsmWay { tags, node_refs });
                 ways_by_id.insert(w.id(), idx);
             }
             Element::Relation(r) => {
@@ -391,7 +398,7 @@ pub fn parse_osm_xml_str(xml: &str) -> Result<OsmData> {
                         OsmNode {
                             lat,
                             lon,
-                            tags: current_node_tags.clone(),
+                            tags: std::mem::take(&mut current_node_tags),
                         },
                     );
                 }
@@ -502,12 +509,11 @@ pub fn parse_osm_xml_str(xml: &str) -> Result<OsmData> {
             Ok(Event::End(ref e)) => match e.name().as_ref() {
                 b"way" if in_way => {
                     in_way = false;
-                    let way = OsmWay {
-                        tags: current_tags.clone(),
-                        node_refs: current_node_refs.clone(),
-                    };
                     let idx = ways.len();
-                    ways.push(way);
+                    ways.push(OsmWay {
+                        tags: std::mem::take(&mut current_tags),
+                        node_refs: std::mem::take(&mut current_node_refs),
+                    });
                     ways_by_id.insert(current_way_id, idx);
                 }
                 b"relation" if in_relation => {
@@ -518,8 +524,8 @@ pub fn parse_osm_xml_str(xml: &str) -> Result<OsmData> {
                         && !current_members.is_empty()
                     {
                         relations.push(OsmRelation {
-                            tags: current_tags.clone(),
-                            members: current_members.clone(),
+                            tags: std::mem::take(&mut current_tags),
+                            members: std::mem::take(&mut current_members),
                         });
                     }
                 }

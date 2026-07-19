@@ -1,37 +1,8 @@
-// City shader with fog and dynamic lighting
-
-struct SceneUniforms {
-    view_proj: mat4x4<f32>,
-    inv_view_proj: mat4x4<f32>,
-    camera_pos: vec3<f32>,
-    _pad0: f32,
-    time_of_day: f32,
-    animation_time: f32,
-    ambient_light: f32,
-    _pad1: f32,
-    sun_direction: vec3<f32>,
-    _pad2: f32,
-    light_direction: vec3<f32>,
-    light_intensity: f32,
-    fog_density: f32,
-    fog_start: f32,
-    _pad3: vec2<f32>,
-    sky_zenith: vec3<f32>,
-    _pad4: f32,
-    sky_horizon: vec3<f32>,
-    _pad5: f32,
-    cloud_speed: f32,
-    cloud_coverage: f32,
-    _pad6: vec2<f32>,
-    cloud_color: vec3<f32>,
-    clouds_enabled: u32,
-    ground_color: vec3<f32>,
-    _pad7: f32,
-    visual_params: vec4<f32>,
-    visual_params2: vec4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+// City shader with fog and dynamic lighting.
+//
+// SceneUniforms struct + binding, feature-type constants (FEATURE_*), and sky
+// helpers are prepended at compile time by `src/render/pipelines.rs` from
+// `scene_uniforms.wgsl`, `features.wgsl`, and `sky_helpers.wgsl` respectively.
 
 const SHADOW_CASCADE_COUNT: u32 = 4u;
 
@@ -63,37 +34,33 @@ struct VertexOutput {
     @location(4) uv: vec2<f32>,
 }
 
-// --- Sky color helpers (loaded from sky_helpers.wgsl at compile time) ---
-
-// --- City shaders ---
-
 struct Material {
     specular_strength: f32,
     shininess: f32,
 }
 
+// Maps a vertex `feature_type` to its lighting material. Threshold ladder uses
+// ±0.5 slop around each integer feature slot — see `FEATURE_*` constants in
+// `features.wgsl` (mirrored from `src/mesh.rs::feature`). Adding a new feature
+// slot requires extending both this ladder and the Rust-side discriminant.
 fn get_material(feature: f32) -> Material {
-    if (feature < 0.5) {
-        return Material(0.0, 1.0);           // terrain
-    } else if (feature < 1.5) {
-        return Material(0.15, 32.0);          // building
-    } else if (feature < 2.5) {
-        return Material(0.08, 16.0);          // road
-    } else if (feature < 3.5) {
-        return Material(0.4, 64.0);           // water
-    } else if (feature < 4.5) {
-        return Material(0.0, 1.0);            // landuse
-    } else if (feature < 5.5) {
-        return Material(0.05, 8.0);           // road marking
-    } else if (feature < 6.5) {
-        return Material(0.25, 48.0);          // railway
+    if (feature < FEATURE_TERRAIN + 0.5) {
+        return Material(0.0, 1.0);           // FEATURE_TERRAIN (0.0)
+    } else if (feature < FEATURE_BUILDING + 0.5) {
+        return Material(0.15, 32.0);          // FEATURE_BUILDING (1.0)
+    } else if (feature < FEATURE_ROAD + 0.5) {
+        return Material(0.08, 16.0);          // FEATURE_ROAD / ROAD_LAYERED / ROAD_PATH (2.x)
+    } else if (feature < FEATURE_WATER + 0.5) {
+        return Material(0.4, 64.0);           // FEATURE_WATER (3.0)
+    } else if (feature < FEATURE_LANDUSE + 0.5) {
+        return Material(0.0, 1.0);            // FEATURE_LANDUSE / LANDUSE_OVERLAY (4.x)
+    } else if (feature < FEATURE_ROAD_MARKING + 0.5) {
+        return Material(0.05, 8.0);           // FEATURE_ROAD_MARKING / _LAYERED (5.x)
+    } else if (feature < FEATURE_RAILWAY + 0.5) {
+        return Material(0.25, 48.0);          // FEATURE_RAILWAY (6.0)
     } else {
-        return Material(0.12, 24.0);          // point feature
+        return Material(0.12, 24.0);          // FEATURE_POINT_FEATURE (7.0) and above
     }
-}
-
-fn cascade_blend_distance(cascade_index: u32) -> f32 {
-    return shadow.shadow_params.y + f32(cascade_index) * 0.0;
 }
 
 fn shadow_cascade_blend(distance_to_camera: f32) -> vec4<f32> {
@@ -101,7 +68,10 @@ fn shadow_cascade_blend(distance_to_camera: f32) -> vec4<f32> {
 
     for (var cascade_index = 0u; cascade_index < SHADOW_CASCADE_COUNT - 1u; cascade_index += 1u) {
         let radius = shadow.cascade_radii[cascade_index];
-        let blend_distance = cascade_blend_distance(cascade_index);
+        // Per-cascade blend distance is not yet wired; all cascades use the
+        // global shadow_params.y blend distance. See camera::SHADOW_CASCADE_BLEND_DISTANCE.
+        // TODO: implement per-cascade blend if radii-dependent falloff is needed.
+        let blend_distance = shadow.shadow_params.y;
         let blend_start = max(radius - blend_distance, 0.0);
 
         if (distance_to_camera <= blend_start) {
@@ -187,7 +157,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 }
 
 fn apply_building_facade_variation(color: vec3<f32>, feature: f32, normal: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
-    if (feature < 0.5 || feature >= 1.5 || abs(normal.y) > 0.35) {
+    // Early-out unless this is a BUILDING vertex (FEATURE_BUILDING ±0.5) with a
+    // near-vertical normal (roofs keep their original color).
+    if (abs(feature - FEATURE_BUILDING) >= 0.5 || abs(normal.y) > 0.35) {
         return color;
     }
 
@@ -216,7 +188,7 @@ fn shadow_cascade_debug_color(distance_to_camera: f32) -> vec3<f32> {
 }
 
 fn is_tree_point_feature(feature_type: f32, uv: vec2<f32>) -> bool {
-    return abs(feature_type - 7.0) < 0.5 && abs(uv.x - 1.0) < 0.25;
+    return abs(feature_type - FEATURE_POINT_FEATURE) < 0.5 && abs(uv.x - 1.0) < 0.25;
 }
 
 fn should_discard_vegetation(feature_type: f32, uv: vec2<f32>, distance_to_camera: f32) -> bool {
@@ -225,7 +197,7 @@ fn should_discard_vegetation(feature_type: f32, uv: vec2<f32>, distance_to_camer
 }
 
 fn is_water_feature(feature_type: f32) -> bool {
-    return feature_type > 2.5 && feature_type < 3.5;
+    return abs(feature_type - FEATURE_WATER) < 0.5;
 }
 
 fn water_normal(world_position: vec3<f32>, base_normal: vec3<f32>) -> vec3<f32> {
@@ -255,15 +227,21 @@ fn apply_bike_ped_overlay(color: vec3<f32>, feature_type: f32) -> vec3<f32> {
     if (scene.visual_params2.y < 0.5) {
         return color;
     }
-    if (feature_type > 2.20 && feature_type < 2.35) {
+    // FEATURE_ROAD_PATH (2.25) ±0.05.
+    if (abs(feature_type - FEATURE_ROAD_PATH) < 0.05) {
         return mix(color, vec3<f32>(0.16, 0.95, 0.75), 0.70);
     }
+    // Landuse overlay band: catches LANDUSE (4.0) upper half and LANDUSE_OVERLAY
+    // (4.25). Asymmetric ±0.275 around 4.225 — see features.wgsl.
     if (feature_type > 3.95 && feature_type < 4.50) {
         return mix(color, vec3<f32>(0.35, 0.82, 0.30), 0.35);
     }
-    if (feature_type > 6.50 && feature_type < 7.50) {
+    // FEATURE_POINT_FEATURE (7.0) ±0.5.
+    if (abs(feature_type - FEATURE_POINT_FEATURE) < 0.5) {
         return mix(color, vec3<f32>(1.0, 0.92, 0.20), 0.45);
     }
+    // Layered road / road-marking bands (ROAD_LAYERED 2.10 and ROAD_MARKING_LAYERED
+    // 5.10, ±0.10). Used to desaturate bridge-tier surfaces.
     if ((feature_type > 1.95 && feature_type < 2.20) || (feature_type > 4.95 && feature_type < 5.20)) {
         let grey = dot(color, vec3<f32>(0.299, 0.587, 0.114));
         return mix(vec3<f32>(grey), color, 0.25) * 0.55;

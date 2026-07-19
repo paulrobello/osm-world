@@ -2,63 +2,119 @@ use super::*;
 use prepared_cache::*;
 use routes::prepare_area;
 use shell::{path_string, shell_quote};
-use std::{ffi::OsString, path::Path, sync::Mutex};
+use std::path::Path;
 use types::{PrepareAreaError, PrepareAreaRequest};
 use validate::{
     prepared_cache_key, validate_bbox, validate_extra_args, validate_spawn,
     validate_srtm_tile_limit,
 };
 
-static ENV_MUTEX: Mutex<()> = Mutex::new(());
+/// Test-only utilities for tests that mutate process-global state.
+///
+/// Several `par_osm_rust` modules (`cache`, `overpass`, `srtm`, `overture`)
+/// resolve their cache directories from process environment variables, so the
+/// server handlers they back transitively read `HOME`, `PAR_OSM_*_CACHE_DIR`,
+/// and legacy `*_CACHE_DIR` names. Refactoring every call site to thread an
+/// explicit cache root is a larger change than the audit wanted to take on in
+/// one step (see ARC-011), so for now these tests mutate the live process
+/// environment under a global mutex with automatic restore-on-drop.
+///
+/// ## Safety contract
+///
+/// - Every test that mutates process env vars MUST hold [`ENV_MUTEX`] for its
+///   entire body (use `let _guard = ENV_MUTEX.lock().unwrap();` as the first
+///   statement).
+/// - The test MUST construct an [`EnvRestore`] via [`EnvRestore::capture`]
+///   listing every env var it intends to mutate (plus the `HOME` and
+///   `*_CACHE_DIR` names that [`set_test_cache_env`] touches).
+/// - Tests MUST NOT mutate env vars outside this module; if a new test needs
+///   env mutation, add the helpers here and route through `ENV_MUTEX`.
+///
+/// Holding `ENV_MUTEX` serializes all such tests so the `unsafe { set_var }`
+/// and `remove_var` calls cannot race with other test threads reading the same
+/// environment.
+mod test_support {
+    use std::{ffi::OsString, sync::Mutex};
 
-struct EnvRestore {
-    vars: Vec<(&'static str, Option<OsString>)>,
-}
+    /// Serializes every test that mutates process env vars. See the module
+    /// safety contract — holding this guard for the full test body is what
+    /// makes the underlying `unsafe { std::env::set_var }` sound.
+    pub static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
-impl EnvRestore {
-    fn capture(names: &[&'static str]) -> Self {
-        Self {
-            vars: names
-                .iter()
-                .map(|name| (*name, std::env::var_os(name)))
-                .collect(),
+    /// Captures the current values of the named env vars on construction and
+    /// restores them on drop. Pair with `ENV_MUTEX` for the safety contract.
+    pub struct EnvRestore {
+        vars: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvRestore {
+        /// Snapshot the current values of `names` so they can be restored when
+        /// the guard drops. Call this after acquiring `ENV_MUTEX` and before
+        /// mutating any env var.
+        pub fn capture(names: &[&'static str]) -> Self {
+            Self {
+                vars: names
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            }
         }
     }
-}
 
-impl Drop for EnvRestore {
-    fn drop(&mut self) {
-        for (name, value) in &self.vars {
-            // SAFETY: EnvRestore is only used within a test guarded by
-            // ENV_MUTEX, which serializes all tests that mutate env vars.
-            // This ensures no concurrent access to the process environment.
-            unsafe {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in &self.vars {
+                // SAFETY: this guard is only constructed by tests that hold
+                // ENV_MUTEX for their full body, so no other thread is
+                // reading or writing the process environment here.
+                // See the module safety contract above.
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
                 }
             }
         }
     }
+
+    /// Points the shared cache helpers at fresh per-test directories under
+    /// `tmp`. Caller MUST hold `ENV_MUTEX` and have captured an `EnvRestore`
+    /// covering `HOME`, `PAR_OSM_OVERPASS_CACHE_DIR`, `OVERPASS_CACHE_DIR`,
+    /// `PAR_OSM_SRTM_CACHE_DIR`, `SRTM_CACHE_DIR`, `PAR_OSM_OVERTURE_CACHE_DIR`,
+    /// and `OVERTURE_CACHE_DIR`.
+    ///
+    /// # Safety
+    ///
+    /// Mutates process-global env vars. Sound only when the caller holds
+    /// `ENV_MUTEX` for the full test body.
+    pub unsafe fn set_test_cache_env(tmp: &tempfile::TempDir) {
+        let home = tmp.path().join("home");
+        let overpass_dir = tmp.path().join("overpass");
+        let srtm_dir = tmp.path().join("srtm");
+        let overture_dir = tmp.path().join("overture");
+        // SAFETY: caller holds ENV_MUTEX for the full test body; see module docs.
+        unsafe {
+            std::env::set_var("HOME", &home);
+            std::env::set_var("PAR_OSM_OVERPASS_CACHE_DIR", &overpass_dir);
+            std::env::remove_var("OVERPASS_CACHE_DIR");
+            std::env::set_var("PAR_OSM_SRTM_CACHE_DIR", &srtm_dir);
+            std::env::remove_var("SRTM_CACHE_DIR");
+            std::env::set_var("PAR_OSM_OVERTURE_CACHE_DIR", &overture_dir);
+            std::env::remove_var("OVERTURE_CACHE_DIR");
+        }
+    }
 }
 
+use test_support::{ENV_MUTEX, EnvRestore};
+
+/// Convenience wrapper for the common cache-env setup: caller has already
+/// acquired `ENV_MUTEX` and captured an `EnvRestore` covering the canonical
+/// cache-env var list.
 fn set_test_cache_env(tmp: &tempfile::TempDir) {
-    let home = tmp.path().join("home");
-    let overpass_dir = tmp.path().join("overpass");
-    let srtm_dir = tmp.path().join("srtm");
-    let overture_dir = tmp.path().join("overture");
-    // SAFETY: All tests calling this function hold ENV_MUTEX, serializing
-    // access to the process environment. No production code reads these
-    // vars concurrently during test execution.
-    unsafe {
-        std::env::set_var("HOME", &home);
-        std::env::set_var("PAR_OSM_OVERPASS_CACHE_DIR", &overpass_dir);
-        std::env::remove_var("OVERPASS_CACHE_DIR");
-        std::env::set_var("PAR_OSM_SRTM_CACHE_DIR", &srtm_dir);
-        std::env::remove_var("SRTM_CACHE_DIR");
-        std::env::set_var("PAR_OSM_OVERTURE_CACHE_DIR", &overture_dir);
-        std::env::remove_var("OVERTURE_CACHE_DIR");
-    }
+    // SAFETY: every caller holds ENV_MUTEX and has captured an EnvRestore
+    // listing every var this function touches. See `test_support` docs.
+    unsafe { test_support::set_test_cache_env(tmp) };
 }
 
 fn cache_xml_for_bbox(bbox: [f64; 4], filter: &par_osm_rust::filter::FeatureFilter) -> String {

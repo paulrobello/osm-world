@@ -7,6 +7,76 @@
 /** API base URL, read from `NEXT_PUBLIC_OSM_WORLD_API_URL` or defaulted to `http://127.0.0.1:3030`. */
 export const API_URL = process.env.NEXT_PUBLIC_OSM_WORLD_API_URL ?? 'http://127.0.0.1:3030';
 
+/**
+ * localStorage key under which the API bearer token is persisted.
+ *
+ * The server requires `Authorization: Bearer <OSM_WORLD_API_TOKEN>` on every
+ * mutating endpoint whenever the operator has set `OSM_WORLD_API_TOKEN`. The
+ * web client never prompt the operator from inside `lib/` — a settings dialog
+ * (out of scope for this module) calls {@link setApiToken}.
+ */
+const API_TOKEN_KEY = 'osm_world_api_token';
+
+/**
+ * Stores the bearer token used for authenticated API calls. Pass `null` or an
+ * empty string to clear the stored token via {@link clearApiToken}.
+ */
+export function setApiToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  if (token === null || token.length === 0) {
+    clearApiToken();
+    return;
+  }
+  try {
+    window.localStorage.setItem(API_TOKEN_KEY, token);
+  } catch {
+    // localStorage may be unavailable (private mode, quota); fall back to in-memory.
+    inMemoryToken = token;
+  }
+}
+
+/** Returns the currently configured bearer token, or `null` if none is set. */
+export function getApiToken(): string | null {
+  if (typeof window !== 'undefined') {
+    try {
+      return window.localStorage.getItem(API_TOKEN_KEY);
+    } catch {
+      // Fall through to in-memory fallback.
+    }
+  }
+  return inMemoryToken;
+}
+
+/** Removes the stored bearer token so subsequent requests omit the header. */
+export function clearApiToken(): void {
+  inMemoryToken = null;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(API_TOKEN_KEY);
+  } catch {
+    // Nothing else we can do; in-memory token was already cleared.
+  }
+}
+
+/**
+ * In-memory fallback used when `localStorage` throws (private mode, quota, or
+ * non-browser environments). Always read via {@link getApiToken}.
+ */
+let inMemoryToken: string | null = null;
+
+/**
+ * Builds the request headers for an API call, merging caller-supplied headers
+ * with `Authorization: Bearer <token>` when a token is configured.
+ */
+function withAuthHeaders(init: HeadersInit | undefined): Headers {
+  const headers = new Headers(init ?? undefined);
+  const token = getApiToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return headers;
+}
+
 /** Feature type toggles controlling which OSM features are included in a prepare request. */
 export interface FeatureFilter {
   roads: boolean;
@@ -102,15 +172,35 @@ export interface LaunchRendererResponse {
 }
 
 /**
- * Internal fetch wrapper that throws on non-OK responses with the server error message.
+ * Error thrown when an API call receives a non-OK HTTP response. Carries the
+ * numeric status so callers (and {@link errorHintForMessage}) can distinguish
+ * 401 auth failures from other categories.
+ */
+export class ApiError extends Error {
+  /** HTTP status code from the failing response. */
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * Internal fetch wrapper that injects the configured bearer token and throws
+ * an {@link ApiError} on non-OK responses with the server error message.
  * @typeParam T - Expected response type
  */
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, init);
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: withAuthHeaders(init?.headers),
+  });
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `HTTP ${response.status}`);
+    throw new ApiError(response.status, body?.error ?? `HTTP ${response.status}`);
   }
 
   return response.json() as Promise<T>;

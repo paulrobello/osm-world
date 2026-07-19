@@ -10,8 +10,11 @@ use subtle::ConstantTimeEq;
 use super::types::{ErrorResponse, PrepareAreaError, PrepareResult};
 
 /// Maximum allowed span in degrees for either latitude or longitude in a bbox.
+/// 0.5° is roughly 55 km at the equator; smaller toward the poles.
 pub const MAX_BBOX_SPAN_DEGREES: f64 = 0.5;
-/// Maximum allowed area in square degrees for a bbox.
+/// Maximum allowed area in square degrees for a bbox. 0.10 deg² is a few
+/// thousand km² (≈30 km × 30 km near the equator), large enough for a metro
+/// area but small enough to bound SRTM download and parse cost.
 pub const MAX_BBOX_AREA_DEGREES: f64 = 0.10;
 /// Maximum number of SRTM tiles that may be downloaded for a single prepare request.
 pub const MAX_SRTM_TILE_COUNT: usize = 16;

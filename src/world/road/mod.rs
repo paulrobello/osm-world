@@ -330,6 +330,12 @@ fn interpolate_path_sample(
     distances: &[f32],
     sample_distance: f32,
 ) -> ((f32, f32), f32) {
+    debug_assert!(
+        !points.is_empty()
+            && points.len() == terrain_elevations.len()
+            && points.len() == distances.len(),
+        "interpolate_path_sample requires non-empty parallel slices of equal length"
+    );
     if sample_distance <= 0.0 {
         return (points[0], terrain_elevations[0]);
     }

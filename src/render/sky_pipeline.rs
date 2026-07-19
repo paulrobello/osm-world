@@ -1,33 +1,21 @@
 use wgpu::*;
 
-/// Concatenate sky_helpers.wgsl into the sky shader at the placeholder.
+/// Shared `SceneUniforms` struct + binding (`shaders/scene_uniforms.wgsl`).
+const SCENE_UNIFORMS: &str = include_str!("../../shaders/scene_uniforms.wgsl");
+
+/// Sky color and fog helpers (`shaders/sky_helpers.wgsl`).
 const SKY_HELPERS: &str = include_str!("../../shaders/sky_helpers.wgsl");
 
-fn sky_shader_source() -> String {
-    let mut source = String::with_capacity(8192);
-    source.push_str(include_str!("../../shaders/sky.wgsl"));
-    // Insert sky helpers at the first placeholder comment
-    if let Some(pos) =
-        source.find("// --- Sky helpers (loaded from sky_helpers.wgsl at compile time) ---")
-    {
-        source.replace_range(
-            pos..pos
-                + "// --- Sky helpers (loaded from sky_helpers.wgsl at compile time) ---".len(),
-            SKY_HELPERS,
-        );
-    }
-    // Insert fog helper at its placeholder comment
-    if let Some(pos) =
-        source.find("// --- Fog helpers (loaded from sky_helpers.wgsl at compile time) ---")
-    {
-        // The fog helper is already in SKY_HELPERS, so we only need to remove the placeholder
-        source.replace_range(
-            pos..pos
-                + "// --- Fog helpers (loaded from sky_helpers.wgsl at compile time) ---".len(),
-            "",
-        );
-    }
-    source
+/// Returns the WGSL source for the sky shader: the shared `SceneUniforms`,
+/// sky/fog helpers, and the sky shader body, concatenated unconditionally so a
+/// missing include or renamed comment cannot silently drop a section. Exposed
+/// publicly so `tests/shader_source_test.rs` sees the same source the renderer
+/// compiles.
+pub fn sky_shader_source() -> String {
+    format!(
+        "{SCENE_UNIFORMS}\n{SKY_HELPERS}\n{}",
+        include_str!("../../shaders/sky.wgsl")
+    )
 }
 
 pub struct SkyPipeline {

@@ -55,3 +55,10 @@ repos:
         language: system
         files: ^(Cargo\.lock|Cargo\.toml|crates/.*Cargo\.toml)$
         pass_filenames: false
+      - id: web-checkall
+        name: make web-checkall (lint + typecheck + test)
+        description: Lint, type-check, and test the web tree via the Makefile
+        entry: make web-checkall
+        language: system
+        files: ^web/
+        pass_filenames: false

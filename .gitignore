@@ -41,7 +41,6 @@ test_images/
 
 # Logs
 *.log
-graphify-out/
 statusline-*.json
 .superpowers/
 .worktrees/

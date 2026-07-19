@@ -2729,7 +2729,6 @@ dependencies = [
  "glam",
  "image",
  "log",
- "memmap2 0.9.11",
  "naga",
  "osmpbf",
  "par-osm-rust",

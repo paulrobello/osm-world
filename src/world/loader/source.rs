@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::geo::{CoordConverter, ElevationData};
+use crate::geo::CoordConverter;
 use crate::osm::parse::parse_osm_file;
 use crate::world::street_sign::ResolvedStreetSign;
+use par_osm_rust::elevation::ElevationData;
 
 pub const POINT_FEATURE_BUILDING_CLEARANCE_METRES: f32 = 2.0;
 

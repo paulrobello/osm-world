@@ -30,7 +30,6 @@ anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 flate2 = "1.1"
 log = "0.4"
-memmap2 = "0.9"
 osmpbf = "0.3.8"
 quick-xml = "0.41"
 reqwest = { version = "0.13", features = ["blocking"] }
@@ -69,7 +68,6 @@ chrono = { workspace = true }
 image = "0.25"
 osmpbf.workspace = true
 earcutr = "0.5"
-memmap2.workspace = true
 flate2.workspace = true
 reqwest.workspace = true
 urlencoding.workspace = true

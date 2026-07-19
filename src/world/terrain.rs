@@ -1,7 +1,8 @@
 //! Terrain heightfield mesh generator.
 
-use crate::geo::{CoordConverter, ElevationData};
+use crate::geo::CoordConverter;
 use crate::render::vertex::{Vertex, feature};
+use par_osm_rust::elevation::ElevationData;
 
 const GRID_SPACING: f32 = 10.0; // metres between grid vertices
 

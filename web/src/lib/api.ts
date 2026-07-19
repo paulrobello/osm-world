@@ -90,14 +90,15 @@ export interface DeletePreparedAreaResponse {
   cache_key: string;
 }
 
-/** Response from `POST /renderer/launch`. */
+/**
+ * Response from `POST /renderer/launch`.
+ *
+ * The server only confirms that the renderer process was spawned; process
+ * identifiers and resolved command details are not exposed over the API.
+ * Matches `LaunchRendererResponse` in `src/server/types.rs`.
+ */
 export interface LaunchRendererResponse {
   status: string;
-  pid: number;
-  program: string;
-  args: string[];
-  command: string;
-  command_cwd: string;
 }
 
 /**
@@ -115,8 +116,13 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Fetches the server health status. */
-export function fetchHealth(): Promise<{ status: string; overpass_cache_dir: string; srtm_cache_dir: string }> {
+/**
+ * Fetches the server health status.
+ *
+ * Returns only the API status string; cache directory paths are not exposed
+ * over the API. Matches `HealthResponse` in `src/server/types.rs`.
+ */
+export function fetchHealth(): Promise<{ status: string }> {
   return apiJson('/health');
 }
 

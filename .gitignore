@@ -11,9 +11,6 @@ debug/
 *.rlib
 *.d
 
-# Cargo
-Cargo.lock
-
 # IDE / Editor
 .idea/
 .vscode/

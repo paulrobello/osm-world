@@ -569,7 +569,7 @@ export default function Home() {
         extra_args: rendererOptionArgs(rendererOptions),
       });
       setLaunchStatus('launched');
-      setLaunchMessage(`Renderer launched as pid ${result.pid}.`);
+      setLaunchMessage(`Renderer launched (status: ${result.status}).`);
     } catch (error) {
       setLaunchStatus('failed');
       setLaunchMessage(error instanceof Error ? error.message : 'Renderer launch failed');
@@ -599,14 +599,6 @@ export default function Home() {
             <div className="console-line">
               <strong>health</strong>
               <span>{loadingMeta ? 'checking…' : health?.status ?? 'offline'}</span>
-            </div>
-            <div className="console-line">
-              <strong>overpass</strong>
-              <span>{health?.overpass_cache_dir ?? 'unavailable'}</span>
-            </div>
-            <div className="console-line">
-              <strong>srtm</strong>
-              <span>{health?.srtm_cache_dir ?? 'unavailable'}</span>
             </div>
             <div className="console-line">
               <strong>areas</strong>

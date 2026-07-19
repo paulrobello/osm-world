@@ -14,7 +14,7 @@ members = ["crates/par-osm-rust"]
 par-osm-rust = { path = "crates/par-osm-rust" }
 axum = "0.8.9"
 tokio = { version = "1.52.3", features = ["full"] }
-tower-http = { version = "0.6.10", features = ["cors"] }
+tower-http = { version = "0.7.0", features = ["cors"] }
 wgpu = "29.0.3"
 winit = "0.30.13"
 glam = "0.32.1"

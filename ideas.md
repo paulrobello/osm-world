@@ -45,7 +45,3 @@ Remove completed items from this list.
 23. **Automated visual regression scenes**
     - Maintain a small suite of prepared city scenes plus screenshot camera positions.
     - Compare image outputs or at least file generation success in CI/local verification.
-
-24. **Graphify-backed architecture docs**
-    - Generate a short `docs/architecture.md` from the graphify community structure, linking core modules like `world::loader`, `stream`, `render`, `server`, and `web`.
-    - Value: makes onboarding easier as the renderer grows.

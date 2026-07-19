@@ -1,3 +1,7 @@
+//! Search / fly-to overlay: builds an index of named world features and lets
+//! the user jump the camera to a result by substring match.
+
+/// Category used to label and group search results.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SearchCategory {
     Address,
@@ -7,6 +11,7 @@ pub enum SearchCategory {
     Transit,
 }
 
+/// A single searchable feature: its display label, category, and world position.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SearchEntry {
     pub label: String,
@@ -15,6 +20,7 @@ pub struct SearchEntry {
 }
 
 impl SearchEntry {
+    /// Constructs a search entry from a label, category, and world-space position.
     pub fn new(label: impl Into<String>, category: SearchCategory, position: glam::Vec3) -> Self {
         Self {
             label: label.into(),
@@ -24,11 +30,13 @@ impl SearchEntry {
     }
 }
 
+/// Mutable UI state for the search window: just the current query string.
 #[derive(Clone, Debug, Default)]
 pub struct SearchState {
     pub query: String,
 }
 
+/// Returns the default search-window position, placed just to the right of the HUD.
 pub fn search_window_default_pos() -> egui::Pos2 {
     egui::pos2(
         crate::ui::hud::HUD_LEFT + crate::ui::hud::HUD_MIN_WIDTH + 16.0,
@@ -36,6 +44,8 @@ pub fn search_window_default_pos() -> egui::Pos2 {
     )
 }
 
+/// Filters `entries` by case-insensitive substring match against `query`,
+/// returning up to `limit` clones.
 pub fn search_entries(entries: &[SearchEntry], query: &str, limit: usize) -> Vec<SearchEntry> {
     let query = query.trim().to_ascii_lowercase();
     if query.is_empty() || limit == 0 {
@@ -49,6 +59,8 @@ pub fn search_entries(entries: &[SearchEntry], query: &str, limit: usize) -> Vec
         .collect()
 }
 
+/// Moves `camera` to an overhead vantage point above and behind `entry`, facing
+/// the result horizontally and pitched down ~32 degrees.
 pub fn fly_to_entry(camera: &mut crate::camera::Flycam, entry: &SearchEntry) {
     camera.position = glam::vec3(
         entry.position.x,
@@ -59,6 +71,9 @@ pub fn fly_to_entry(camera: &mut crate::camera::Flycam, entry: &SearchEntry) {
     camera.pitch = (-32.0_f32).to_radians();
 }
 
+/// Builds the searchable index from named roads, buildings (by address),
+/// address points, transit routes, transit point features, landmarks, and POIs
+/// in `source`.
 pub fn build_search_index(source: &crate::world::loader::WorldSource) -> Vec<SearchEntry> {
     let mut entries = Vec::new();
     for road in &source.roads {
@@ -124,6 +139,9 @@ pub fn build_search_index(source: &crate::world::loader::WorldSource) -> Vec<Sea
     entries
 }
 
+/// Draws the "Search / Fly To" window: a query text field and a list of up to
+/// eight matching entries. Clicking a result flies the camera to it and keeps
+/// the entry's label in the query box.
 pub fn draw(
     ctx: &egui::Context,
     state: &mut SearchState,

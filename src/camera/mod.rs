@@ -1,36 +1,55 @@
+//! Camera types and shadow-cascade helpers: free-flight flycam, scene-uniform
+//! layout for the GPU, and cascade selection/blending for the sun shadow map.
+
 pub mod controller;
 
 use bytemuck::{Pod, Zeroable};
 
 pub use controller::CameraController;
 
+/// Number of cascades used by the sun shadow map.
 pub const SHADOW_CASCADE_COUNT: usize = 4;
+/// Square edge length, in texels, of each sun shadow cascade map.
 pub const SHADOW_MAP_SIZE: u32 = 2048;
+/// World-space radius per cascade; cascades cover progressively larger areas.
 pub const SHADOW_CASCADE_RADII: [f32; SHADOW_CASCADE_COUNT] = [350.0, 900.0, 2200.0, 5200.0];
+/// Distance over which two adjacent cascades cross-fade.
 pub const SHADOW_CASCADE_BLEND_DISTANCE: f32 = 150.0;
+/// Distance over which the final cascade fades into "no shadow" at far range.
 pub const SHADOW_FAR_FADE_DISTANCE: f32 = 650.0;
+/// Maximum camera-to-occluder distance for which contact shadows are applied.
 pub const CONTACT_SHADOW_MAX_DISTANCE: f32 = 260.0;
+/// Strength multiplier for the screen-space contact-shadow term.
 pub const CONTACT_SHADOW_STRENGTH: f32 = 0.35;
+/// Minimum occluder height (in world units) eligible to cast a contact shadow.
 pub const CONTACT_SHADOW_MIN_OCCLUDER_HEIGHT: f32 = 8.0;
 const SHADOW_MAP_SIZE_F32: f32 = SHADOW_MAP_SIZE as f32;
 
+/// One sun shadow cascade: the light view-projection matrix and its world-space radius.
 #[derive(Copy, Clone, Debug)]
 pub struct ShadowCascade {
     pub light_view_proj: glam::Mat4,
     pub radius: f32,
 }
 
+/// A full set of shadow cascades for a single frame, one per `SHADOW_CASCADE_COUNT` slot.
 #[derive(Copy, Clone, Debug)]
 pub struct ShadowCascadeSet {
     pub cascades: [ShadowCascade; SHADOW_CASCADE_COUNT],
 }
 
+/// Per-cascade blend weights for the current camera distance plus an overall
+/// shadow-strength multiplier that fades shadows out at the far edge.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ShadowCascadeBlend {
     pub weights: [f32; SHADOW_CASCADE_COUNT],
     pub shadow_strength: f32,
 }
 
+/// Computes the cascade blend weights and overall shadow strength for a camera
+/// at `distance` from the shadow origin, given a cascade `radii` table. The
+/// result sums to a single dominant cascade except inside the blend band
+/// between two cascades, where it cross-fades.
 pub fn shadow_cascade_blend(
     distance: f32,
     radii: [f32; SHADOW_CASCADE_COUNT],
@@ -164,6 +183,8 @@ pub struct Flycam {
 }
 
 impl Flycam {
+    /// Constructs a flycam at the default spawn position with sensible speed,
+    /// field-of-view, and near/far plane defaults for the given `aspect` ratio.
     pub fn new(aspect: f32) -> Self {
         Self {
             position: glam::Vec3::new(0.0, 50.0, 100.0),
@@ -177,6 +198,7 @@ impl Flycam {
         }
     }
 
+    /// Returns the unit forward vector derived from yaw and pitch.
     pub fn forward(&self) -> glam::Vec3 {
         glam::Vec3::new(
             self.yaw.cos() * self.pitch.cos(),
@@ -186,18 +208,23 @@ impl Flycam {
         .normalize()
     }
 
+    /// Returns the horizontal unit right vector derived from yaw (always Y-up).
     pub fn right(&self) -> glam::Vec3 {
         glam::Vec3::new(-self.yaw.sin(), 0.0, self.yaw.cos()).normalize()
     }
 
+    /// Builds the right-handed view matrix from position and forward direction.
     pub fn view_matrix(&self) -> glam::Mat4 {
         glam::Mat4::look_to_rh(self.position, self.forward(), glam::Vec3::Y)
     }
 
+    /// Builds the right-handed perspective projection matrix from FOV, aspect,
+    /// and near/far planes.
     pub fn projection_matrix(&self) -> glam::Mat4 {
         glam::Mat4::perspective_rh(self.fov, self.aspect, self.near, self.far)
     }
 
+    /// Builds scene uniforms with default visual-detail settings.
     pub fn uniforms(
         &self,
         day: &crate::atmosphere::DayCycleState,
@@ -210,6 +237,8 @@ impl Flycam {
         )
     }
 
+    /// Builds scene uniforms with the supplied `visual` detail settings, baked
+    /// into the visual-detail uniform slots alongside camera and atmosphere state.
     pub fn uniforms_with_visual_detail(
         &self,
         day: &crate::atmosphere::DayCycleState,
@@ -264,10 +293,15 @@ impl Flycam {
         }
     }
 
+    /// Builds the shadow cascade set for `light_direction`, snapping each
+    /// cascade to its shadow-map texel grid to reduce shimmer on camera motion.
     pub fn shadow_cascades(&self, light_direction: [f32; 3]) -> ShadowCascadeSet {
         self.shadow_cascades_with_snap(light_direction, true)
     }
 
+    /// Builds the shadow cascade set for `light_direction` without texel
+    /// snapping. Use this when the light or camera moves every frame so that
+    /// snapping would not produce a stable result anyway.
     pub fn shadow_cascades_for_dynamic_light(&self, light_direction: [f32; 3]) -> ShadowCascadeSet {
         self.shadow_cascades_with_snap(light_direction, false)
     }

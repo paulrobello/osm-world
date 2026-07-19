@@ -1,7 +1,14 @@
+//! Top-left heads-up display overlay showing camera, time-of-day, and FPS.
+
+/// Left-edge offset of the HUD overlay in logical pixels.
 pub const HUD_LEFT: f32 = 8.0;
+/// Top-edge offset of the HUD overlay in logical pixels.
 pub const HUD_TOP: f32 = 8.0;
+/// Minimum width of the HUD frame so values stay aligned as they change.
 pub const HUD_MIN_WIDTH: f32 = 280.0;
 
+/// Draws the top-left HUD: optional FPS, camera position and lat/lon, yaw/pitch,
+/// forward vector, current time-of-day, and a hint for the settings keybind.
 pub fn draw(
     ctx: &egui::Context,
     camera: &crate::camera::Flycam,

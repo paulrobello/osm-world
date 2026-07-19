@@ -1,11 +1,18 @@
+//! Settings panel: collapsible sections for day-cycle/atmosphere, performance,
+//! visual detail, minimap, area switch, label layers, clouds, fog, and sky
+//! colors. Each section's expanded state is persisted via `SettingsSectionsPrefs`.
+
 use egui::{CollapsingHeader, ComboBox, RichText, ScrollArea, Slider};
 
+/// Mutable references to the three label-layer setting groups, bundled so the
+/// settings draw call can borrow them together.
 pub struct LabelSettingsMut<'a> {
     pub poi: &'a mut crate::ui::poi_labels::PoiLabelSettings,
     pub addresses: &'a mut crate::ui::poi_labels::AddressLabelSettings,
     pub street_signs: &'a mut crate::ui::poi_labels::StreetSignLabelSettings,
 }
 
+/// All mutable application state touched by the settings panel in a single draw.
 pub struct SettingsDrawState<'a> {
     pub atmosphere: &'a mut crate::atmosphere::AtmosphereSettings,
     pub day_cycle: &'a mut crate::atmosphere::DayCycleState,
@@ -18,10 +25,14 @@ pub struct SettingsDrawState<'a> {
     pub show: &'a mut bool,
 }
 
+/// Returns whether the settings window should be open by default at startup.
 pub fn settings_window_default_open() -> bool {
     false
 }
 
+/// Draws the settings window with one collapsible section per state group.
+/// Visibility is bound to `state.show` so callers can close the panel from
+/// outside (for example, when the user presses the settings keybind).
 pub fn draw(ctx: &egui::Context, state: SettingsDrawState<'_>) {
     egui::Window::new("Settings")
         .open(state.show)

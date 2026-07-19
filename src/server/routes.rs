@@ -33,46 +33,95 @@ use super::validate::{
     validate_srtm_tile_limit,
 };
 
+/// Default CORS origins when `OSM_WORLD_CORS_ORIGINS` is unset: the two
+/// localhost origins used by the Web Explorer dev server.
+const DEFAULT_CORS_ORIGINS: &[&str] = &["http://localhost:8032", "http://127.0.0.1:8032"];
+
 /// Builds the Axum router with all API routes.
 ///
-/// Routes are split into read-only endpoints (health, cache, prepared areas)
-/// and mutating endpoints (prepare, update, delete, launch). Mutating endpoints
-/// require authentication via `auth_middleware` when `OSM_WORLD_API_TOKEN` is set.
+/// Routes are split into a tiny public router (`/health`) and an authenticated
+/// router that carries every other endpoint — including the previously
+/// unauthenticated read-only ones (`GET /cache/areas`, `GET /areas/prepared`),
+/// which serialize filesystem paths (SEC-003). `auth_middleware` is a no-op when
+/// `OSM_WORLD_API_TOKEN` is unset (local-default), so local UX is unchanged; only
+/// remote operators who deliberately set a token see 401s.
 ///
-/// CORS is restricted to `localhost:8032` and `127.0.0.1:8032` for the Web Explorer.
+/// `rate_limit_middleware` is applied to the *merged* router so read-only routes
+/// are covered too (SEC-010) — `GET /cache/areas` does a `spawn_blocking` dir
+/// scan per call and would otherwise be a cheap DoS vector.
+///
+/// CORS origins default to the two localhost origins used by the Web Explorer
+/// dev server and can be overridden via `OSM_WORLD_CORS_ORIGINS` (ARC-010).
 pub fn build_router(project_root: PathBuf) -> Router {
-    let read_only = Router::new()
-        .route("/health", get(health))
-        .route("/cache/areas", get(cache_areas))
-        .route("/areas/prepared", get(prepared_areas_handler));
+    let public = Router::new().route("/health", get(health));
 
-    let mutating = Router::new()
+    let authed = Router::new()
+        .route("/cache/areas", get(cache_areas))
+        .route("/areas/prepared", get(prepared_areas_handler))
         .route(
             "/areas/prepared/{cache_key}",
             post(update_prepared_area_handler).delete(delete_prepared_area_handler),
         )
         .route("/areas/prepare", post(prepare_area_handler))
         .route("/renderer/launch", post(launch_renderer_handler))
-        .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::middleware::from_fn(auth_middleware));
 
     Router::new()
-        .merge(read_only)
-        .merge(mutating)
+        .merge(public)
+        .merge(authed)
         .fallback(not_found)
         .with_state(AppState { project_root })
-        .layer(
-            CorsLayer::new()
-                .allow_origin(AllowOrigin::list([
-                    HeaderValue::from_static("http://localhost:8032"),
-                    HeaderValue::from_static("http://127.0.0.1:8032"),
-                ]))
-                .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
-                .allow_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::header::AUTHORIZATION,
-                ]),
-        )
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(cors_layer())
+}
+
+/// Builds the CORS layer, reading allowed origins from the
+/// `OSM_WORLD_CORS_ORIGINS` env var (comma-separated) when set, otherwise
+/// falling back to [`DEFAULT_CORS_ORIGINS`]. Empty strings in the list are
+/// dropped. Invalid header values are logged and skipped.
+fn cors_layer() -> CorsLayer {
+    let origins = allowed_cors_origins();
+    let mut list: Vec<HeaderValue> = Vec::with_capacity(origins.len());
+    for origin in &origins {
+        match HeaderValue::from_str(origin) {
+            Ok(value) => list.push(value),
+            Err(err) => log::warn!("ignoring invalid CORS origin {origin:?}: {err}"),
+        }
+    }
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(list))
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+        ])
+}
+
+/// Resolves the effective CORS origin allowlist: the comma-separated values from
+/// `OSM_WORLD_CORS_ORIGINS` when that env var is set and non-empty (after
+/// trimming), otherwise the default localhost origins.
+fn allowed_cors_origins() -> Vec<String> {
+    match std::env::var("OSM_WORLD_CORS_ORIGINS") {
+        Ok(raw) => {
+            let parsed: Vec<String> = raw
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if parsed.is_empty() {
+                DEFAULT_CORS_ORIGINS
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect()
+            } else {
+                parsed
+            }
+        }
+        Err(_) => DEFAULT_CORS_ORIGINS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
+    }
 }
 
 /// Starts the Axum HTTP server on the given host and port.

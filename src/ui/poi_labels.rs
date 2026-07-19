@@ -1,3 +1,6 @@
+//! Screen-projected label overlays for points of interest, addresses, and
+//! street signs. Each kind has its own settings, draw call, and capping policy.
+
 use crate::camera::Flycam;
 use crate::world::loader::ResolvedPointFeature;
 use crate::world::point_feature::{PointFeatureKind, point_feature_label, point_feature_style};
@@ -7,6 +10,7 @@ const DEFAULT_MAX_ADDRESS_LABELS: usize = 48;
 const STREET_SIGN_BOARD_LABEL_Y_OFFSET: f32 = 2.56;
 const STREET_SIGN_ON_SIGN_DISTANCE: f32 = 120.0;
 
+/// Runtime visibility and draw-distance settings for POI/landmark/transit labels.
 #[derive(Clone, Debug)]
 pub struct PoiLabelSettings {
     pub visible: bool,
@@ -22,6 +26,7 @@ impl Default for PoiLabelSettings {
     }
 }
 
+/// Runtime visibility, draw-distance, and on-screen cap settings for address labels.
 #[derive(Clone, Debug)]
 pub struct AddressLabelSettings {
     pub visible: bool,
@@ -39,6 +44,7 @@ impl Default for AddressLabelSettings {
     }
 }
 
+/// Runtime visibility and draw-distance settings for street-sign labels.
 #[derive(Clone, Debug)]
 pub struct StreetSignLabelSettings {
     pub visible: bool,
@@ -54,12 +60,15 @@ impl Default for StreetSignLabelSettings {
     }
 }
 
+/// A screen-projected POI/address label: text and world-space anchor.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PoiLabel {
     pub text: String,
     pub position: glam::Vec3,
 }
 
+/// A screen-projected street-sign label: text, world-space anchor, and the
+/// horizontal tangent used to orient the on-sign board.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StreetSignLabel {
     pub text: String,
@@ -92,6 +101,8 @@ fn label_overlay_order() -> egui::Order {
     egui::Order::Background
 }
 
+/// Builds POI labels from `point_features`, keeping only landmarks, transit
+/// stops, and POIs that resolve to a non-empty label.
 pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Vec<PoiLabel> {
     point_features
         .iter()
@@ -122,6 +133,8 @@ pub fn labels_from_point_features(point_features: &[ResolvedPointFeature]) -> Ve
         .collect()
 }
 
+/// Builds address labels from building footprints and standalone address
+/// points, keeping only those that resolve to a non-empty address string.
 pub fn labels_from_address_features(
     buildings: &[crate::world::loader::ResolvedFeature],
     address_points: &[ResolvedPointFeature],
@@ -143,6 +156,8 @@ pub fn labels_from_address_features(
     labels
 }
 
+/// Builds street-sign labels from `street_signs`, skipping empty names and
+/// trimming whitespace.
 pub fn labels_from_street_signs(
     street_signs: &[crate::world::street_sign::ResolvedStreetSign],
 ) -> Vec<StreetSignLabel> {
@@ -161,6 +176,8 @@ pub fn labels_from_street_signs(
         .collect()
 }
 
+/// Draws POI labels as projected screen overlays using `settings` for
+/// visibility and distance culling, capped at a fixed on-screen maximum.
 pub fn draw(
     ctx: &egui::Context,
     camera: &Flycam,
@@ -183,6 +200,8 @@ pub fn draw(
     );
 }
 
+/// Draws address labels as projected screen overlays using `settings` for
+/// visibility, distance culling, and an on-screen cap.
 pub fn draw_addresses(
     ctx: &egui::Context,
     camera: &Flycam,
@@ -205,6 +224,9 @@ pub fn draw_addresses(
     );
 }
 
+/// Draws street-sign labels: anchored on the sign board when close, switching
+/// to floating badges beyond a fixed distance. Capped at a fixed on-screen
+/// maximum.
 pub fn draw_street_signs(
     ctx: &egui::Context,
     camera: &Flycam,
@@ -578,6 +600,9 @@ fn feature_label_position(
     Some(glam::vec3(x / len, elevation + y_offset, z / len))
 }
 
+/// Projects a world-space point to screen-space pixel coordinates using
+/// `camera` and the current `viewport_size`. Returns `None` if the point is
+/// behind the camera, outside clip space, or off-screen.
 pub fn project_world_to_screen(
     camera: &Flycam,
     world_position: glam::Vec3,

@@ -41,6 +41,8 @@ impl Default for VisualDetailPrefs {
 }
 
 impl VisualDetailPrefs {
+    /// Builds a prefs struct by copying the persistable fields out of the live
+    /// visual-detail `settings`.
     pub fn from_visual_detail_settings(
         settings: &crate::visual_detail::VisualDetailSettings,
     ) -> Self {
@@ -57,6 +59,8 @@ impl VisualDetailPrefs {
         }
     }
 
+    /// Reconstructs live visual-detail settings from the persisted prefs,
+    /// leaving `reload_required` false and clamping each value to its valid range.
     pub fn to_visual_detail_settings(&self) -> crate::visual_detail::VisualDetailSettings {
         let mut settings = crate::visual_detail::VisualDetailSettings {
             preset: self.preset,
@@ -93,6 +97,8 @@ pub struct SettingsSectionsPrefs {
 }
 
 impl SettingsSectionsPrefs {
+    /// Returns true when every section is collapsed. Used to detect whether
+    /// the persisted UI state should be treated as "default" on the next load.
     pub fn all_collapsed(&self) -> bool {
         !self.day_cycle
             && !self.performance
@@ -126,6 +132,8 @@ impl Default for MinimapPrefs {
 }
 
 impl MinimapPrefs {
+    /// Builds a prefs struct by copying the persistable fields out of the live
+    /// minimap `state` (texture id is not persisted).
     pub fn from_minimap_state(state: &crate::ui::minimap::MinimapState) -> Self {
         Self {
             visible: state.visible,
@@ -135,6 +143,8 @@ impl MinimapPrefs {
         }
     }
 
+    /// Writes the persisted visibility, zoom, rotation, and tile-debug fields
+    /// back into a live minimap state without touching the runtime texture id.
     pub fn apply_to_minimap_state(&self, state: &mut crate::ui::minimap::MinimapState) {
         state.visible = self.visible;
         state.zoom = self.zoom;
@@ -154,6 +164,7 @@ pub struct CameraPrefs {
 }
 
 impl CameraPrefs {
+    /// Snapshots the position and orientation of `camera` into a persistable struct.
     pub fn from_camera(camera: &crate::camera::Flycam) -> Self {
         Self {
             x: camera.position.x,
@@ -164,6 +175,8 @@ impl CameraPrefs {
         }
     }
 
+    /// Restores position and orientation into `camera`, leaving other camera
+    /// parameters (FOV, aspect, near/far, speed) untouched.
     pub fn apply_to_camera(&self, camera: &mut crate::camera::Flycam) {
         camera.position = glam::vec3(self.x, self.y, self.z);
         camera.yaw = self.yaw;

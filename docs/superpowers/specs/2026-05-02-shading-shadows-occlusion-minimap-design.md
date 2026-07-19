@@ -1,3 +1,5 @@
+> ⚠️ Historical spec (2026-05) — retained for reference; current behavior may differ. See `docs/ARCHITECTURE.md` and the source code.
+
 # Shading, Shadows, Occlusion Culling, and Minimap
 
 **Date:** 2026-05-02

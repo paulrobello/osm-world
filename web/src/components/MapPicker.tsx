@@ -1,3 +1,12 @@
+/**
+ * Interactive OpenLayers map picker for selecting an area to prepare.
+ *
+ * Renders an OSM base layer plus a bounding-box draw interaction and an
+ * optional spawn-point marker. The drawn bbox and spawn coordinate are
+ * reported back through the `onBboxChange` and `onSpawnChange` callbacks so
+ * the parent page can drive prepare/launch actions. Also overlays cached
+ * prepared-area tiles when a cache directory is provided.
+ */
 'use client';
 
 import { useEffect, useRef } from 'react';

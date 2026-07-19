@@ -52,6 +52,23 @@ jobs:
         # ignored advisories still appear because `wayland-scanner` (a Linux
         # build-time proc-macro pulled by winit) transitively pulls 0.39.4 and
         # parses only its own vendored Wayland protocol XML — not untrusted
-        # input. Tracked by SEC-008 (Phase 3a); drop these ignores once it
-        # updates wayland-scanner to a quick-xml >=0.41 branch.
+        # input. Drop once winit pulls a wayland-scanner built with quick-xml
+        # >=0.41.
+        #
+        # SEC-008 (Phase 3a) — three further advisories are reported by
+        # `cargo audit` as *warnings* (informational; they do not fail this
+        # step). No fixed version is reachable without major upstream releases,
+        # so they are accepted/known here:
+        #   - RUSTSEC-2026-0186 (memmap2 0.5.10, unsound): transitively pinned
+        #     by `osmpbf 0.3.8` (latest osmpbf). The crate we use directly is
+        #     `memmap2 0.9.11` (unaffected). Drop when osmpbf releases a 0.5.x
+        #     line or we migrate to a maintained PBF reader.
+        #   - RUSTSEC-2026-0192 (ttf-parser 0.25.1, unmaintained): pulled by
+        #     egui 0.34. Drop when egui ships a release that adopts a
+        #     maintained font parser.
+        #   - RUSTSEC-2024-0436 (paste 1.0.15, unmaintained): pulled via the
+        #     image/ravif/rav1e chain that egui's clipboard support uses. Drop
+        #     when image or ravif drops the paste dependency.
+        # Re-run `cargo update -p <crate>` periodically to test whether a fixed
+        # version has become reachable.
         run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195

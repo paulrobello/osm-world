@@ -367,6 +367,14 @@ Fetches or reuses source data, optionally downloads SRTM tiles, and returns a re
 }
 ```
 
+`cache_status` has three values:
+
+| Value | Meaning |
+| --- | --- |
+| `prepared_cache_hit` | A prepared `.osm` file already existed on disk and was reused without re-fetching source data. |
+| `prepared` | No prepared file existed, so source data was fetched and a new `.osm` file was written. |
+| `force_refreshed` | `force_refresh` was `true`, so source data was re-fetched and the prepared `.osm` file was overwritten even if it existed. |
+
 **Error Responses:**
 
 | Status | Cause | Example |

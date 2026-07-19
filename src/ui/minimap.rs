@@ -1,3 +1,7 @@
+//! Bottom-right minimap overlay: renders the top-down render-target texture,
+//! a player arrow, a compass, an optional streaming-tile debug overlay, and
+//! scroll-to-zoom plus Ctrl+click-to-rotate interactions.
+
 use crate::camera::Flycam;
 
 fn player_arrow_direction(camera: &Flycam, rotate_with_camera: bool) -> egui::Vec2 {
@@ -35,6 +39,9 @@ fn minimap_up(camera: &Flycam, rotate_with_camera: bool) -> glam::Vec3 {
     }
 }
 
+/// Mutable minimap UI state: visibility, zoom level, whether the map rotates
+/// with the camera heading, whether the streaming-tile debug overlay shows,
+/// and the render-target texture id once uploaded.
 pub struct MinimapState {
     pub visible: bool,
     pub zoom: f32,
@@ -257,6 +264,10 @@ fn handle_minimap_click(state: &mut MinimapState, clicked: bool, ctrl_down: bool
     }
 }
 
+/// Draws the minimap overlay anchored to the bottom-right corner. Renders the
+/// render-target texture, the streaming-tile debug overlay (when enabled), the
+/// compass, the player arrow, and handles Ctrl+click rotation toggle plus
+/// scroll-to-zoom. No-op when `state.visible` is false.
 pub fn draw(
     ctx: &egui::Context,
     camera: &Flycam,

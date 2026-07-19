@@ -15,10 +15,11 @@ Guide for setting up a development environment, running checks, and submitting c
 
 ## Prerequisites
 
-- Rust toolchain matching the version specified in `Cargo.toml`
-- Bun (for the Web Explorer frontend)
-- A sibling `par-osm-rust` checkout at `../par-osm-rust` until the dependency is vendored or published
+- Rust 1.92 (the `rust-version` declared in `Cargo.toml`)
+- Bun 1.3.x (for the Web Explorer frontend)
 - A GPU with WGPU-compatible drivers
+
+The `par-osm-rust` data-source crate is vendored in-tree at `crates/par-osm-rust` and builds as part of the workspace, so no sibling checkout is required.
 
 ## Development Setup
 

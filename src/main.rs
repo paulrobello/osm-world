@@ -116,12 +116,22 @@ struct Args {
     serve: bool,
 
     /// API server host when --serve is used
+    ///
+    /// Defaults to loopback. Non-loopback hosts (e.g. `0.0.0.0`) are refused
+    /// unless `OSM_WORLD_API_TOKEN` is set or `--allow-remote-host` is passed,
+    /// so the localhost threat model cannot be voided by accident (SEC-004).
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
     /// API server port when --serve is used
     #[arg(long, default_value_t = 3030)]
     port: u16,
+
+    /// Explicitly allow binding the API to a non-loopback host without setting
+    /// `OSM_WORLD_API_TOKEN`. Required to override the SEC-004 guard when the
+    /// operator has another auth layer (reverse proxy, network firewall, etc.).
+    #[arg(long = "allow-remote-host", default_value_t = false)]
+    allow_remote_host: bool,
 
     /// Save a screenshot to PATH after rendering starts
     #[arg(long)]
@@ -267,6 +277,59 @@ fn validate_spawn_pair(args: &Args) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Returns true when `host` is a loopback address.
+///
+/// Recognizes the IPv4 loopback range (`127.0.0.0/8`), the IPv6 loopback
+/// (`::1`), and common loopback hostnames (`localhost`). Anything else —
+/// including `0.0.0.0` and other wildcard binds — is treated as remote.
+fn is_loopback_host(host: &str) -> bool {
+    let normalized = host.trim().to_ascii_lowercase();
+    if normalized == "localhost" {
+        return true;
+    }
+    let Ok(parsed) = normalized.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    parsed.is_loopback()
+}
+
+/// Enforces the SEC-004 host-binding guard for `--serve`.
+///
+/// Loopback hosts are always allowed. Non-loopback hosts require either
+/// `OSM_WORLD_API_TOKEN` to be set (so authenticated requests are the default)
+/// or `--allow-remote-host` to be passed (so the operator acknowledges they are
+/// responsible for an external auth/firewall layer). Local-default operation —
+/// `--host 127.0.0.1` with no token — is unchanged.
+fn enforce_host_policy(args: &Args) -> anyhow::Result<()> {
+    if !args.serve {
+        return Ok(());
+    }
+    enforce_host_policy_decision(
+        &args.host,
+        args.allow_remote_host,
+        std::env::var("OSM_WORLD_API_TOKEN").is_ok(),
+    )
+}
+
+/// Pure decision function extracted from [`enforce_host_policy`] so tests can
+/// cover every branch without mutating the process env.
+fn enforce_host_policy_decision(
+    host: &str,
+    allow_remote: bool,
+    has_token: bool,
+) -> anyhow::Result<()> {
+    if is_loopback_host(host) {
+        return Ok(());
+    }
+    if allow_remote || has_token {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to bind --host '{}' without authentication: set OSM_WORLD_API_TOKEN or pass --allow-remote-host",
+        host
+    );
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
@@ -303,6 +366,7 @@ fn main() -> anyhow::Result<()> {
     visual_detail.clamp();
 
     if args.serve {
+        enforce_host_policy(&args)?;
         let rt = tokio::runtime::Runtime::new()?;
         return rt.block_on(osm_world::server::run(
             &args.host,
@@ -441,19 +505,75 @@ mod tests {
 
     #[test]
     fn parses_serve_flags() {
+        // Loopback hosts are always allowed by the SEC-004 guard.
         let args = Args::try_parse_from([
             "osm-world",
             "--serve",
             "--host",
-            "0.0.0.0",
+            "127.0.0.1",
             "--port",
             "3031",
         ])
         .unwrap();
 
         assert!(args.serve);
-        assert_eq!(args.host, "0.0.0.0");
+        assert_eq!(args.host, "127.0.0.1");
         assert_eq!(args.port, 3031);
+    }
+
+    #[test]
+    fn parses_allow_remote_host_flag() {
+        // Non-loopback hosts parse fine; the SEC-004 guard is enforced at run
+        // time, not parse time, so callers like our own tests can build the
+        // Args and inspect them.
+        let args = Args::try_parse_from([
+            "osm-world",
+            "--serve",
+            "--host",
+            "0.0.0.0",
+            "--allow-remote-host",
+        ])
+        .unwrap();
+
+        assert_eq!(args.host, "0.0.0.0");
+        assert!(args.allow_remote_host);
+    }
+
+    #[test]
+    fn sec004_loopback_hosts_are_allowed_without_token_or_flag() {
+        for host in ["127.0.0.1", "::1", "localhost", "127.1.2.3"] {
+            assert!(
+                enforce_host_policy_decision(host, false, false).is_ok(),
+                "loopback host {host:?} should be allowed"
+            );
+            assert!(is_loopback_host(host), "is_loopback_host({host:?})");
+        }
+    }
+
+    #[test]
+    fn sec004_non_loopback_host_rejected_without_token_or_flag() {
+        let err = enforce_host_policy_decision("0.0.0.0", false, false).unwrap_err();
+        assert!(
+            err.to_string().contains("refusing to bind"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn sec004_non_loopback_host_allowed_with_allow_remote_host_flag() {
+        assert!(enforce_host_policy_decision("0.0.0.0", true, false).is_ok());
+    }
+
+    #[test]
+    fn sec004_non_loopback_host_allowed_when_token_set() {
+        assert!(enforce_host_policy_decision("0.0.0.0", false, true).is_ok());
+    }
+
+    #[test]
+    fn sec004_non_loopback_ipv6_wildcard_also_rejected() {
+        // `::` binds all IPv6 interfaces; treated as remote by the guard.
+        let err = enforce_host_policy_decision("::", false, false).unwrap_err();
+        assert!(err.to_string().contains("refusing to bind"));
     }
 
     #[test]

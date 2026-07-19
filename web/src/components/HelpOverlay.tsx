@@ -1,3 +1,11 @@
+/**
+ * First-run help overlay for the Web Explorer.
+ *
+ * Renders a dismissible introduction panel the first time a visitor opens the
+ * picker. Dismissal is persisted to `localStorage` under
+ * `osm-world-web-help-seen` so the overlay does not reappear on subsequent
+ * visits. A "Help" trigger is rendered once the overlay has been dismissed.
+ */
 'use client';
 
 import { useEffect, useState } from 'react';

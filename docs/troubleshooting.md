@@ -14,18 +14,17 @@ Common issues, likely causes, and fixes for osm-world.
 
 ### Error: `no matching package named 'par-osm-rust' found`
 
-**Symptom:** `cargo build` fails with a path dependency resolution error.
+**Symptom:** `cargo build` fails with a path dependency resolution error referencing `par-osm-rust`.
 
-**Likely cause:** The `par-osm-rust` repository is not cloned next to `osm-world`.
+**Likely cause:** The vendored `par-osm-rust` workspace member is missing or the workspace is not being built from the repository root.
 
-**Fix:** Clone the sibling repository at the expected relative path:
+**Fix:** Build from the repository root so Cargo resolves `par-osm-rust` from its vendored path at `crates/par-osm-rust`:
 
 ```bash
-cd ..
-git clone https://github.com/paulrobello/par-osm-rust
-cd osm-world
 make build
 ```
+
+If you previously checked out an older revision that pointed at a sibling `../par-osm-rust`, run `git pull` and remove any stale `par-osm-rust` directory left next to `osm-world`. No sibling checkout is required.
 
 **Verify:** `make build` completes without errors.
 
@@ -38,6 +37,47 @@ make build
 **Fix:** Update GPU drivers to the latest stable version. On Linux, verify Vulkan support with `vulkaninfo`.
 
 **Verify:** The renderer window opens and displays the scene.
+
+### Error: WGPU surface creation fails on Linux (X11 or Wayland)
+
+**Symptom:** The renderer panics or logs a `wgpu` surface-creation error shortly after opening the window, typically with messages about `Unsupported` surface, `X11`, `Wayland`, or `Failed to create surface`.
+
+**Likely cause:** WGPU could not negotiate a window-system surface with the running compositor. On Linux this is usually missing `vulkan-loader`, missing X11/Wayland development libraries, or running through a remote/SSH session without a display.
+
+**Fix:** Install the X11/Wayland/Vulkan runtime libraries, then retry. On Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y libxcb1-dev libxcb-render0-dev libxcb-shape0-dev \
+  libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libvulkan1 mesa-vulkan-drivers
+```
+
+Verify the loader can see the install:
+
+```bash
+vulkaninfo | head -n 20
+```
+
+If you are running over SSH, forward the display (`ssh -X` or set `DISPLAY`/`WAYLAND_DISPLAY`) or run the renderer on the local seat.
+
+**Verify:** `make run` opens a visible window and the renderer logs the chosen adapter and surface format.
+
+### Error: `bun install` fails with permission or peer-dependency errors
+
+**Symptom:** `make web-install` (or `bun install` in `web/`) exits with `EPERM`, `EACCES`, or unresolved peer-dependency errors.
+
+**Likely cause:** Leftover files from a previous install are owned by a different user (often caused by running inside a container or with `sudo` once), or the global Bun cache is corrupted. Peer-dependency mismatches usually trace back to a stale lockfile.
+
+**Fix:** Reset the local web install state, then reinstall:
+
+```bash
+cd web
+rm -rf node_modules ~/.bun/install/cache
+bun install
+```
+
+If a peer-dependency error mentions a specific package (for example `postcss`), confirm `web/package.json` `overrides` still pins the version the rest of the tree expects.
+
+**Verify:** `bun install` completes and `bun run build` succeeds.
 
 ## Renderer Issues
 

@@ -1,5 +1,9 @@
+//! Feature inspector: identifies world features under the cursor and renders
+//! the inspector window that shows their label, kind, and tags.
+
 use std::collections::HashMap;
 
+/// High-level kind of an inspectable feature, shown in the inspector header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FeatureKind {
     Address,
@@ -11,6 +15,7 @@ pub enum FeatureKind {
     Transit,
 }
 
+/// Geometric shape used for hit-testing a feature against a screen click.
 #[derive(Clone, Debug, PartialEq)]
 pub enum IdentifyShape {
     Point(glam::Vec3),
@@ -18,6 +23,7 @@ pub enum IdentifyShape {
     Polygon(Vec<glam::Vec3>),
 }
 
+/// A world feature that can be selected in the inspector.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IdentifiableFeature {
     pub kind: FeatureKind,
@@ -28,6 +34,8 @@ pub struct IdentifiableFeature {
 }
 
 impl IdentifiableFeature {
+    /// Constructs a point-shaped feature with the given kind, label, position,
+    /// and tag map.
     pub fn new(
         kind: FeatureKind,
         label: String,
@@ -43,23 +51,30 @@ impl IdentifiableFeature {
         }
     }
 
+    /// Builder that replaces the default point shape with a polyline or polygon
+    /// so hit-testing follows the feature's real geometry.
     pub fn with_shape(mut self, shape: IdentifyShape) -> Self {
         self.shape = shape;
         self
     }
 }
 
+/// A feature already projected to a screen position, used when picking from
+/// pre-projected candidates (for example, label overlays).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScreenIdentifiable {
     pub feature: IdentifiableFeature,
     pub screen_pos: egui::Pos2,
 }
 
+/// Mutable UI state for the inspector: the currently selected feature, if any.
 #[derive(Clone, Debug, Default)]
 pub struct InspectState {
     pub selected: Option<IdentifiableFeature>,
 }
 
+/// Picks the closest pre-projected feature to `click` within `max_radius`
+/// screen pixels. Returns `None` if nothing is in range.
 pub fn pick_screen_identifiable(
     features: &[ScreenIdentifiable],
     click: egui::Pos2,
@@ -75,6 +90,9 @@ pub fn pick_screen_identifiable(
         .map(|(_, feature)| feature)
 }
 
+/// Picks the closest feature to `click` by projecting each feature's shape into
+/// screen space with `camera` and `viewport_size`, then taking the one inside
+/// `max_radius` pixels. Returns `None` if nothing is in range.
 pub fn pick_identifiable(
     features: &[IdentifiableFeature],
     camera: &crate::camera::Flycam,
@@ -191,6 +209,9 @@ fn point_in_polygon(point: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
     inside
 }
 
+/// Builds the full set of inspectable features from `source`: buildings (with
+/// polygon outlines), roads and transit routes (as polylines), address points,
+/// generated street signs, landmarks, transit stops, and POIs.
 pub fn build_identifiables(source: &crate::world::loader::WorldSource) -> Vec<IdentifiableFeature> {
     let mut features = Vec::new();
     for building in &source.buildings {
@@ -281,6 +302,8 @@ pub fn build_identifiables(source: &crate::world::loader::WorldSource) -> Vec<Id
     features
 }
 
+/// Draws the "Feature Inspector" window for the currently selected feature,
+/// or does nothing when nothing is selected.
 pub fn draw(ctx: &egui::Context, state: &mut InspectState) {
     let Some(feature) = &state.selected else {
         return;

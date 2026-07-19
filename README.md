@@ -1,9 +1,9 @@
 # osm-world
 
+![CI](https://github.com/paulrobello/osm-world/actions/workflows/ci.yml/badge.svg)
 ![Runs on Linux | MacOS | Windows](https://img.shields.io/badge/runs%20on-Linux%20%7C%20MacOS%20%7C%20Windows-blue)
 ![Arch x86-64 | ARM | AppleSilicon](https://img.shields.io/badge/arch-x86--64%20%7C%20ARM%20%7C%20AppleSilicon-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
 
 Render real-world cities in 3D from [OpenStreetMap](https://www.openstreetmap.org/) data. `osm-world` is a Rust and WGPU desktop renderer with optional SRTM elevation, OpenStreetMap/Overture-backed area preparation, and a browser-based Web Explorer for selecting areas and launching repeatable renderer commands.
 
@@ -71,7 +71,7 @@ New to osm-world? Here are the quickest paths to a rendered city:
 
 ### From Source
 
-Requires the Rust toolchain specified by `Cargo.toml`.
+Requires Rust 1.92 (the `rust-version` declared in `Cargo.toml`).
 
 ```bash
 git clone https://github.com/paulrobello/osm-world
@@ -80,13 +80,7 @@ make build
 # binary at target/debug/osm-world
 ```
 
-The project currently uses a local path dependency on the sibling `par-osm-rust` repository:
-
-```text
-../par-osm-rust
-```
-
-Clone or keep that repository next to `osm-world` before building.
+The `par-osm-rust` data-source crate is vendored in-tree at `crates/par-osm-rust` and builds as part of the workspace, so no sibling checkout is required.
 
 ### Web Dependencies
 
@@ -98,14 +92,16 @@ make web-install
 
 | Tool | Notes |
 | --- | --- |
-| Rust | Required for the renderer and API server. Use the toolchain specified by `Cargo.toml`. |
-| Bun | Required only for the Web Explorer. |
-| `par-osm-rust` | Required as a sibling checkout until the local path dependency is published or vendored. |
+| Rust | Required for the renderer and API server. Use Rust 1.92 (the `rust-version` in `Cargo.toml`). |
+| Bun | Required only for the Web Explorer. Tested with Bun 1.3.x. |
+
+> **Note:** On macOS (especially under tmux), prefer `make run-app` over `make run` to launch the renderer. `run-app` opens the binary directly, which lets the window receive keyboard focus; the `cargo run` path used by `make run` can launch without focus under some terminal/tmux configurations.
 
 ## Quick Start
 
 ```bash
-# Open the renderer with the built-in test scene
+# Open the renderer with the built-in test scene.
+# On macOS/tmux, prefer `make run-app` so the window receives keyboard focus.
 make run
 
 # Render a local OpenStreetMap extract
@@ -157,12 +153,25 @@ Common renderer options:
 | `--input <path>` | Load a `.osm.pbf`, `.pbf`, or `.osm` source file. |
 | `--srtm-dir <path>` | Use SRTM elevation tiles from a cache directory. |
 | `--spawn-lat <lat> --spawn-lon <lon>` | Place the initial camera near a geographic coordinate. |
+| `--cam-x`, `--cam-y`, `--cam-z` | Override the initial camera position in world space. |
+| `--cam-yaw`, `--cam-pitch` | Override the initial camera yaw and pitch in degrees. |
 | `--show-settings` | Start with the in-app settings panel open. |
 | `--time-of-day <hours>` | Set lighting time, where `12` is noon. |
 | `--real-time-of-day` | Sync lighting to the local wall clock. |
 | `--visual-preset performance\|balanced\|showcase` | Select renderer detail defaults. |
+| `--landmark-detail <level>` | Override landmark rendering detail. |
+| `--facade-variation <0.0..=1.0>` | Building facade variation multiplier. |
+| `--roof-variation <0.0..=1.0>` | Building roof variation multiplier. |
+| `--vegetation-density <0.0..=3.0>` | Vegetation density multiplier. |
+| `--synthetic-tree-cap <n>` | Maximum number of synthetic trees per tile. |
+| `--vegetation-distance <metres>` | Maximum vegetation draw distance. |
+| `--debug-shadow-cascades` | Tint geometry by shadow cascade for debugging. |
 | `--hide-poi-labels`, `--hide-address-labels`, `--hide-street-sign-labels` | Hide label layers at startup. |
 | `--hide-minimap`, `--rotate-minimap` | Control minimap startup behavior. |
+| `--max-uploaded-tiles <n>` | Maximum number of streaming tiles uploaded to the GPU. |
+| `--max-uploaded-mb <MiB>` | Maximum estimated uploaded tile memory. |
+
+For the full flag list including streaming and tile-debug options, see the [Visual Detail Controls design](docs/superpowers/specs/2026-05-06-osm-world-visual-detail-controls-design.md) or run `cargo run -- --help`.
 
 ### Screenshot Mode
 
@@ -222,6 +231,10 @@ Visit `http://localhost:8032` in a browser.
 ## Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** — Runtime modes, module map, data flow, renderer, API server, web UI, and design tradeoffs
+- **[Troubleshooting](docs/troubleshooting.md)** — Build, renderer, API server, web, data, and cache failure modes with symptoms and fixes
+- **[Changelog](CHANGELOG.md)** — Notable changes per release
+- **[Contributing](CONTRIBUTING.md)** — Development setup, code style, tests, and pull request process
+- **[Superpowers Specs and Plans Index](docs/superpowers/README.md)** — Historical design specs and implementation plans retained for reference
 - **[Initial 3D Engine Design](docs/superpowers/specs/2026-05-01-osm-world-3d-engine-design.md)** — Original renderer architecture and mesh-generation plan
 - **[Streaming and LOD Design](docs/superpowers/specs/2026-05-02-phase3-streaming-lod-design.md)** — Tile streaming and level-of-detail direction
 - **[Shared Cache and Web Picker Design](docs/superpowers/specs/2026-05-03-shared-osm-cache-and-streaming-design.md)** — `par-osm-rust` cache contract and prepare workflow
@@ -252,7 +265,6 @@ See **[Architecture](docs/ARCHITECTURE.md)** for the full module map, data flow,
 - **Prepared-area size:** The API validates bbox size and limits SRTM tile counts to keep local preparation practical.
 - **Streaming state:** Startup uses tile selection and GPU buffer caps, but runtime rendering still uploads one `SceneBuffers` allocation until incremental tile uploads are implemented.
 - **Large-region detail:** Distant startup tiles can be skipped when the selected mesh would exceed the GPU buffer budget. Use smaller areas or lower visual detail for dense regions.
-- **Local dependency:** `par-osm-rust` is currently expected as a sibling checkout.
 
 ## Contributing
 
@@ -281,7 +293,7 @@ bun run build
 
 ## License
 
-This project is licensed under the MIT License. The license is declared in `Cargo.toml`.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for the full text. The license is also declared in `Cargo.toml`.
 
 ## Author
 

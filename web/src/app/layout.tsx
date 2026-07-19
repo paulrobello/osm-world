@@ -1,3 +1,10 @@
+/**
+ * Root Next.js layout for the osm-world Web Explorer.
+ *
+ * Sets the document language, page metadata, and renders the global stylesheet
+ * so every route shares the same HTML shell. Page-specific UI is rendered into
+ * `<body>` by Next.js via `children`.
+ */
 import './globals.css';
 import type { Metadata } from 'next';
 

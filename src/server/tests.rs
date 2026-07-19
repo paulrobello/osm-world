@@ -130,7 +130,10 @@ fn cache_xml_for_bbox_with_xml(
     filter: &par_osm_rust::filter::FeatureFilter,
     xml: &str,
 ) -> String {
-    let overpass_url = par_osm_rust::overpass::default_overpass_url();
+    // ARC-003: upstream 0.3.0 returns `Cow<'static, str>` (honors the
+    // `OVERPASS_URL` env override); `&` produces a `&Cow<str>` that auto-derefs
+    // to `&str` at the call site below.
+    let overpass_url = &par_osm_rust::overpass::default_overpass_url();
     cache_xml_for_bbox_with_xml_and_overpass_url(bbox, filter, xml, overpass_url)
 }
 
@@ -152,11 +155,16 @@ fn cache_xml_for_bbox_with_xml_and_overpass_url(
     xml: &str,
     overpass_url: &str,
 ) -> String {
-    let bbox_tuple = (bbox[0], bbox[1], bbox[2], bbox[3]);
-    let cache_key = par_osm_rust::osm_cache::cache_key_for_url(bbox_tuple, filter, overpass_url);
-    par_osm_rust::osm_cache::write_for_url(&cache_key, bbox_tuple, filter, xml, overpass_url)
+    // ARC-003: par-osm-rust 0.3.0's osm_cache API takes the validated `BBox`
+    // newtype and returns a path-safe `Key` newtype. The test fixture bboxes
+    // below are all small valid literals, so the unchecked constructor is
+    // safe; the resulting `Key` is converted to the String the surrounding
+    // helpers expect via `as_str()`.
+    let bbox_typed = par_osm_rust::bbox::BBox::from_unchecked(bbox[0], bbox[1], bbox[2], bbox[3]);
+    let cache_key = par_osm_rust::osm_cache::cache_key_for_url(&bbox_typed, filter, overpass_url);
+    par_osm_rust::osm_cache::write_for_url(&cache_key, &bbox_typed, filter, xml, overpass_url)
         .unwrap();
-    cache_key
+    cache_key.as_str().to_string()
 }
 
 fn cached_prepare_request(
@@ -205,7 +213,7 @@ fn prepare_area_uses_exact_cached_xml_with_spawn_point() {
         &[],
         par_osm_rust::sources::PoiSourceMode::OsmOnly,
         par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     let mut req = cached_prepare_request(bbox, filter);
     req.spawn_lat = Some(38.0005);
@@ -418,7 +426,7 @@ fn prepared_cache_key_ignores_overture_options_when_overture_disabled() {
         &[],
         par_osm_rust::sources::PoiSourceMode::OsmOnly,
         par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     let noisy_key = prepared_cache_key(
         bbox,
@@ -427,7 +435,7 @@ fn prepared_cache_key_ignores_overture_options_when_overture_disabled() {
         &["not-a-theme".to_string(), "places".to_string()],
         par_osm_rust::sources::PoiSourceMode::OverturePreferred,
         par_osm_rust::sources::OvertureFailureMode::Fail,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
 
     assert_eq!(noisy_key, default_key);
@@ -451,7 +459,7 @@ fn prepared_cache_key_canonicalizes_overture_theme_aliases_order_and_all_default
         ],
         mode,
         failure,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     let canonical_key = prepared_cache_key(
         bbox,
@@ -460,7 +468,7 @@ fn prepared_cache_key_canonicalizes_overture_theme_aliases_order_and_all_default
         &["building".to_string(), "place".to_string()],
         mode,
         failure,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     assert_eq!(alias_key, canonical_key);
 
@@ -471,7 +479,7 @@ fn prepared_cache_key_canonicalizes_overture_theme_aliases_order_and_all_default
         &[],
         mode,
         failure,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     let explicit_all_key = prepared_cache_key(
         bbox,
@@ -486,7 +494,7 @@ fn prepared_cache_key_canonicalizes_overture_theme_aliases_order_and_all_default
         ],
         mode,
         failure,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     assert_eq!(default_all_key, explicit_all_key);
 }
@@ -634,7 +642,7 @@ fn prepare_area_ignores_invalid_overture_theme_when_overture_disabled() {
         &[],
         par_osm_rust::sources::PoiSourceMode::OsmOnly,
         par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
     let mut req = cached_prepare_request(bbox, filter);
     req.overture_themes = vec!["definitely-not-a-theme".to_string()];
@@ -729,7 +737,7 @@ fn prepare_area_uses_exact_cached_xml_without_elevation() {
         &[],
         par_osm_rust::sources::PoiSourceMode::OsmOnly,
         par_osm_rust::sources::OvertureFailureMode::FallbackToOsm,
-        par_osm_rust::overpass::default_overpass_url(),
+        &par_osm_rust::overpass::default_overpass_url(),
     );
 
     let response = prepare_area(cached_prepare_request(bbox, filter), tmp.path()).unwrap();

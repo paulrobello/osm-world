@@ -442,7 +442,15 @@ pub(crate) fn validate_spawn(
 /// Validates that the bounding box does not require more SRTM tiles than the
 /// configured maximum.
 pub(crate) fn validate_srtm_tile_limit(bbox: (f64, f64, f64, f64)) -> PrepareResult<()> {
-    let tiles = par_osm_rust::srtm::tiles_for_bbox(bbox.0, bbox.1, bbox.2, bbox.3);
+    // ARC-003: par-osm-rust 0.3.0's `tiles_for_bbox` takes the validated
+    // `BBox` newtype and returns `Result` (the upstream function now enforces
+    // its own `MAX_SRTM_TILES` cap, which we treat as a bad-request here).
+    // The unchecked constructor is safe because the caller already ran
+    // `validate_bbox`, which rejects non-finite / out-of-range / inverted
+    // bounds before this function is reached.
+    let bbox_typed = par_osm_rust::bbox::BBox::from_unchecked(bbox.0, bbox.1, bbox.2, bbox.3);
+    let tiles = par_osm_rust::srtm::tiles_for_bbox(&bbox_typed)
+        .map_err(|err| PrepareAreaError::bad_request(err.context("computing SRTM tile count")))?;
     if tiles.len() > MAX_SRTM_TILE_COUNT {
         return Err(PrepareAreaError::bad_request(anyhow::anyhow!(
             "requested bbox requires {} SRTM tiles; maximum is {MAX_SRTM_TILE_COUNT}",
@@ -499,9 +507,14 @@ pub fn is_degraded_overture_prepared_cache(overture_enabled: bool, source_status
 pub(crate) fn effective_overpass_url_for_prepare(
     overpass_url: Option<&str>,
 ) -> PrepareResult<String> {
+    // ARC-003: upstream 0.3.0's `default_overpass_url()` returns
+    // `Cow<'static, str>` (it honors the `OVERPASS_URL` env override). Bind
+    // the Cow to a local so the borrow stays live for the downstream &str
+    // use; `&default_url` derefs to `&str` via `Cow`'s `Deref<Target = str>`.
+    let default_url = par_osm_rust::overpass::default_overpass_url();
     let url = match overpass_url {
         Some(url) => url,
-        None => par_osm_rust::overpass::default_overpass_url(),
+        None => &default_url,
     };
     par_osm_rust::overpass::validate_overpass_url(url)
         .map_err(|err| PrepareAreaError::bad_request(err.context("validating Overpass URL")))?;

@@ -17,13 +17,15 @@ default = []
 dev_scene = []
 
 [workspace]
-members = ["crates/par-osm-rust"]
 resolver = "2"
 
 [workspace.dependencies]
-# Crates used by both `osm-world` and the vendored `par-osm-rust` library.
-# Pinned consistently so a `cargo update` cannot desync the two manifests; the
-# audit flagged this as ARC-009.
+# Shared pin version anchors. ARC-009 originally introduced these to keep the
+# vendored `par-osm-rust` workspace member and `osm-world` from drifting on
+# different patch versions of the same crate. `par-osm-rust` is now consumed
+# from crates.io (ARC-003), so these are no longer co-versioned with another
+# workspace manifest — but the centralized pinning is still useful as a single
+# override point for `cargo update`.
 anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 flate2 = "1.1"
@@ -50,7 +52,7 @@ all = { level = "deny", priority = -1 }
 workspace = true
 
 [dependencies]
-par-osm-rust = { path = "crates/par-osm-rust" }
+par-osm-rust = "0.3.0"
 axum = "0.8.9"
 tokio = { version = "1.52.3", features = ["full"] }
 tower-http = { version = "0.7.0", features = ["cors"] }

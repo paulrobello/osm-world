@@ -233,6 +233,13 @@ pub(crate) fn prepare_area(
     project_root: &Path,
 ) -> PrepareResult<PrepareAreaResponse> {
     let bbox = validate_bbox(req.bbox)?;
+    // ARC-003: par-osm-rust 0.3.0's fetch and SRTM APIs take the `BBox`
+    // newtype. The server keeps the `(south, west, north, east)` tuple for
+    // its own prepared-cache key and spawn-in-bbox validation, both of which
+    // run their own bounds checks; constructing the `BBox` via
+    // `from_unchecked` is safe because `validate_bbox` above already
+    // rejected non-finite / out-of-range / inverted bounds.
+    let bbox_typed = par_osm_rust::bbox::BBox::from_unchecked(bbox.0, bbox.1, bbox.2, bbox.3);
     let spawn = validate_spawn(req.spawn_lat, req.spawn_lon, bbox)?;
     validate_filter(&req.filter)?;
     let effective_overpass_url = effective_overpass_url_for_prepare(req.overpass_url.as_deref())?;
@@ -281,71 +288,90 @@ pub(crate) fn prepare_area(
         None
     };
 
-    let (cache_status, source_status, warnings) =
-        if let Some((source_status, warnings)) = prepared_cache_hit {
-            ("prepared_cache_hit".to_string(), source_status, warnings)
-        } else {
-            let source_options = par_osm_rust::sources::SourceOptions {
-                filter: req.filter.clone(),
-                overpass_url: req.overpass_url.clone(),
-                use_overpass_cache: !req.force_refresh,
-                overture: par_osm_rust::overture::OvertureParams {
-                    enabled: req.overture,
-                    themes,
-                    priority: std::collections::HashMap::new(),
-                    timeout_secs: req.overture_timeout.unwrap_or(120),
-                },
-                poi_source_mode,
-                overture_failure_mode: failure_mode,
-            };
-            let mut progress_cb = |pct: f32, message: &str| {
-                log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);
-            };
-            let par_osm_rust::sources::SourceFetchResult {
-                data,
-                status,
-                warnings,
-            } = par_osm_rust::sources::fetch_map_data(bbox, &source_options, &mut progress_cb)
-                .map_err(|err| {
-                    PrepareAreaError::upstream(
-                        "failed to fetch map data",
-                        err.context("fetching map data from configured sources"),
-                    )
-                })?;
-            let source_status = source_status_string(status);
-            let xml = par_osm_rust::osm::write_osm_xml_string(&data);
-
-            std::fs::create_dir_all(&prepared_dir).map_err(|err| {
-                PrepareAreaError::internal(
-                    "failed to prepare area",
-                    anyhow::Error::new(err).context(format!(
-                        "creating prepared cache dir {}",
-                        prepared_dir.display()
-                    )),
-                )
-            })?;
-            super::shell::write_atomic(&osm_path, &xml)
-                .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
-
-            let cache_status = if req.force_refresh {
-                "force_refreshed".to_string()
-            } else {
-                "prepared".to_string()
-            };
-            (cache_status, source_status, warnings)
+    let (cache_status, source_status, warnings) = if let Some((source_status, warnings)) =
+        prepared_cache_hit
+    {
+        ("prepared_cache_hit".to_string(), source_status, warnings)
+    } else {
+        let source_options = par_osm_rust::sources::SourceOptions {
+            filter: req.filter.clone(),
+            overpass_url: req.overpass_url.clone(),
+            use_overpass_cache: !req.force_refresh,
+            overture: par_osm_rust::overture::OvertureParams {
+                enabled: req.overture,
+                themes,
+                timeout_secs: req.overture_timeout.unwrap_or(120),
+                // ARC-003: upstream 0.3.0 added a TTL on cached Overture
+                // GeoJSON. `None` selects upstream's own default (~30-day
+                // TTL), matching the previous vendored behaviour where no
+                // expiry was enforced. Surface as a product knob only if a
+                // caller needs a different refresh cadence.
+                cache_ttl_secs: None,
+                // The deprecated `priority` field is intentionally not
+                // named here — it is filled by `Default::default()` so the
+                // `deprecated` lint does not fire and the field's eventual
+                // upstream removal needs no change at this call site.
+                ..par_osm_rust::overture::OvertureParams::default()
+            },
+            poi_source_mode,
+            overture_failure_mode: failure_mode,
+            // ARC-003 / ARC-107: upstream 0.3.0 added a per-consumer
+            // extension to the Overpass host SSRF allowlist. The server
+            // keeps the canonical allowlist (no extra hosts) so the
+            // security surface is unchanged from the vendored build.
+            // Expose via an env knob only if an operator needs to allow a
+            // non-default Overpass mirror.
+            extra_allowed_hosts: Vec::new(),
         };
+        let mut progress_cb = |pct: f32, message: &str| {
+            log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);
+        };
+        let par_osm_rust::sources::SourceFetchResult {
+            data,
+            status,
+            warnings,
+        } = par_osm_rust::sources::fetch_map_data(&bbox_typed, &source_options, &mut progress_cb)
+            .map_err(|err| {
+            PrepareAreaError::upstream(
+                "failed to fetch map data",
+                err.context("fetching map data from configured sources"),
+            )
+        })?;
+        let source_status = source_status_string(status);
+        let xml = par_osm_rust::osm::write_osm_xml_string(&data);
+
+        std::fs::create_dir_all(&prepared_dir).map_err(|err| {
+            PrepareAreaError::internal(
+                "failed to prepare area",
+                anyhow::Error::new(err).context(format!(
+                    "creating prepared cache dir {}",
+                    prepared_dir.display()
+                )),
+            )
+        })?;
+        super::shell::write_atomic(&osm_path, &xml)
+            .map_err(|err| PrepareAreaError::internal("failed to prepare area", err))?;
+
+        let cache_status = if req.force_refresh {
+            "force_refreshed".to_string()
+        } else {
+            "prepared".to_string()
+        };
+        (cache_status, source_status, warnings)
+    };
 
     let srtm_dir = if req.use_elevation {
         validate_srtm_tile_limit(bbox)?;
         let srtm_dir = par_osm_rust::cache::srtm_cache_dir();
         par_osm_rust::srtm::download_tiles_for_bbox(
-            bbox.0,
-            bbox.1,
-            bbox.2,
-            bbox.3,
+            &bbox_typed,
             &srtm_dir,
-            &|index, total, tile| {
-                log::info!("preparing SRTM tile {}/{}: {}", index + 1, total, tile);
+            // ARC-003: upstream 0.3.0 unified every progress callback on the
+            // shared `ProgressFn<'_> = &mut dyn FnMut(f32, &str)` contract.
+            // The `(fraction, message)` payload already encodes tile name and
+            // index/total in `message`, so the log just relays it.
+            &mut |fraction, message| {
+                log::info!("preparing SRTM {:.0}%: {}", fraction * 100.0, message);
             },
         )
         .map_err(|err| classify_srtm_error(err.context("downloading SRTM tiles")))?;

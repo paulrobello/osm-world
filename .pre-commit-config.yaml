@@ -1,0 +1,50 @@
+# Pre-commit hooks for osm-world
+# First-time setup:  pre-commit install
+# Run manually:      make pre-commit   (or: pre-commit run --all-files)
+# Update hook revs:  make pre-commit-update
+
+repos:
+  # --- Secret scanning (required before any push) ---
+  # gitleaks: entropy + rule-based scan of the staged diff.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  # detect-private-key: catches SSH/PEM key material the rules might miss.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+
+  # --- Rust checks, wired to the Makefile's canonical targets ---
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: make fmt (cargo fmt --check)
+        description: Check Rust formatting via the Makefile
+        entry: make fmt
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-lint
+        name: make lint (cargo clippy -D warnings)
+        description: Lint Rust via the Makefile (clippy also type-checks)
+        entry: make lint
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test
+        name: make test (cargo test)
+        description: Run Rust tests via the Makefile
+        entry: make test
+        language: system
+        types: [rust]
+        pass_filenames: false

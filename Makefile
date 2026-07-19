@@ -90,3 +90,9 @@ checkall: fmt typecheck lint test
 
 clean:
 	cargo clean
+
+pre-commit:
+	pre-commit run --all-files
+
+pre-commit-update:
+	pre-commit autoupdate

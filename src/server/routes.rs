@@ -124,6 +124,48 @@ fn allowed_cors_origins() -> Vec<String> {
     }
 }
 
+/// Resolves the Overture GeoJSON cache TTL from `OSM_WORLD_OVERTURE_CACHE_TTL`
+/// (whole seconds). Unset or empty → `None`, which selects upstream's own
+/// ~30-day default TTL. A non-parseable value is logged and treated as unset so
+/// a typo can't silently disable the cache.
+fn overture_cache_ttl_from_env() -> Option<u64> {
+    match std::env::var("OSM_WORLD_OVERTURE_CACHE_TTL") {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            match trimmed.parse::<u64>() {
+                Ok(secs) => Some(secs),
+                Err(_) => {
+                    log::warn!(
+                        "OSM_WORLD_OVERTURE_CACHE_TTL={raw:?} is not a valid u64 seconds value; \
+                         falling back to upstream default TTL"
+                    );
+                    None
+                }
+            }
+        }
+        Err(_) => None,
+    }
+}
+
+/// Resolves the per-consumer extension to the Overpass host SSRF allowlist from
+/// `OSM_WORLD_EXTRA_ALLOWED_HOSTS` (comma-separated hostnames). Unset → empty
+/// (the canonical allowlist is the whole surface). Upstream still applies its
+/// own per-host checks (HTTPS, no userinfo, etc.) to every entry, including
+/// these.
+fn extra_allowed_hosts_from_env() -> Vec<String> {
+    match std::env::var("OSM_WORLD_EXTRA_ALLOWED_HOSTS") {
+        Ok(raw) => raw
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Starts the Axum HTTP server on the given host and port.
 ///
 /// Binds a TCP listener and serves the API router. The router is wrapped in
@@ -302,11 +344,10 @@ pub(crate) fn prepare_area(
                 themes,
                 timeout_secs: req.overture_timeout.unwrap_or(120),
                 // ARC-003: upstream 0.3.0 added a TTL on cached Overture
-                // GeoJSON. `None` selects upstream's own default (~30-day
-                // TTL), matching the previous vendored behaviour where no
-                // expiry was enforced. Surface as a product knob only if a
-                // caller needs a different refresh cadence.
-                cache_ttl_secs: None,
+                // GeoJSON. `None` (the default when
+                // `OSM_WORLD_OVERTURE_CACHE_TTL` is unset) selects upstream's
+                // own ~30-day TTL, matching the previous vendored behaviour.
+                cache_ttl_secs: overture_cache_ttl_from_env(),
                 // The deprecated `priority` field is intentionally not
                 // named here — it is filled by `Default::default()` so the
                 // `deprecated` lint does not fire and the field's eventual
@@ -315,13 +356,13 @@ pub(crate) fn prepare_area(
             },
             poi_source_mode,
             overture_failure_mode: failure_mode,
-            // ARC-003 / ARC-107: upstream 0.3.0 added a per-consumer
-            // extension to the Overpass host SSRF allowlist. The server
-            // keeps the canonical allowlist (no extra hosts) so the
-            // security surface is unchanged from the vendored build.
-            // Expose via an env knob only if an operator needs to allow a
-            // non-default Overpass mirror.
-            extra_allowed_hosts: Vec::new(),
+            // ARC-003 / ARC-107: upstream 0.3.0 added a per-consumer extension
+            // to the Overpass host SSRF allowlist. Unset, this is empty so the
+            // canonical allowlist is the whole surface. Operators who need a
+            // non-default Overpass mirror list hostnames (comma-separated) in
+            // `OSM_WORLD_EXTRA_ALLOWED_HOSTS`; upstream still enforces its
+            // per-host checks (HTTPS, no userinfo) on every entry.
+            extra_allowed_hosts: extra_allowed_hosts_from_env(),
         };
         let mut progress_cb = |pct: f32, message: &str| {
             log::info!("preparing source data {:.0}%: {}", pct * 100.0, message);

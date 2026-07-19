@@ -85,7 +85,7 @@ fn draw_compass(
     painter.circle_stroke(
         center,
         radius,
-        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(150)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_white_alpha(150)),
     );
 
     for (label, world_direction, color) in cardinals {
@@ -228,7 +228,7 @@ fn draw_tile_debug_overlay(
         painter.add(egui::Shape::convex_polygon(
             points.to_vec(),
             color.linear_multiply(0.18),
-            egui::Stroke::new(1.0, color),
+            egui::Stroke::new(1.0_f32, color),
         ));
     }
 
@@ -322,7 +322,7 @@ pub fn draw(
                     painter.add(egui::Shape::convex_polygon(
                         vec![tip, left, right],
                         egui::Color32::WHITE,
-                        egui::Stroke::new(1.0, egui::Color32::BLACK),
+                        egui::Stroke::new(1.0_f32, egui::Color32::BLACK),
                     ));
 
                     // Do not request focus here: if egui owns keyboard focus after

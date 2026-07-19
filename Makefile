@@ -86,7 +86,14 @@ clippy-fix:
 fmt-fix:
 	cargo fmt
 
-checkall: fmt typecheck lint test
+security-audit:
+	# The two ignores skip advisories on quick-xml 0.39.4, which is now only
+	# pulled transitively by wayland-scanner (Linux build-time proc-macro).
+	# See .github/workflows/ci.yml and SEC-008. Drop once wayland-scanner
+	# moves to quick-xml >=0.41.
+	cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+
+checkall: fmt typecheck lint test security-audit
 
 clean:
 	cargo clean

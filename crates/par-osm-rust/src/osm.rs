@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 use osmpbf::{Element, ElementReader};
 use quick_xml::Reader;
+use quick_xml::XmlVersion;
 use quick_xml::events::Event;
 use quick_xml::events::attributes::Attribute;
 use std::collections::{HashMap, HashSet};
@@ -184,7 +185,7 @@ impl OsmData {
 }
 
 fn xml_attr_value(attr: &Attribute<'_>) -> String {
-    attr.unescape_value()
+    attr.normalized_value(XmlVersion::Implicit1_0)
         .map(|value| value.into_owned())
         .unwrap_or_else(|_| {
             std::str::from_utf8(attr.value.as_ref())

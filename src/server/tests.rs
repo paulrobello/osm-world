@@ -4,7 +4,10 @@ use routes::prepare_area;
 use shell::{path_string, shell_quote};
 use std::{ffi::OsString, path::Path, sync::Mutex};
 use types::{PrepareAreaError, PrepareAreaRequest};
-use validate::{prepared_cache_key, validate_bbox, validate_spawn, validate_srtm_tile_limit};
+use validate::{
+    prepared_cache_key, validate_bbox, validate_extra_args, validate_spawn,
+    validate_srtm_tile_limit,
+};
 
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -882,4 +885,85 @@ fn validate_srtm_tile_limit_rejects_too_many_tiles_before_download() {
     let err = validate_srtm_tile_limit((-4.1, -4.1, 0.1, 0.1)).unwrap_err();
 
     assert!(matches!(err, PrepareAreaError::BadRequest { .. }));
+}
+
+// -- SEC-007: extra_args value validation -----------------------------------
+
+#[test]
+fn validate_extra_args_accepts_known_flag_with_valid_value() {
+    let args = vec![
+        "--visual-preset".to_string(),
+        "showcase".to_string(),
+        "--max-uploaded-tiles".to_string(),
+        "64".to_string(),
+    ];
+    validate_extra_args(&args).expect("known flags with valid values should pass");
+}
+
+#[test]
+fn validate_extra_args_accepts_boolean_switches_without_values() {
+    let args = vec![
+        "--hide-minimap".to_string(),
+        "--debug-shadow-cascades".to_string(),
+        "--no-streaming".to_string(),
+    ];
+    validate_extra_args(&args).expect("boolean switches should pass");
+}
+
+#[test]
+fn validate_extra_args_rejects_unknown_flag_name() {
+    let args = vec!["--dangerous-flag".to_string()];
+    let err = validate_extra_args(&args).unwrap_err();
+    assert!(
+        err.to_string().contains("unsupported renderer flag"),
+        "expected unsupported-flag error, got: {err}"
+    );
+}
+
+#[test]
+fn validate_extra_args_rejects_out_of_range_numeric_value() {
+    let args = vec!["--max-uploaded-tiles".to_string(), "0".to_string()];
+    validate_extra_args(&args).unwrap_err();
+
+    let args = vec!["--time-of-day".to_string(), "25.0".to_string()];
+    validate_extra_args(&args).unwrap_err();
+
+    let args = vec!["--vegetation-density".to_string(), "5.0".to_string()];
+    validate_extra_args(&args).unwrap_err();
+}
+
+#[test]
+fn validate_extra_args_rejects_non_numeric_value_for_numeric_flag() {
+    let args = vec!["--max-uploaded-mb".to_string(), "not-a-number".to_string()];
+    validate_extra_args(&args).unwrap_err();
+}
+
+#[test]
+fn validate_extra_args_rejects_screenshot_path_with_traversal() {
+    let args = vec!["--screenshot".to_string(), "../escape.png".to_string()];
+    validate_extra_args(&args).unwrap_err();
+}
+
+#[test]
+fn validate_extra_args_rejects_unknown_visual_preset_value() {
+    let args = vec!["--visual-preset".to_string(), "ultra".to_string()];
+    validate_extra_args(&args).unwrap_err();
+}
+
+#[test]
+fn validate_extra_args_rejects_value_flag_without_value() {
+    let args = vec!["--width".to_string()];
+    validate_extra_args(&args).unwrap_err();
+}
+
+#[test]
+fn validate_extra_args_accepts_equals_form() {
+    let args = vec!["--width=1280".to_string(), "--height=720".to_string()];
+    validate_extra_args(&args).expect("equals-form flags should pass");
+}
+
+#[test]
+fn validate_extra_args_rejects_negative_width_via_equals_form() {
+    let args = vec!["--width=-100".to_string()];
+    validate_extra_args(&args).unwrap_err();
 }

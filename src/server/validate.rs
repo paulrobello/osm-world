@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::{Json, http::StatusCode, response::IntoResponse};
+use subtle::ConstantTimeEq;
 
 use super::types::{ErrorResponse, PrepareAreaError, PrepareResult};
 
@@ -65,22 +66,221 @@ const ALLOWED_RENDERER_FLAGS: &[&str] = &[
     "--max-uploaded-mb",
 ];
 
-/// Validate that every flag in `extra_args` is in the allowlist.
-/// Returns an error listing any rejected flags.
+/// Type of a value-flag entry: flag name plus the validator for its value.
+type ValueFlag = (&'static str, fn(&str) -> Result<(), String>);
+
+/// Value-taking flags paired with a validator that mirrors the parser the
+/// renderer's own `clap` definition uses in `src/main.rs`. Validators return
+/// `Err(message)` so callers see a single descriptive rejection string.
+const VALUE_FLAGS: &[ValueFlag] = &[
+    ("--screenshot", validate_screenshot_path),
+    ("--screenshot-delay", validate_nonnegative_f32),
+    ("--auto-exit", validate_nonnegative_f32),
+    ("--width", validate_positive_f64),
+    ("--height", validate_positive_f64),
+    ("--cam-x", validate_finite_f32),
+    ("--cam-y", validate_finite_f32),
+    ("--cam-z", validate_finite_f32),
+    ("--cam-yaw", validate_finite_f32),
+    ("--cam-pitch", validate_finite_f32),
+    ("--time-of-day", validate_hour_of_day),
+    ("--visual-preset", validate_visual_preset),
+    ("--landmark-detail", validate_landmark_detail),
+    ("--facade-variation", validate_normalized_f32),
+    ("--roof-variation", validate_normalized_f32),
+    ("--vegetation-density", validate_density_multiplier),
+    ("--synthetic-tree-cap", validate_positive_usize),
+    ("--vegetation-distance", validate_nonnegative_f32),
+    ("--tile-size", validate_positive_f32),
+    ("--stream-radius", validate_positive_f32),
+    ("--upload-budget-mb", validate_positive_f32),
+    ("--max-uploaded-tiles", validate_positive_usize),
+    ("--max-uploaded-mb", validate_positive_f32),
+];
+
+/// Validate that every flag in `extra_args` is in the allowlist and that every
+/// value passed to a value-taking flag parses and is in range. Both space-
+/// separated (`--flag value`) and `=`-joined (`--flag=value`) forms are
+/// accepted. Returns an error listing every rejection.
 pub fn validate_extra_args(extra_args: &[String]) -> Result<(), anyhow::Error> {
-    let rejected: Vec<&str> = extra_args
-        .iter()
-        .filter(|arg| arg.starts_with('-') && !ALLOWED_RENDERER_FLAGS.contains(&arg.as_str()))
-        .map(|s| s.as_str())
-        .collect();
-    if rejected.is_empty() {
-        Ok(())
-    } else {
-        anyhow::bail!(
+    let mut rejected: Vec<&str> = Vec::new();
+    let mut value_errors: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < extra_args.len() {
+        let arg = extra_args[i].as_str();
+        // First handle the `--flag=value` form by splitting on the first `=`.
+        if let Some(eq_pos) = arg.find('=') {
+            let name = &arg[..eq_pos];
+            if let Some((_, validator)) = VALUE_FLAGS.iter().find(|(n, _)| *n == name) {
+                let value = &arg[eq_pos + 1..];
+                if let Err(msg) = validator(value) {
+                    value_errors.push(format!("{name}: {msg}"));
+                }
+                i += 1;
+                continue;
+            }
+            if !ALLOWED_RENDERER_FLAGS.contains(&name) && name.starts_with("--") {
+                rejected.push(name);
+            } else if VALUE_FLAGS.iter().any(|(n, _)| *n == name) {
+                // already handled above
+            } else {
+                // Boolean switch with an unexpected `=value` suffix. clap would
+                // reject this at parse time; report it as a value error.
+                value_errors.push(format!("{name} does not take a value"));
+            }
+            i += 1;
+            continue;
+        }
+        if let Some((_, validator)) = VALUE_FLAGS.iter().find(|(n, _)| *n == arg) {
+            match extra_args.get(i + 1) {
+                Some(value) => {
+                    if let Err(msg) = validator(value) {
+                        value_errors.push(format!("{arg}: {msg}"));
+                    }
+                    i += 2;
+                    continue;
+                }
+                None => {
+                    value_errors.push(format!("{arg} requires a value"));
+                    break;
+                }
+            }
+        }
+        if arg.starts_with("--") && !ALLOWED_RENDERER_FLAGS.contains(&arg) {
+            rejected.push(arg);
+        }
+        i += 1;
+    }
+    let mut errors: Vec<String> = Vec::new();
+    if !rejected.is_empty() {
+        errors.push(format!(
             "unsupported renderer flag(s): {}. Allowed flags: {}",
             rejected.join(", "),
             ALLOWED_RENDERER_FLAGS.join(", ")
-        )
+        ));
+    }
+    errors.extend(value_errors);
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(errors.join("; "))
+    }
+}
+
+// -- extra_args value validators --------------------------------------------
+// Each validator mirrors the equivalent `clap` `value_parser` in `src/main.rs`
+// so anything accepted here is also accepted by the renderer at parse time.
+
+fn validate_screenshot_path(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("screenshot path must not be empty".to_string());
+    }
+    if value.bytes().any(|b| b == 0) {
+        return Err("screenshot path must not contain NUL bytes".to_string());
+    }
+    // Reject `..` components. The renderer runs as the same user as the server,
+    // so this is hygiene rather than a hard boundary, but it keeps callers from
+    // steering output at ancestor paths via traversal segments.
+    if std::path::Path::new(value)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("screenshot path must not contain '..'".to_string());
+    }
+    Ok(())
+}
+
+fn validate_finite_f32(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+    if !n.is_finite() {
+        return Err("must be a finite number".to_string());
+    }
+    Ok(())
+}
+
+fn validate_nonnegative_f32(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+    if !n.is_finite() || n < 0.0 {
+        return Err("must be a finite nonnegative number".to_string());
+    }
+    Ok(())
+}
+
+fn validate_positive_f32(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+    if !n.is_finite() || n <= 0.0 {
+        return Err("must be a finite positive number".to_string());
+    }
+    Ok(())
+}
+
+fn validate_positive_f64(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f64>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+    if !n.is_finite() || n <= 0.0 {
+        return Err("must be a finite positive number".to_string());
+    }
+    Ok(())
+}
+
+fn validate_normalized_f32(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+    if !n.is_finite() || !(0.0..=1.0).contains(&n) {
+        return Err("must be a finite number in the range 0..=1".to_string());
+    }
+    Ok(())
+}
+
+fn validate_density_multiplier(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f32>()
+        .map_err(|err| format!("invalid float: {err}"))?;
+    if !n.is_finite() || !(0.0..=3.0).contains(&n) {
+        return Err("must be a finite number in the range 0..=3".to_string());
+    }
+    Ok(())
+}
+
+fn validate_positive_usize(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<usize>()
+        .map_err(|err| format!("invalid integer: {err}"))?;
+    if n < 1 {
+        return Err("must be at least 1".to_string());
+    }
+    Ok(())
+}
+
+fn validate_hour_of_day(value: &str) -> Result<(), String> {
+    let n = value
+        .parse::<f32>()
+        .map_err(|err| format!("invalid hour: {err}"))?;
+    if !n.is_finite() || !(0.0..=24.0).contains(&n) {
+        return Err("must be a finite hour in the range 0..=24".to_string());
+    }
+    Ok(())
+}
+
+fn validate_visual_preset(value: &str) -> Result<(), String> {
+    match value {
+        "performance" | "balanced" | "showcase" => Ok(()),
+        _ => Err("must be one of: performance, balanced, showcase".to_string()),
+    }
+}
+
+fn validate_landmark_detail(value: &str) -> Result<(), String> {
+    match value {
+        "off" | "simple" | "showcase" => Ok(()),
+        _ => Err("must be one of: off, simple, showcase".to_string()),
     }
 }
 
@@ -101,7 +301,11 @@ pub async fn auth_middleware(
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.strip_prefix("Bearer "));
             match provided {
-                Some(token) if token == expected => next.run(request).await,
+                // Constant-time comparison avoids a timing oracle that would
+                // reveal how many leading bytes of a guessed token match.
+                Some(token) if bool::from(token.as_bytes().ct_eq(expected.as_bytes())) => {
+                    next.run(request).await
+                }
                 _ => (
                     StatusCode::UNAUTHORIZED,
                     Json(ErrorResponse {
@@ -421,25 +625,41 @@ struct ClientBucket {
     window_start: Instant,
 }
 
-/// Shared rate limiter: tracks request counts per client IP.
-#[derive(Clone, Default)]
+/// Shared rate limiter: tracks request counts per client key (normally the TCP
+/// peer address, optionally the left-most `X-Forwarded-For` entry when the
+/// operator opts in via `OSM_WORLD_TRUST_PROXY`).
+#[derive(Clone)]
 pub(crate) struct RateLimiter {
     buckets: Arc<Mutex<HashMap<String, ClientBucket>>>,
+    last_sweep: Arc<Mutex<Instant>>,
 }
 
 impl RateLimiter {
     pub(crate) fn new() -> Self {
         Self {
             buckets: Arc::new(Mutex::new(HashMap::new())),
+            last_sweep: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
     /// Returns `Ok(())` if the client is within rate limits, or a 429 error response.
-    fn check(&self, client_ip: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    fn check(&self, client_key: &str) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
         let now = Instant::now();
-        let mut buckets = self.buckets.lock().unwrap();
+        // Recover from a poisoned mutex rather than crashing the API. A panic
+        // in another request handler would otherwise take down every future
+        // rate-limited call.
+        let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last_sweep = self.last_sweep.lock().unwrap_or_else(|e| e.into_inner());
+        // Evict expired buckets periodically so the map cannot grow unbounded
+        // under header rotation or a noisy-peer attack.
+        if now.duration_since(*last_sweep).as_secs() >= RATE_LIMIT_WINDOW_SECS {
+            buckets.retain(|_, bucket| {
+                now.duration_since(bucket.window_start).as_secs() < RATE_LIMIT_WINDOW_SECS
+            });
+            *last_sweep = now;
+        }
         let bucket = buckets
-            .entry(client_ip.to_string())
+            .entry(client_key.to_string())
             .or_insert_with(|| ClientBucket {
                 count: 0,
                 window_start: now,
@@ -464,23 +684,57 @@ impl RateLimiter {
     }
 }
 
+/// Reads the trusted-proxy opt-in flag. When set (any of `"1"`, `"true"`,
+/// `"yes"`, `"on"` case-insensitively), the rate-limit key derivation trusts
+/// the `X-Forwarded-For` header chain. Otherwise, only the TCP peer address is
+/// used. Header values are spoofable, so we never trust them by default.
+fn trust_proxy() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        matches!(
+            std::env::var("OSM_WORLD_TRUST_PROXY")
+                .ok()
+                .map(|v| v.trim().to_ascii_lowercase())
+                .as_deref(),
+            Some("1" | "true" | "yes" | "on")
+        )
+    })
+}
+
+/// Derive the rate-limit key from the TCP peer address (preferred), optionally
+/// falling back to the left-most `X-Forwarded-For` entry when `trust_proxy()`
+/// is set. Returns the literal `"unknown"` only when no peer info is available
+/// (e.g. tests that bypass the real `ConnectInfo` plumbing).
+fn client_rate_limit_key(request: &axum::extract::Request) -> String {
+    use std::net::SocketAddr;
+    if trust_proxy()
+        && let Some(forwarded) = request
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+        && let Some(first) = forwarded.split(',').next()
+    {
+        let trimmed = first.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    if let Some(axum::extract::ConnectInfo(addr)) = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+    {
+        return addr.ip().to_string();
+    }
+    "unknown".to_string()
+}
+
 /// Axum middleware that rate-limits requests based on client IP.
 /// Applied to mutating endpoints that trigger expensive operations.
 pub async fn rate_limit_middleware(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> impl IntoResponse {
-    // Extract the client IP from the X-Real-IP or connection info.
-    // For a localhost-only server, the IP is typically 127.0.0.1, so we
-    // rate-limit on the combination of IP + port to distinguish concurrent
-    // browser tabs. If no IP can be determined, we allow the request.
-    let client_key = request
-        .headers()
-        .get("x-real-ip")
-        .or_else(|| request.headers().get("x-forwarded-for"))
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown")
-        .to_string();
+    let client_key = client_rate_limit_key(&request);
 
     static LIMITER: std::sync::OnceLock<RateLimiter> = std::sync::OnceLock::new();
     let limiter = LIMITER.get_or_init(RateLimiter::new);

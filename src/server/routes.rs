@@ -1,5 +1,6 @@
 //! Axum route handlers, router construction, and the `prepare_area` business logic.
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -76,17 +77,22 @@ pub fn build_router(project_root: PathBuf) -> Router {
 
 /// Starts the Axum HTTP server on the given host and port.
 ///
-/// Binds a TCP listener and serves the API router. Blocks until the server
-/// encounters an error or is shut down.
+/// Binds a TCP listener and serves the API router. The router is wrapped in
+/// `into_make_service_with_connect_info` so each request carries the TCP peer
+/// address; the rate-limit middleware uses that instead of trusting spoofable
+/// client headers. Blocks until the server encounters an error or is shut down.
 pub async fn run(host: &str, port: u16, project_root: PathBuf) -> anyhow::Result<()> {
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("binding HTTP server to {addr}"))?;
     log::info!("area prepare API listening on http://{addr}");
-    axum::serve(listener, build_router(project_root))
-        .await
-        .context("running HTTP server")
+    axum::serve(
+        listener,
+        build_router(project_root).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("running HTTP server")
 }
 
 async fn health() -> Json<HealthResponse> {

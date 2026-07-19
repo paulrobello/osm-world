@@ -24,6 +24,9 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2.9.1
 
@@ -43,3 +46,12 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+      - name: Security audit
+        # SEC-001 removed the direct quick-xml 0.39.4 dep (now 0.41). The two
+        # ignored advisories still appear because `wayland-scanner` (a Linux
+        # build-time proc-macro pulled by winit) transitively pulls 0.39.4 and
+        # parses only its own vendored Wayland protocol XML — not untrusted
+        # input. Tracked by SEC-008 (Phase 3a); drop these ignores once it
+        # updates wayland-scanner to a quick-xml >=0.41 branch.
+        run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195

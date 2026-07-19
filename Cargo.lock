@@ -2734,11 +2734,12 @@ dependencies = [
  "osmpbf",
  "par-osm-rust",
  "pollster",
- "quick-xml",
+ "quick-xml 0.41.0",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
+ "subtle",
  "tempfile",
  "tokio",
  "tower-http 0.7.0",
@@ -2780,7 +2781,7 @@ dependencies = [
  "log",
  "memmap2 0.9.11",
  "osmpbf",
- "quick-xml",
+ "quick-xml 0.41.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -3100,6 +3101,15 @@ name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
 ]
@@ -4655,7 +4665,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c324a910fd86ebdc364a3e61ec1f11737d3b1d6c273c0239ee8ff4bc0d24b4a"
 dependencies = [
  "proc-macro2",
- "quick-xml",
+ "quick-xml 0.39.4",
  "quote",
 ]
 

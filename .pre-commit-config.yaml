@@ -48,3 +48,10 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+      - id: cargo-audit
+        name: make security-audit (cargo audit)
+        description: Scan Cargo.lock for known vulnerabilities via the Makefile
+        entry: make security-audit
+        language: system
+        files: ^(Cargo\.lock|Cargo\.toml|crates/.*Cargo\.toml)$
+        pass_filenames: false

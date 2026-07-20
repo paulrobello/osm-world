@@ -10,7 +10,6 @@ pub mod atmosphere;
 pub mod camera;
 pub mod geo;
 pub mod mesh;
-pub mod osm;
 pub mod render;
 pub mod server;
 pub mod stream;

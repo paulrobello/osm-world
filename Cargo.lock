@@ -2730,10 +2730,8 @@ dependencies = [
  "image",
  "log",
  "naga",
- "osmpbf",
  "par-osm-rust",
  "pollster",
- "quick-xml 0.41.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -2772,9 +2770,9 @@ dependencies = [
 
 [[package]]
 name = "par-osm-rust"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf11dfb801da9fd34a462bfaf5097da22aec0a19827d9913d1af25cdd0ff7f78"
+checksum = "cfc3d201b265d581607b88e3c24a99264de1bf4ecea4624b3cf780992d5c0b84"
 dependencies = [
  "anyhow",
  "chrono",

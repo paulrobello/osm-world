@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::geo::CoordConverter;
-use crate::osm::parse::parse_osm_file;
 use crate::world::street_sign::ResolvedStreetSign;
 use par_osm_rust::elevation::ElevationData;
+use par_osm_rust::osm::parse_osm_file;
 
 pub const POINT_FEATURE_BUILDING_CLEARANCE_METRES: f32 = 2.0;
 
@@ -163,7 +163,7 @@ pub fn load_world_source_with_visual_detail(
 
     // 2. Get bounding box
     let (min_lat, min_lon, max_lat, max_lon) = osm_data
-        .bounds
+        .bounds()
         .ok_or_else(|| anyhow::anyhow!("OSM data has no bounding box"))?;
 
     // 3. Coordinate converter with SW corner as origin
@@ -194,7 +194,7 @@ pub fn load_world_source_with_visual_detail(
     let mut address_points: Vec<ResolvedPointFeature> = Vec::new();
 
     // 5. Resolve ways to world coordinates and classify
-    for way in &osm_data.ways {
+    for way in osm_data.ways() {
         // Resolve node references to world coordinates
         let mut points = Vec::with_capacity(way.node_refs.len());
         let mut elevations = Vec::with_capacity(way.node_refs.len());
@@ -203,7 +203,7 @@ pub fn load_world_source_with_visual_detail(
         let mut count = 0usize;
 
         for &node_id in &way.node_refs {
-            if let Some(node) = osm_data.nodes.get(&node_id) {
+            if let Some(node) = osm_data.nodes().get(&node_id) {
                 let (x, z) = conv.to_world_xz(node.lat, node.lon);
                 points.push((x, z));
                 elevations.push(elev(node.lat, node.lon));
@@ -324,20 +324,20 @@ pub fn load_world_source_with_visual_detail(
     }
 
     // Also process relation geometry for transit routes and multipolygon landuse/water features.
-    for rel in &osm_data.relations {
+    for rel in osm_data.relations() {
         if crate::world::transit::is_transit_route(&rel.tags) {
             for member in &rel.members {
-                let Some(&way_idx) = osm_data.ways_by_id.get(&member.way_id) else {
+                let Some(&way_idx) = osm_data.ways_by_id().get(&member.way_id) else {
                     continue;
                 };
-                let way = &osm_data.ways[way_idx];
+                let way = &osm_data.ways()[way_idx];
                 let mut points = Vec::new();
                 let mut elevations = Vec::new();
                 let mut sum_lat = 0.0f64;
                 let mut sum_lon = 0.0f64;
                 let mut count = 0usize;
                 for &node_id in &way.node_refs {
-                    if let Some(node) = osm_data.nodes.get(&node_id) {
+                    if let Some(node) = osm_data.nodes().get(&node_id) {
                         let (x, z) = conv.to_world_xz(node.lat, node.lon);
                         points.push((x, z));
                         elevations.push(elev(node.lat, node.lon));
@@ -366,12 +366,12 @@ pub fn load_world_source_with_visual_detail(
         let mut count = 0usize;
 
         for member in &rel.members {
-            if let Some(&way_idx) = osm_data.ways_by_id.get(&member.way_id)
+            if let Some(&way_idx) = osm_data.ways_by_id().get(&member.way_id)
                 && member.role == "outer"
             {
-                let way = &osm_data.ways[way_idx];
+                let way = &osm_data.ways()[way_idx];
                 for &node_id in &way.node_refs {
-                    if let Some(node) = osm_data.nodes.get(&node_id) {
+                    if let Some(node) = osm_data.nodes().get(&node_id) {
                         let (x, z) = conv.to_world_xz(node.lat, node.lon);
                         all_points.push((x, z));
                         elevations.push(elev(node.lat, node.lon));
@@ -430,7 +430,7 @@ pub fn load_world_source_with_visual_detail(
         }
     }
 
-    for node in osm_data.nodes.values() {
+    for node in osm_data.tagged_nodes() {
         let raw_point = conv.to_world_xz(node.lat, node.lon);
         let point = super::geometry::move_point_outside_containing_building(raw_point, &buildings);
         if crate::world::point_feature::point_feature_style(&node.tags).is_some() {

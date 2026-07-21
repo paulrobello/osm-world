@@ -80,7 +80,7 @@ make build
 # binary at target/debug/osm-world
 ```
 
-The `par-osm-rust` data-source crate is vendored in-tree at `crates/par-osm-rust` and builds as part of the workspace, so no sibling checkout is required.
+The `par-osm-rust` data-source crate is consumed from crates.io as a normal dependency, so no sibling checkout is required.
 
 ### Web Dependencies
 
@@ -100,9 +100,12 @@ make web-install
 ## Quick Start
 
 ```bash
-# Open the renderer with the built-in test scene.
+# Open the renderer with the built-in dev scene (a single box on a ground
+# plane). The dev_scene feature is off by default so test geometry does not
+# ship in release binaries; enable it explicitly for local runs without
+# source data.
 # On macOS/tmux, prefer `make run-app` so the window receives keyboard focus.
-make run
+cargo run --features dev_scene
 
 # Render a local OpenStreetMap extract
 cargo run -- --input city.osm.pbf
@@ -129,7 +132,13 @@ Useful environment variables:
 | `NEXT_PUBLIC_OSM_WORLD_API_URL` | Web frontend API base URL. Defaults to `http://127.0.0.1:3030`. |
 | `PAR_OSM_OVERPASS_CACHE_DIR` | Override the shared Overpass cache directory used by `par-osm-rust`. |
 | `PAR_OSM_SRTM_CACHE_DIR` | Override the shared SRTM cache directory used by `par-osm-rust`. |
-| `OVERPASS_URL` | Override the Overpass endpoint used by the vendored `par-osm-rust` crate for source preparation. Read at process start; changes require a restart. |
+| `PAR_OSM_OVERTURE_CACHE_DIR` | Override the shared Overture GeoJSON cache directory used by `par-osm-rust`. |
+| `OVERPASS_URL` | Override the Overpass endpoint used by `par-osm-rust` for source preparation. Read at process start; changes require a restart. |
+| `OSM_WORLD_API_TOKEN` | Required to bind the API server to a non-loopback host (or pass `--allow-remote-host`). Also gates authenticated renderer-launch requests. |
+| `OSM_WORLD_CORS_ORIGINS` | Comma-separated CORS origin allowlist for the API server. Defaults to localhost origins. |
+| `OSM_WORLD_OVERTURE_CACHE_TTL` | Overture GeoJSON cache TTL in whole seconds. Unset uses the upstream default (~30 days). |
+| `OSM_WORLD_EXTRA_ALLOWED_HOSTS` | Comma-separated extra hostnames added to the Overpass SSRF allowlist. |
+| `OSM_WORLD_PREFS_PATH` | Override the camera/preferences file path. |
 
 ## Command-Line Options
 
@@ -152,6 +161,7 @@ Common renderer options:
 | --- | --- |
 | `--input <path>` | Load a `.osm.pbf`, `.pbf`, or `.osm` source file. |
 | `--srtm-dir <path>` | Use SRTM elevation tiles from a cache directory. |
+| `--width <px>` / `--height <px>` | Window size in logical pixels (defaults `1600` × `1000`). |
 | `--spawn-lat <lat> --spawn-lon <lon>` | Place the initial camera near a geographic coordinate. |
 | `--cam-x`, `--cam-y`, `--cam-z` | Override the initial camera position in world space. |
 | `--cam-yaw`, `--cam-pitch` | Override the initial camera yaw and pitch in degrees. |
@@ -189,7 +199,7 @@ cargo run --release -- \
 cargo run -- --serve --host 127.0.0.1 --port 3030
 ```
 
-The server exposes health, cache, prepared-area, area-prepare, and renderer-launch endpoints used by the Web Explorer.
+The server exposes health, cache, prepared-area, area-prepare, and renderer-launch endpoints used by the Web Explorer. Non-loopback hosts are refused unless `OSM_WORLD_API_TOKEN` is set or `--allow-remote-host` is passed, so the localhost threat model cannot be voided by accident.
 
 ### Streaming and Tile Debug Options
 
@@ -277,7 +287,7 @@ make lint       # cargo clippy
 make fmt        # rustfmt check
 make typecheck  # cargo check
 make web-build  # Build the Next.js frontend
-make checkall   # fmt + typecheck + lint + test
+make checkall   # fmt + typecheck + lint + test + security-audit + web-checkall
 make clean      # cargo clean
 make dev        # Start both Rust API + Web Explorer
 make serve      # Start Rust API server only

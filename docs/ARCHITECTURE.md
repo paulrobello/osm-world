@@ -36,7 +36,7 @@ High-level architecture and design of `osm-world`, a Rust desktop renderer and l
 1. A WGPU desktop renderer that opens a native window and renders a city scene from local `.osm.pbf`, `.pbf`, or `.osm` data.
 2. A local Axum API server plus Next.js Web Explorer that prepares map areas, manages cache history, and creates copyable renderer commands.
 
-The renderer uses the shared `par-osm-rust` crate for source-data preparation and cache paths. The project keeps data acquisition, world classification, mesh generation, rendering, UI, and web orchestration separated so each layer can evolve independently.
+Both surfaces use the shared `par-osm-rust` crate (consumed from crates.io): the renderer imports its OSM parser and `ElevationData`, while the API server reuses its source-data fetch, Overture/SRTM handling, and shared cache paths. The project keeps data acquisition, world classification, mesh generation, rendering, UI, and web orchestration separated so each layer can evolve independently.
 
 ## High-Level Pipeline
 
@@ -107,9 +107,10 @@ The library crate exposes these top-level modules from `src/lib.rs`.
 | Application | `app` | Winit application state, WGPU initialization, per-frame update, render-loop integration, user preferences, and area switching. |
 | Environment | `atmosphere` | Day cycle, sun direction, light uniforms, and shadow-cascade blending inputs. |
 | Camera | `camera` | Flycam state, input controller, projection/view matrices, spawn overrides, and shadow cascade math. |
-| Data | `osm` | Local `.osm.pbf`, `.pbf`, and `.osm` parsing into nodes, ways, relations, tags, and bounds. |
-| Geography | `geo` | Coordinate conversion, SRTM loading helpers, and elevation lookup. |
+| Data | `par_osm_rust::osm` | OSM `.osm.pbf`, `.pbf`, and `.osm` parsing into nodes, ways, relations, tags, and bounds. Imported from the upstream crate; no local parser module. |
+| Geography | `geo` | Equirectangular coordinate conversion (`CoordConverter`). Elevation and SRTM lookup come from `par_osm_rust::elevation::ElevationData`. |
 | World | `world` | Source loading, feature classification, terrain/road/building/water/landuse/railway/POI mesh generation, labels, addresses, and street signs. |
+| Mesh types | `mesh` | Shared `Vertex` and box-emission helpers imported by both `world` and `render`, breaking what would otherwise be an upward `world → render` dependency. |
 | Rendering | `render` | WGPU buffers, bind groups, city/sky/shadow/contact-shadow pipelines, minimap target, frustum helpers, occlusion queries, and vertex layout. |
 | Streaming | `stream` | Tile coordinates, tile rectangles, tile debug states, and level-of-detail selection helpers. |
 | UI | `ui` | Egui HUD, settings, labels, minimap, search, and feature inspection. |
@@ -124,8 +125,8 @@ graph TD
     App[app]
     Server[server]
     Shared[par-osm-rust]
-    Osm[osm]
     Geo[geo]
+    Mesh[mesh]
     World[world]
     Stream[stream]
     Render[render]
@@ -146,10 +147,12 @@ graph TD
     App --> Stream
     App --> Atmosphere
     App --> Visual
-    World --> Osm
+    World --> Shared
     World --> Geo
+    World --> Mesh
     World --> Stream
     World --> Render
+    Render --> Mesh
     Render --> Camera
     Render --> Atmosphere
     UI --> Camera
@@ -159,8 +162,8 @@ graph TD
     class App primary
     class Server primary
     class Shared database
-    class Osm data
     class Geo data
+    class Mesh data
     class World active
     class Stream warning
     class Render active
@@ -241,7 +244,7 @@ The prepare API accepts a bbox, feature filter, elevation toggle, force-refresh 
 | `POST` | `/areas/prepare` | Fetch or reuse source data, optionally download SRTM, and return renderer command data. |
 | `POST` | `/renderer/launch` | Spawn the local renderer process for a prepared area. |
 
-The router applies restricted Cross-Origin Resource Sharing (CORS) to `localhost:8032` and `127.0.0.1:8032`. Mutating endpoints require a Bearer token matching `OSM_WORLD_API_TOKEN` when that variable is set. Requests are rate-limited to 20 per minute per client IP.
+The router applies restricted Cross-Origin Resource Sharing (CORS) to `localhost:8032` and `127.0.0.1:8032`, overridable via `OSM_WORLD_CORS_ORIGINS`. Mutating endpoints require a Bearer token matching `OSM_WORLD_API_TOKEN` when that variable is set. Requests are rate-limited to 20 per minute per client IP. Two further env knobs tune upstream `par-osm-rust` behavior: `OSM_WORLD_OVERTURE_CACHE_TTL` (whole seconds; unset selects upstream's ~30-day default) controls the Overture GeoJSON cache TTL, and `OSM_WORLD_EXTRA_ALLOWED_HOSTS` (comma-separated hostnames) extends the Overpass host SSRF allowlist when an operator needs a non-default Overpass mirror.
 
 ### API Endpoint Schemas
 
@@ -608,7 +611,7 @@ The frontend reads `NEXT_PUBLIC_OSM_WORLD_API_URL` and defaults to `http://127.0
 | --- | --- | --- |
 | **Rust + WGPU renderer** | Provides native performance, explicit GPU resource control, and cross-platform rendering. | Requires GPU-capable development and platform-specific graphics debugging. |
 | **Local Axum API for Web Explorer** | Keeps browser UI simple while letting Rust own filesystem, cache, and process-launch work. | The web UI depends on a local server and CORS boundary during development. |
-| **Shared `par-osm-rust` cache crate** | Reuses Overpass, Overture, SRTM, source, parse, and cache behavior with related projects. | Requires a sibling checkout until the dependency is published or vendored. |
+| **Shared `par-osm-rust` crate** | Reuses Overpass, Overture, SRTM, OSM parsing, elevation, and cache behavior with related projects via a crates.io dependency. | Pinned to a published crate version; upgrades require validating upstream tag-map and elevation-surface changes at the loader boundary (`clone_tags_as_strings` in `src/world/loader/source.rs`). |
 | **Prepared `.osm` files** | Gives the renderer a deterministic local input and makes command variants copyable. | Prepared files can become stale if source settings change without a refresh. |
 | **Equirectangular projection** | Fast and adequate for city-scale scenes. | Not suitable for very large regions or high-precision geodesic analysis. |
 | **Layer-specific index buffers** | Makes draw ordering and shadow inclusion explicit without duplicating vertices. | Adds CPU-side index partitioning when scene buffers are built. |

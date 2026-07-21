@@ -14,17 +14,19 @@ Common issues, likely causes, and fixes for osm-world.
 
 ### Error: `no matching package named 'par-osm-rust' found`
 
-**Symptom:** `cargo build` fails with a path dependency resolution error referencing `par-osm-rust`.
+**Symptom:** `cargo build` fails during dependency resolution with the error `no matching package named 'par-osm-rust' found`.
 
-**Likely cause:** The vendored `par-osm-rust` workspace member is missing or the workspace is not being built from the repository root.
+**Likely cause:** `par-osm-rust` is consumed from crates.io (declared in `Cargo.toml`). Resolution failures usually mean the local Cargo registry cache is stale or missing, most often because of an offline build that has never fetched the crate, or a `Cargo.lock` pinned to a version that has since been yanked.
 
-**Fix:** Build from the repository root so Cargo resolves `par-osm-rust` from its vendored path at `crates/par-osm-rust`:
+**Fix:** Refresh the registry and update the lockfile, then rebuild:
 
 ```bash
+cargo update -p par-osm-rust
+cargo fetch
 make build
 ```
 
-If you previously checked out an older revision that pointed at a sibling `../par-osm-rust`, run `git pull` and remove any stale `par-osm-rust` directory left next to `osm-world`. No sibling checkout is required.
+If `cargo fetch` reports a network error, run it once while online so the crate is cached for subsequent offline builds.
 
 **Verify:** `make build` completes without errors.
 
@@ -182,7 +184,7 @@ NEXT_PUBLIC_OSM_WORLD_API_URL=http://127.0.0.1:3031 make web-dev
 
 **Likely cause:** The Overpass API throttles requests from the same IP address.
 
-**Fix:** Wait a few minutes before retrying. Use smaller bounding boxes. Disable "Force refresh" to reuse cached data. Set a custom Overpass URL pointing to a mirror.
+**Fix:** Wait a few minutes before retrying. Use smaller bounding boxes. Disable "Force refresh" to reuse cached data. To use a custom Overpass mirror, set its URL in the prepare request and add its hostname to `OSM_WORLD_EXTRA_ALLOWED_HOSTS` (comma-separated) so the server-side SSRF allowlist accepts it.
 
 **Verify:** The prepare request completes without Overpass errors.
 

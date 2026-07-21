@@ -2770,9 +2770,9 @@ dependencies = [
 
 [[package]]
 name = "par-osm-rust"
-version = "0.3.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc3d201b265d581607b88e3c24a99264de1bf4ecea4624b3cf780992d5c0b84"
+checksum = "bab6a8a3e48a7d9d243bff21ead92de21555e1faafc7b672d590d4f5e6bd4adf"
 dependencies = [
  "anyhow",
  "chrono",

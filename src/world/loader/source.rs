@@ -6,7 +6,19 @@ use std::path::Path;
 use crate::geo::CoordConverter;
 use crate::world::street_sign::ResolvedStreetSign;
 use par_osm_rust::elevation::ElevationData;
-use par_osm_rust::osm::parse_osm_file;
+use par_osm_rust::osm::{TagMap, parse_osm_file};
+
+/// Materialize a crate `TagMap` into the renderer's owned `HashMap<String, String>`.
+///
+/// par-osm-rust 0.5.0 (ENH-008) interns tag keys as `Arc<str>`; the renderer's
+/// feature structs and ~40 classification/styling functions stay on plain
+/// `String` keys, so this is the single boundary where interned keys become
+/// owned strings (once per feature, at load).
+fn clone_tags_as_strings(src: &TagMap) -> HashMap<String, String> {
+    src.iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
+}
 
 pub const POINT_FEATURE_BUILDING_CLEARANCE_METRES: f32 = 2.0;
 
@@ -232,7 +244,7 @@ pub fn load_world_source_with_visual_detail(
         let is_closed = way.node_refs.len() >= 4 && way.node_refs.first() == way.node_refs.last();
 
         let resolved = ResolvedFeature {
-            tags: way.tags.clone(),
+            tags: clone_tags_as_strings(&way.tags),
             points,
             elevations,
             rep_lat,
@@ -240,7 +252,7 @@ pub fn load_world_source_with_visual_detail(
         };
 
         // 6. Classify
-        let tags = &way.tags;
+        let tags = &resolved.tags;
 
         let is_building = tags.contains_key("building") && is_closed;
         let is_road = tags.contains_key("highway");
@@ -325,7 +337,8 @@ pub fn load_world_source_with_visual_detail(
 
     // Also process relation geometry for transit routes and multipolygon landuse/water features.
     for rel in osm_data.relations() {
-        if crate::world::transit::is_transit_route(&rel.tags) {
+        let rel_tags = clone_tags_as_strings(&rel.tags);
+        if crate::world::transit::is_transit_route(&rel_tags) {
             for member in &rel.members {
                 let Some(&way_idx) = osm_data.ways_by_id().get(&member.way_id) else {
                     continue;
@@ -348,7 +361,7 @@ pub fn load_world_source_with_visual_detail(
                 }
                 if points.len() >= 2 && count > 0 {
                     transit_routes.push(ResolvedFeature {
-                        tags: rel.tags.clone(),
+                        tags: rel_tags.clone(),
                         points,
                         elevations,
                         rep_lat: sum_lat / count as f64,
@@ -383,7 +396,7 @@ pub fn load_world_source_with_visual_detail(
             }
         }
 
-        let tags = &rel.tags;
+        let tags = &rel_tags;
         if all_points.len() < 3 {
             continue;
         }
@@ -397,7 +410,7 @@ pub fn load_world_source_with_visual_detail(
             || tags.get("landuse").map(|s| s.as_str()) == Some("reservoir");
 
         let resolved = ResolvedFeature {
-            tags: rel.tags.clone(),
+            tags: rel_tags.clone(),
             points: all_points,
             elevations,
             rep_lat,
@@ -433,8 +446,9 @@ pub fn load_world_source_with_visual_detail(
     for node in osm_data.tagged_nodes() {
         let raw_point = conv.to_world_xz(node.lat, node.lon);
         let point = super::geometry::move_point_outside_containing_building(raw_point, &buildings);
-        if crate::world::point_feature::point_feature_style(&node.tags).is_some() {
-            let mut tags = node.tags.clone();
+        let node_tags = clone_tags_as_strings(&node.tags);
+        if crate::world::point_feature::point_feature_style(&node_tags).is_some() {
+            let mut tags = node_tags.clone();
             if !tags.contains_key("name")
                 && let Some(name) = super::geometry::containing_building_name(raw_point, &buildings)
             {
@@ -448,9 +462,9 @@ pub fn load_world_source_with_visual_detail(
                 rep_lon: node.lon,
             });
         }
-        if crate::world::address::address_label_text(&node.tags).is_some() {
+        if crate::world::address::address_label_text(&node_tags).is_some() {
             address_points.push(ResolvedPointFeature {
-                tags: node.tags.clone(),
+                tags: node_tags.clone(),
                 point,
                 elevation: elev(node.lat, node.lon),
                 rep_lat: node.lat,

@@ -19,7 +19,7 @@ Guide for setting up a development environment, running checks, and submitting c
 - Bun 1.3.x (for the Web Explorer frontend)
 - A GPU with WGPU-compatible drivers
 
-The `par-osm-rust` data-source crate is vendored in-tree at `crates/par-osm-rust` and builds as part of the workspace, so no sibling checkout is required.
+The `par-osm-rust` data-source crate is consumed from crates.io as a normal dependency, so no sibling checkout is required.
 
 ## Development Setup
 
@@ -30,10 +30,10 @@ make build
 make web-install
 ```
 
-Run the renderer with the built-in test scene:
+Run the renderer with the built-in dev scene (a single box on a ground plane). The `dev_scene` feature is off by default so test geometry does not ship in release binaries; enable it explicitly for a local run without source data:
 
 ```bash
-make run
+cargo run --features dev_scene
 ```
 
 Start both the Rust API server and the Web Explorer:
